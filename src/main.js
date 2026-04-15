@@ -207,13 +207,19 @@ async function handleServiceToggle() {
         if (!serviceInstalled) {
             if (!strategy) return;
             await invoke('start_zapret_service', { strategy });
+            $('hero-status').textContent = 'Service mode enabled';
+            $('hero-status').className = 'text-secondary';
         } else {
             await invoke('remove_zapret_service');
+            $('hero-status').textContent = 'Service mode disabled';
+            $('hero-status').className = 'text-error-dim';
         }
         await pollService();
         await pollStatus();
     } catch (err) {
         console.error('Ошибка переключения service mode:', err);
+        $('hero-status').textContent = `Service error: ${err}`;
+        $('hero-status').className = 'text-error-dim text-xl';
     } finally {
         btn.disabled = false;
     }

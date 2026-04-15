@@ -140,6 +140,74 @@ fn run_hidden_cmd_with_args(args: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
+fn get_service_sorted_bat_files(binaries_dir: &PathBuf) -> Result<Vec<String>, String> {
+    let ps_script = format!(
+        "Get-ChildItem -LiteralPath '{}' -Filter '*.bat' | Where-Object {{ $_.Name -notlike 'service*' }} | Sort-Object {{ [Regex]::Replace($_.Name, '(\\d+)', {{ $args[0].Value.PadLeft(8, '0') }}) }} | ForEach-Object {{ $_.Name }}",
+        binaries_dir.to_string_lossy().replace('\'', "''")
+    );
+
+    let out = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &ps_script])
+        .output()
+        .map_err(|e| format!("Не удалось получить список .bat через PowerShell: {}", e))?;
+
+    if !out.status.success() {
+        return Err("PowerShell не смог собрать список .bat файлов".to_string());
+    }
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let files: Vec<String> = stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
+    if files.is_empty() {
+        return Err("Список стратегий для service.bat пуст".to_string());
+    }
+
+    Ok(files)
+}
+
+fn get_game_filter_mode_from_service_bat(binaries_dir: &PathBuf) -> Option<String> {
+    let service_bat = binaries_dir.join("service.bat");
+    if !service_bat.exists() {
+        return None;
+    }
+
+    let cmdline = format!(
+        "cd /d \"{}\" && call \"{}\" load_game_filter && echo __GF__!GameFilterStatus!__",
+        binaries_dir.to_string_lossy(),
+        service_bat.to_string_lossy()
+    );
+
+    let out = Command::new("cmd")
+        .args(["/v:on", "/c", &cmdline])
+        .output()
+        .ok()?;
+
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let marker_start = "__GF__";
+    let marker_end = "__";
+    let start = stdout.find(marker_start)?;
+    let rest = &stdout[start + marker_start.len()..];
+    let end = rest.find(marker_end)?;
+    let status = rest[..end].trim().to_lowercase();
+
+    if status.contains("tcp and udp") {
+        Some("all".to_string())
+    } else if status.contains("(tcp)") {
+        Some("tcp".to_string())
+    } else if status.contains("(udp)") {
+        Some("udp".to_string())
+    } else if status.contains("disabled") {
+        Some("disabled".to_string())
+    } else {
+        None
+    }
+}
+
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
 /// Список стратегий — имена .bat файлов из binaries/ (без service.bat).
@@ -217,23 +285,26 @@ fn get_service_status() -> ServiceStatus {
 fn get_filters_status() -> FiltersStatus {
     let dir = find_binaries_dir();
 
-    // ── Game Filter: binaries/utils/game_filter.enabled ──
-    let game_flag = dir.join("utils").join("game_filter.enabled");
-    let game_filter = if !game_flag.exists() {
-        "disabled".to_string()
-    } else {
-        let content = std::fs::read_to_string(&game_flag).unwrap_or_default();
-        // Убираем BOM, пробелы, CRLF
-        let mode = content
-            .trim_start_matches('\u{FEFF}')
-            .trim()
-            .to_lowercase();
-        match mode.as_str() {
-            "tcp" => "tcp".to_string(),
-            "udp" => "udp".to_string(),
-            _ => "all".to_string(),
+    // ── Game Filter: приоритетно читаем фактический статус из service.bat ──
+    // Фолбэк — файл binaries/utils/game_filter.enabled.
+    let game_filter = get_game_filter_mode_from_service_bat(&dir).unwrap_or_else(|| {
+        let game_flag = dir.join("utils").join("game_filter.enabled");
+        if !game_flag.exists() {
+            "disabled".to_string()
+        } else {
+            let content = std::fs::read_to_string(&game_flag).unwrap_or_default();
+            // Убираем BOM, пробелы, CRLF
+            let mode = content
+                .trim_start_matches('\u{FEFF}')
+                .trim()
+                .to_lowercase();
+            match mode.as_str() {
+                "tcp" => "tcp".to_string(),
+                "udp" => "udp".to_string(),
+                _ => "all".to_string(),
+            }
         }
-    };
+    });
     let game_filter_label = match game_filter.as_str() {
         "disabled" => "disabled".to_string(),
         "tcp" => "enabled (TCP)".to_string(),
@@ -296,15 +367,8 @@ fn start_zapret_service(strategy: String, state: State<'_, AppState>) -> Result<
         return Err("service.bat не найден в папке binaries".to_string());
     }
 
-    // Индекс стратегии как в service.bat (алфавитная сортировка .bat, без service*)
-    let mut files: Vec<String> = std::fs::read_dir(&binaries_dir)
-        .map_err(|e| format!("Не удалось прочитать binaries: {}", e))?
-        .filter_map(|e| e.ok())
-        .filter_map(|e| e.path().file_name().and_then(|n| n.to_str()).map(|s| s.to_string()))
-        .filter(|name| name.to_ascii_lowercase().ends_with(".bat"))
-        .filter(|name| !name.to_ascii_lowercase().starts_with("service"))
-        .collect();
-    files.sort();
+    // Индекс стратегии как в service.bat (натуральная сортировка через PowerShell).
+    let files = get_service_sorted_bat_files(&binaries_dir)?;
 
     let target = format!("{}.bat", strategy);
     let index = files
@@ -314,8 +378,8 @@ fn start_zapret_service(strategy: String, state: State<'_, AppState>) -> Result<
         .ok_or_else(|| format!("Стратегия не найдена для установки в сервис: {}", strategy))?;
 
     // Автоматизируем меню service.bat:
-    // 1 -> Install Service, далее индекс стратегии, потом 0 -> Exit
-    let automation = format!("echo 1&echo {}&echo 0", index);
+    // 1 -> Install Service, индекс стратегии, Enter для pause, 0 -> Exit
+    let automation = format!("echo 1&echo {}&echo.&echo 0", index);
     let cmdline = format!(
         "cd /d \"{}\" && ({}) | \"{}\" admin",
         binaries_dir.to_string_lossy(),
@@ -323,10 +387,15 @@ fn start_zapret_service(strategy: String, state: State<'_, AppState>) -> Result<
         service_bat.to_string_lossy()
     );
 
-    Command::new("cmd")
+    let out = Command::new("cmd")
         .args(["/c", &cmdline])
         .output()
         .map_err(|e| format!("Не удалось запустить установку сервиса: {}", e))?;
+
+    if !out.status.success() || !is_service_installed("zapret") {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("Не удалось установить сервис. {}", err.trim()));
+    }
 
     *state.active_strategy.lock().unwrap() = Some(strategy);
     Ok("Service mode enabled".into())
@@ -340,16 +409,24 @@ fn remove_zapret_service(state: State<'_, AppState>) -> Result<String, String> {
         return Err("service.bat не найден в папке binaries".to_string());
     }
 
-    // 2 -> Remove Services, 0 -> Exit
+    // 2 -> Remove Services, Enter для pause, 0 -> Exit
     let cmdline = format!(
-        "cd /d \"{}\" && (echo 2&echo 0) | \"{}\" admin",
+        "cd /d \"{}\" && (echo 2&echo.&echo 0) | \"{}\" admin",
         binaries_dir.to_string_lossy(),
         service_bat.to_string_lossy()
     );
-    Command::new("cmd")
+    let out = Command::new("cmd")
         .args(["/c", &cmdline])
         .output()
         .map_err(|e| format!("Не удалось удалить сервис: {}", e))?;
+
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("Ошибка удаления сервиса. {}", err.trim()));
+    }
+    if is_service_installed("zapret") {
+        return Err("Сервис zapret всё ещё установлен после попытки удаления".to_string());
+    }
 
     *state.active_strategy.lock().unwrap() = None;
     Ok("Service mode disabled".into())
