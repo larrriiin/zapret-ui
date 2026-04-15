@@ -95,8 +95,7 @@
         class="fixed top-0 right-0 left-20 flex justify-between items-center px-10 h-20 z-40 bg-transparent backdrop-blur-3xl">
         <div class="flex flex-col">
             <span class="text-[#ba9eff] font-headline text-lg font-bold uppercase tracking-widest">ZAPRET_</span>
-            <span class="text-[10px] text-error-dim font-bold uppercase tracking-[0.2em] opacity-80">Status:
-                Disconnected</span>
+            <span id="header-status" class="text-[10px] text-error-dim font-bold uppercase tracking-[0.2em] opacity-80">Status: Disconnected</span>
         </div>
     </header>
 
@@ -109,7 +108,7 @@
 
                 <div class="relative z-10 flex flex-col items-center text-center w-full max-w-md px-6">
                     <h2 class="font-headline text-5xl font-black text-on-background tracking-tighter mb-10 uppercase">
-                        <span class="text-error-dim">Disconnected</span>
+                        <span id="hero-status" class="text-error-dim">Disconnected</span>
                     </h2>
 
                     <div class="w-full space-y-3 mb-8 text-left">
@@ -118,19 +117,18 @@
                         <div class="glass-panel rounded-2xl p-4 border border-primary/10">
                             <select id="strategy-select"
                                 class="bg-transparent text-on-surface w-full outline-none border-none font-headline text-sm">
-                                <option value="--filter-tcp=443 --dpi-desync=fake">Discord + YouTube (General)</option>
-                                <option value="--filter-tcp=443 --dpi-desync=split2">Alternative Strategy</option>
+                                <option value="" disabled selected>Загрузка стратегий…</option>
                             </select>
                         </div>
                     </div>
                 </div>
 
-                <button
-                    class="group relative w-full py-4 bg-primary rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:shadow-[0_0_40px_rgba(186,158,255,0.3)]">
+                <button id="connect-btn" data-action="start"
+                    class="group relative w-full py-4 bg-primary rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:shadow-[0_0_40px_rgba(186,158,255,0.3)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">
                     <span
                         class="flex items-center justify-center gap-3 text-on-primary font-headline font-bold text-sm tracking-widest uppercase">
-                        Establish Connection
-                        <span class="material-symbols-outlined group-hover:rotate-12 transition-transform">bolt</span>
+                        <span id="connect-btn-text">Establish Connection</span>
+                        <span id="connect-btn-icon" class="material-symbols-outlined group-hover:rotate-12 transition-transform">bolt</span>
                     </span>
                 </button>
         </div>
