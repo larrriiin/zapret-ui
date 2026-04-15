@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>Zapret_ VPN</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;900&family=Manrope:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+        rel="stylesheet" />
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary": "#ba9eff",
+                        "primary-dim": "#8455ef",
+                        "on-primary": "#39008c",
+                        "secondary": "#53ddfc",
+                        "tertiary": "#ec63ff",
+                        "background": "#070d1f",
+                        "surface": "#070d1f",
+                        "on-background": "#dfe4fe",
+                        "on-surface": "#dfe4fe",
+                        "on-surface-variant": "#a5aac2",
+                        "outline-variant": "#41475b",
+                        "surface-container-high": "#171f36",
+                        "surface-container-highest": "#1c253e",
+                        "error-dim": "#d73357"
+                    },
+                    "fontFamily": {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Manrope"]
+                    }
+                },
+            },
+        }
+    </script>
+    <style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+
+        .glass-panel {
+            background: rgba(186, 158, 255, 0.05);
+            backdrop-filter: blur(40px);
+        }
+
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #1c253e;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+
+<body class="bg-background text-on-background font-body selection:bg-primary/30 antialiased overflow-hidden">
+
+    <aside
+        class="fixed inset-y-0 left-0 w-20 bg-[#0c1326] flex flex-col py-10 items-center gap-8 z-50 border-r border-outline-variant/10">
+        <div class="text-[#ba9eff] font-black text-xl mb-4">
+            <span class="material-symbols-outlined" style="font-variation-settings: 'opsz' 40;">blur_on</span>
+        </div>
+        <nav class="flex flex-col gap-6 w-full items-center">
+            <a href="#"
+                class="w-full flex justify-center py-3 border-r-2 border-[#ba9eff] bg-gradient-to-r from-[#ba9eff]/10 to-transparent text-[#ba9eff]"
+                title="Главная">
+                <span class="material-symbols-outlined">grid_view</span>
+            </a>
+            <a href="#"
+                class="w-full flex justify-center py-3 text-[#dfe4fe]/40 hover:text-[#ba9eff] hover:bg-[#171f36] transition-colors duration-200"
+                title="Настройка сайтов">
+                <span class="material-symbols-outlined">language</span>
+            </a>
+            <a href="#"
+                class="w-full flex justify-center py-3 text-[#dfe4fe]/40 hover:text-[#ba9eff] hover:bg-[#171f36] transition-colors duration-200"
+                title="Настройка IP">
+                <span class="material-symbols-outlined">settings_input_component</span>
+            </a>
+        </nav>
+    </aside>
+
+    <header
+        class="fixed top-0 right-0 left-20 flex justify-between items-center px-10 h-20 z-40 bg-transparent backdrop-blur-3xl">
+        <div class="flex flex-col">
+            <span class="text-[#ba9eff] font-headline text-lg font-bold uppercase tracking-widest">ZAPRET_</span>
+            <span class="text-[10px] text-error-dim font-bold uppercase tracking-[0.2em] opacity-80">Status:
+                Disconnected</span>
+        </div>
+    </header>
+
+    <main class="ml-20 pt-20 min-h-screen bg-surface overflow-y-auto">
+        <div class="max-w-5xl mx-auto p-12 space-y-12">
+
+            <section
+                class="relative h-[450px] flex flex-col items-center justify-center rounded-3xl overflow-hidden bg-surface-container-low/30 border border-outline-variant/10">
+                <div class="absolute inset-0 bg-gradient-to-b from-[#ba9eff]/5 to-transparent z-0"></div>
+
+                <div class="relative z-10 flex flex-col items-center text-center w-full max-w-md px-6">
+                    <h2 class="font-headline text-5xl font-black text-on-background tracking-tighter mb-10 uppercase">
+                        <span class="text-error-dim">Disconnected</span>
+                    </h2>
+
+                    <div class="w-full space-y-3 mb-8 text-left">
+                        <h3 class="font-headline text-[10px] font-bold uppercase tracking-[0.2em] text-primary/70 ml-2">
+                            Routing Strategy</h3>
+                        <div class="glass-panel rounded-2xl p-4 border border-primary/10">
+                            <select id="strategy-select"
+                                class="bg-transparent text-on-surface w-full outline-none border-none font-headline text-sm">
+                                <option value="--filter-tcp=443 --dpi-desync=fake">Discord + YouTube (General)</option>
+                                <option value="--filter-tcp=443 --dpi-desync=split2">Alternative Strategy</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <button
+                    class="group relative w-full py-4 bg-primary rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:shadow-[0_0_40px_rgba(186,158,255,0.3)]">
+                    <span
+                        class="flex items-center justify-center gap-3 text-on-primary font-headline font-bold text-sm tracking-widest uppercase">
+                        Establish Connection
+                        <span class="material-symbols-outlined group-hover:rotate-12 transition-transform">bolt</span>
+                    </span>
+                </button>
+        </div>
+        </section>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+
+            <section class="space-y-4">
+                <div class="flex items-center justify-between px-2 h-6">
+                    <h3 class="font-headline text-xs font-bold uppercase tracking-[0.2em] text-primary/70">IPSet Filter
+                    </h3>
+                    <button class="relative w-12 h-6 flex items-center bg-primary/20 rounded-full p-1 group">
+                        <div
+                            class="w-4 h-4 bg-primary rounded-full shadow-[0_0_10px_#ba9eff] translate-x-6 transition-transform">
+                        </div>
+                    </button>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div
+                        class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
+                        <span class="material-symbols-outlined text-primary text-xl">download_done</span>
+                        <span
+                            class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Loaded</span>
+                    </div>
+                    <div
+                        class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
+                        <span class="material-symbols-outlined text-secondary text-xl">all_inclusive</span>
+                        <span class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Any</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="space-y-4">
+                <div class="flex items-center justify-between px-2 h-6">
+                    <h3 class="font-headline text-xs font-bold uppercase tracking-[0.2em] text-primary/70">Game Filter
+                    </h3>
+                    <button class="relative w-12 h-6 flex items-center bg-primary/20 rounded-full p-1 group">
+                        <div
+                            class="w-4 h-4 bg-primary rounded-full shadow-[0_0_10px_#ba9eff] translate-x-6 transition-transform">
+                        </div>
+                    </button>
+                </div>
+                <div class="grid grid-cols-3 gap-3">
+                    <div
+                        class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
+                        <span class="material-symbols-outlined text-primary text-xl">Layers</span>
+                        <span
+                            class="text-[10px] font-bold uppercase tracking-tighter text-on-surface-variant text-center leading-none">TCP
+                            + UDP</span>
+                    </div>
+                    <div
+                        class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
+                        <span class="material-symbols-outlined text-secondary text-xl">terminal</span>
+                        <span
+                            class="text-[10px] font-bold uppercase tracking-tighter text-on-surface-variant">TCP</span>
+                    </div>
+                    <div
+                        class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
+                        <span class="material-symbols-outlined text-tertiary text-xl">router</span>
+                        <span
+                            class="text-[10px] font-bold uppercase tracking-tighter text-on-surface-variant">UDP</span>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+        </div>
+    </main>
+
+    <div
+        class="fixed top-0 right-0 w-[600px] h-[600px] bg-primary/5 rounded-full blur-[120px] pointer-events-none -z-10 opacity-50">
+    </div>
+    <div
+        class="fixed bottom-0 left-20 w-[400px] h-[400px] bg-tertiary/5 rounded-full blur-[100px] pointer-events-none -z-10 opacity-30">
+    </div>
+</body>
+
+</html>
