@@ -12,9 +12,11 @@
       {
         "title": "zapret-ui",
         "width": 1000,
-        "height": 700,
+        "height": 730,
         "resizable": false,
-        "maximizable": false
+        "maximizable": false,
+        "decorations": false,
+        "transparent": false
       }
     ],
     "security": {

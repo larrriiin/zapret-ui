@@ -63,13 +63,41 @@
             border-radius: 10px;
         }
 
-        /* Активная карточка фильтра */
+        /* Titlebar */
+        #titlebar {
+            height: 30px;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        #titlebar [data-tauri-drag-region] {
+            cursor: move;
+            cursor: grab;
+        }
+        #titlebar [data-tauri-drag-region]:active {
+            cursor: grabbing;
+        }
+        .titlebar-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 44px;
+            height: 30px;
+            transition: background 0.15s;
+            cursor: pointer;
+        }
+        .titlebar-btn:hover { background: rgba(186,158,255,0.12); }
+        .titlebar-btn.close:hover { background: rgba(215, 51, 87, 0.7); }
+        .titlebar-btn .material-symbols-outlined { font-size: 15px; }
+
+        /* Active filter card */
         .card-active {
             border-color: rgba(186, 158, 255, 0.6) !important;
             box-shadow: 0 0 16px rgba(186, 158, 255, 0.2);
         }
-
-        /* Состояния тумблера */
+        /* Disabled filter card */
+        .card-disabled {
+            cursor: not-allowed !important;
+        }
         .toggle-btn { transition: background 0.2s; }
         .toggle-btn.is-on  { background: rgba(186, 158, 255, 0.2); }
         .toggle-btn.is-off { background: rgba(65, 71, 91, 0.3); }
@@ -81,8 +109,22 @@
 
 <body class="bg-background text-on-background font-body selection:bg-primary/30 antialiased overflow-hidden">
 
+    <!-- Custom title bar -->
+    <div id="titlebar" class="fixed top-0 left-0 right-0 flex items-stretch z-[9999] border-b border-outline-variant/10" style="background:#0a1020;">
+        <div data-tauri-drag-region class="flex-1 flex items-center px-4 gap-2">
+            <span class="material-symbols-outlined text-primary" style="font-size:16px;">blur_on</span>
+            <span class="font-headline text-xs font-bold uppercase tracking-widest text-primary/60">ZAPRET_</span>
+        </div>
+        <button id="tb-minimize" class="titlebar-btn" title="Minimize">
+            <span class="material-symbols-outlined text-on-surface-variant">remove</span>
+        </button>
+        <button id="tb-close" class="titlebar-btn close" title="Close">
+            <span class="material-symbols-outlined text-on-surface-variant">close</span>
+        </button>
+    </div>
+
     <aside
-        class="fixed inset-y-0 left-0 w-20 bg-[#0c1326] flex flex-col py-10 items-center gap-8 z-50 border-r border-outline-variant/10">
+        class="fixed top-[30px] bottom-0 left-0 w-20 bg-[#0c1326] flex flex-col py-10 items-center gap-8 z-50 border-r border-outline-variant/10">
         <div class="text-[#ba9eff] font-black text-xl mb-4">
             <span class="material-symbols-outlined" style="font-variation-settings: 'opsz' 40;">blur_on</span>
         </div>
@@ -92,29 +134,42 @@
                 title="Главная">
                 <span class="material-symbols-outlined">grid_view</span>
             </a>
-            <a href="#"
+            <a href="#" id="nav-sites"
                 class="w-full flex justify-center py-3 text-[#dfe4fe]/40 hover:text-[#ba9eff] hover:bg-[#171f36] transition-colors duration-200"
-                title="Настройка сайтов">
+                title="Site Lists">
                 <span class="material-symbols-outlined">language</span>
             </a>
-            <a href="#"
+            <a href="#" id="nav-ips"
                 class="w-full flex justify-center py-3 text-[#dfe4fe]/40 hover:text-[#ba9eff] hover:bg-[#171f36] transition-colors duration-200"
-                title="Настройка IP">
+                title="IP Settings">
                 <span class="material-symbols-outlined">settings_input_component</span>
+            </a>
+            <a href="#" id="nav-diagnostics"
+                class="w-full flex justify-center py-3 text-[#dfe4fe]/40 hover:text-[#ba9eff] hover:bg-[#171f36] transition-colors duration-200"
+                title="Diagnostics">
+                <span class="material-symbols-outlined">stethoscope</span>
             </a>
         </nav>
     </aside>
 
     <header
-        class="fixed top-0 right-0 left-20 flex justify-between items-center px-10 h-20 z-40 bg-transparent backdrop-blur-3xl">
+        class="fixed top-[30px] right-0 left-20 flex justify-between items-center px-10 h-20 z-40 bg-transparent backdrop-blur-3xl">
         <div class="flex flex-col">
             <span class="text-[#ba9eff] font-headline text-lg font-bold uppercase tracking-widest">ZAPRET_</span>
             <span id="header-status" class="text-[10px] text-error-dim font-bold uppercase tracking-[0.2em] opacity-80">Status: Disconnected</span>
         </div>
+        <div class="flex items-center gap-4">
+            <span id="version-display" class="text-xs text-on-surface-variant">v1.9.7b</span>
+            <button id="check-updates-btn" class="flex items-center gap-2 px-4 py-2 bg-surface-container-high border border-outline-variant/30 rounded-xl text-on-surface-variant hover:text-primary hover:border-primary/50 transition-colors text-xs font-bold uppercase tracking-wider">
+                <span class="material-symbols-outlined text-sm">update</span>
+                Check Updates
+            </button>
+        </div>
     </header>
 
-    <main class="ml-20 pt-20 h-screen overflow-hidden bg-surface">
-        <div class="p-8 space-y-8">
+    <main class="ml-20 pt-20 h-screen overflow-hidden bg-surface" style="margin-top:30px;">
+        <!-- Home Section -->
+        <div id="section-home" class="p-8 space-y-8">
 
             <section
                 class="relative h-[360px] flex flex-col items-center justify-center rounded-3xl overflow-hidden bg-surface-container-low/30 border border-outline-variant/10">
@@ -128,11 +183,24 @@
                     <div class="w-full space-y-3 mb-8 text-left">
                         <h3 class="font-headline text-[10px] font-bold uppercase tracking-[0.2em] text-primary/70 ml-2">
                             Routing Strategy</h3>
-                        <div class="glass-panel rounded-2xl p-4 border border-primary/10">
-                            <select id="strategy-select"
-                                class="bg-transparent text-on-surface w-full outline-none border-none font-headline text-sm">
-                                <option value="" disabled selected>Загрузка стратегий…</option>
-                            </select>
+                        <!-- Custom dropdown -->
+                        <div id="strategy-dropdown" class="relative">
+                            <!-- Trigger button -->
+                            <button id="strategy-trigger" type="button"
+                                class="glass-panel w-full flex items-center justify-between rounded-2xl border border-primary/10 px-4 py-3 font-headline text-sm text-on-surface hover:border-primary/30 transition-colors cursor-pointer">
+                                <span id="strategy-label" class="truncate text-on-surface/60">Loading strategies...</span>
+                                <span class="material-symbols-outlined text-primary/60 text-base ml-2 transition-transform" id="strategy-chevron">expand_more</span>
+                            </button>
+                            <!-- Hidden native select for form value compatibility -->
+                            <select id="strategy-select" class="sr-only"></select>
+                            <!-- Dropdown panel -->
+                            <div id="strategy-options"
+                                class="hidden fixed z-[999] rounded-2xl border border-primary/20 overflow-hidden shadow-2xl"
+                                style="background: #0d1225;">
+                                <div id="strategy-options-list" class="max-h-64 overflow-y-auto py-1">
+                                    <!-- options injected by JS -->
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -216,8 +284,237 @@
             </section>
 
         </div>
-        </div>
+        </div><!-- /section-home -->
     </main>
+
+    <!-- Sites Section -->
+    <div id="section-sites" class="hidden fixed inset-0 ml-20 pt-20 overflow-y-auto bg-surface z-10 p-8 space-y-6">
+        <h2 class="font-headline text-2xl font-bold text-primary mb-4">Site Lists</h2>
+        
+        <div class="grid grid-cols-2 gap-6">
+            <!-- Include List -->
+            <div class="glass-panel rounded-2xl border border-primary/10 p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-secondary">Include</h3>
+                    <span class="material-symbols-outlined text-secondary">playlist_add</span>
+                </div>
+                <div class="flex gap-2 mb-4">
+                    <input type="text" id="site-include-input" placeholder="example.com" 
+                        class="flex-1 bg-surface-container-highest border border-outline-variant/30 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary/50">
+                    <button id="site-include-add" class="px-4 py-2 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors">
+                        Add
+                    </button>
+                </div>
+                <div id="site-include-list" class="space-y-2 max-h-[300px] overflow-y-auto">
+                    <!-- Dynamic list -->
+                </div>
+            </div>
+
+            <!-- Exclude List -->
+            <div class="glass-panel rounded-2xl border border-primary/10 p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-error-dim">Exclude</h3>
+                    <span class="material-symbols-outlined text-error-dim">playlist_remove</span>
+                </div>
+                <div class="flex gap-2 mb-4">
+                    <input type="text" id="site-exclude-input" placeholder="example.com" 
+                        class="flex-1 bg-surface-container-highest border border-outline-variant/30 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary/50">
+                    <button id="site-exclude-add" class="px-4 py-2 bg-error-dim rounded-xl text-white font-bold text-xs uppercase tracking-wider hover:opacity-80 transition-colors">
+                        Add
+                    </button>
+                </div>
+                <div id="site-exclude-list" class="space-y-2 max-h-[300px] overflow-y-auto">
+                    <!-- Dynamic list -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- IPs Section -->
+    <div id="section-ips" class="hidden fixed inset-0 ml-20 pt-20 overflow-y-auto bg-surface z-10 p-8 space-y-6">
+        <h2 class="font-headline text-2xl font-bold text-primary mb-4">IP Settings</h2>
+        
+        <!-- Update IPSet List Button -->
+        <div class="glass-panel rounded-2xl border border-primary/10 p-6 max-w-2xl">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-secondary">Update IPSet List</h3>
+                    <p class="text-xs text-on-surface-variant mt-1">Download latest IP ranges from remote source</p>
+                </div>
+                <button id="ipset-update-btn" class="px-6 py-3 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors flex items-center gap-2">
+                    <span class="material-symbols-outlined text-sm">download</span>
+                    Update
+                </button>
+            </div>
+            <div id="ipset-update-status" class="hidden mt-4 text-sm"></div>
+        </div>
+
+        <!-- IP Exclude List -->
+        <div class="glass-panel rounded-2xl border border-primary/10 p-6 max-w-2xl">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-tertiary">IP Exclude</h3>
+                <span class="material-symbols-outlined text-tertiary">block</span>
+            </div>
+            <div class="flex gap-2 mb-4">
+                <input type="text" id="ip-exclude-input" placeholder="192.168.1.1 or 10.0.0.0/24" 
+                    class="flex-1 bg-surface-container-highest border border-outline-variant/30 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary/50">
+                <button id="ip-exclude-add" class="px-4 py-2 bg-tertiary rounded-xl text-white font-bold text-xs uppercase tracking-wider hover:opacity-80 transition-colors">
+                    Add
+                </button>
+            </div>
+            <div id="ip-exclude-list" class="space-y-2 max-h-[400px] overflow-y-auto">
+                <!-- Dynamic list -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Diagnostics Section -->
+    <div id="section-diagnostics" class="hidden fixed inset-0 ml-20 pt-20 overflow-y-auto bg-surface z-10 p-8 space-y-6">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="font-headline text-2xl font-bold text-primary">Diagnostics</h2>
+            <button id="run-diagnostics-btn" class="px-6 py-3 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors flex items-center gap-2">
+                <span class="material-symbols-outlined text-sm">play_arrow</span>
+                Run Diagnostics
+            </button>
+        </div>
+
+        <!-- Diagnostics Results -->
+        <div id="diagnostics-results" class="hidden space-y-3 max-w-3xl">
+            <!-- Results will be populated here -->
+        </div>
+
+        <!-- Discord Cache Clear -->
+        <div id="discord-cache-section" class="hidden glass-panel rounded-2xl border border-primary/10 p-6 max-w-3xl mt-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-secondary">Discord Cache</h3>
+                    <p class="text-xs text-on-surface-variant mt-1">Clear Discord cache to fix potential connection issues</p>
+                </div>
+                <button id="clear-discord-cache-btn" class="px-6 py-3 bg-secondary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:opacity-80 transition-colors">
+                    Clear Cache
+                </button>
+            </div>
+            <div id="discord-cache-status" class="hidden mt-4 text-sm"></div>
+        </div>
+
+        <!-- Run Tests Section -->
+        <div class="glass-panel rounded-2xl border border-primary/10 p-6 max-w-3xl mt-6">
+            <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-secondary mb-4">Run Tests</h3>
+            
+            <!-- Test Type Selection -->
+            <div class="mb-4">
+                <p class="text-xs text-on-surface-variant mb-2 uppercase tracking-wider">Test Type</p>
+                <div class="flex gap-2">
+                    <button id="test-type-standard" data-type="standard"
+                        class="flex-1 py-2 rounded-xl border border-primary/30 text-xs font-bold uppercase tracking-wider transition-colors card-active">
+                        Standard (HTTP/Ping)
+                    </button>
+                    <button id="test-type-dpi" data-type="dpi"
+                        class="flex-1 py-2 rounded-xl border border-outline-variant/30 text-xs font-bold uppercase tracking-wider text-on-surface-variant hover:border-primary/30 transition-colors">
+                        DPI Checkers (TCP 16-20)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Run Button & Cancel -->
+            <div class="flex gap-2 mb-4">
+                <button id="run-tests-btn" class="flex-1 py-3 bg-secondary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:opacity-80 transition-colors flex items-center justify-center gap-2">
+                    <span class="material-symbols-outlined text-sm">science</span>
+                    Run Tests
+                </button>
+                <button id="cancel-tests-btn" class="hidden px-4 py-3 bg-surface-container-high border border-outline-variant/30 rounded-xl text-on-surface-variant font-bold text-xs uppercase tracking-wider hover:bg-surface-container-high transition-colors">
+                    Cancel
+                </button>
+            </div>
+
+            <!-- Status -->
+            <div id="tests-status" class="hidden text-sm mb-3"></div>
+
+            <!-- Live Log -->
+            <div id="tests-log" class="hidden bg-[#0a1022] rounded-xl p-3 max-h-[320px] overflow-y-auto font-mono text-xs space-y-0.5"></div>
+
+            <!-- Summary Results -->
+            <div id="tests-results" class="hidden mt-4 space-y-2"></div>
+        </div>
+    </div>
+
+    <!-- Restart Prompt Modal -->
+    <div id="restart-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+        <div class="glass-panel rounded-2xl border border-primary/30 p-8 max-w-md mx-4">
+            <div class="flex items-center gap-3 mb-4">
+                <span class="material-symbols-outlined text-primary text-2xl">restart_alt</span>
+                <h3 class="font-headline text-lg font-bold text-primary">Restart Required</h3>
+            </div>
+            <p class="text-on-surface-variant text-sm mb-6">Changes have been saved. Restart Zapret to apply the new settings?</p>
+            <div class="flex gap-3">
+                <button id="restart-later" class="flex-1 py-3 rounded-xl border border-outline-variant/30 text-on-surface-variant font-bold text-xs uppercase tracking-wider hover:bg-surface-container-high transition-colors">
+                    Later
+                </button>
+                <button id="restart-now" class="flex-1 py-3 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors">
+                    Restart Now
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Update Available Modal -->
+    <div id="update-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+        <div class="glass-panel rounded-2xl border border-primary/30 p-8 max-w-md mx-4">
+            <div class="flex items-center gap-3 mb-4">
+                <span class="material-symbols-outlined text-primary text-2xl">system_update</span>
+                <h3 class="font-headline text-lg font-bold text-primary">Update Available</h3>
+            </div>
+            <p class="text-on-surface-variant text-sm mb-2">A new version of Zapret is available!</p>
+            <div class="flex items-center gap-2 mb-6 text-sm">
+                <span class="text-on-surface-variant">Current:</span>
+                <span id="update-current-version" class="text-on-surface font-bold">1.9.7b</span>
+                <span class="text-on-surface-variant">→</span>
+                <span id="update-latest-version" class="text-secondary font-bold">1.9.8</span>
+            </div>
+            <div class="flex gap-3">
+                <button id="update-later" class="flex-1 py-3 rounded-xl border border-outline-variant/30 text-on-surface-variant font-bold text-xs uppercase tracking-wider hover:bg-surface-container-high transition-colors">
+                    Later
+                </button>
+                <button id="update-now" class="flex-1 py-3 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors">
+                    Update Now
+                </button>
+            </div>
+            <div id="update-status" class="hidden mt-4 text-sm text-center"></div>
+        </div>
+    </div>
+
+    <!-- Latest Version Modal (no updates) -->
+    <div id="latest-version-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+        <div class="glass-panel rounded-2xl border border-secondary/30 p-8 max-w-md mx-4">
+            <div class="flex items-center gap-3 mb-4">
+                <span class="material-symbols-outlined text-secondary text-2xl">check_circle</span>
+                <h3 class="font-headline text-lg font-bold text-secondary">Up to Date</h3>
+            </div>
+            <p class="text-on-surface-variant text-sm mb-4">You have the latest version installed.</p>
+            <div class="flex items-center justify-center gap-2 mb-6 py-3 bg-surface-container-high rounded-xl">
+                <span class="text-on-surface-variant text-sm">Version:</span>
+                <span id="latest-version-number" class="text-on-surface font-bold text-lg">1.9.7b</span>
+            </div>
+            <button id="latest-version-ok" class="w-full py-3 bg-secondary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:opacity-80 transition-colors">
+                OK
+            </button>
+        </div>
+    </div>
+
+    <!-- Admin Privilege Check Modal -->
+    <div id="admin-check-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+        <div class="glass-panel rounded-2xl border border-error-dim/30 p-8 max-w-md mx-4">
+            <div class="flex items-center gap-3 mb-4">
+                <span class="material-symbols-outlined text-error-dim text-2xl">admin_panel_settings</span>
+                <h3 class="font-headline text-lg font-bold text-error-dim">Administrator Required</h3>
+            </div>
+            <p class="text-on-surface-variant text-sm mb-4">This application requires administrator privileges to function properly.</p>
+            <p class="text-on-surface-variant text-sm mb-6">Please restart the application as administrator.</p>
+            <button id="admin-check-close" class="w-full py-3 bg-error-dim rounded-xl text-white font-bold text-xs uppercase tracking-wider hover:opacity-80 transition-colors">
+                Close Application
+            </button>
+        </div>
+    </div>
 
     <div
         class="fixed top-0 right-0 w-[600px] h-[600px] bg-primary/5 rounded-full blur-[120px] pointer-events-none -z-10 opacity-50">
