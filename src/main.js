@@ -1,18 +1,16 @@
-const { invoke } = window.__TAURI__.core;
+// invoke получаем лениво, чтобы не было гонки с инициализацией Tauri
+function invoke(cmd, args) {
+    return window.__TAURI__.core.invoke(cmd, args);
+}
 
 // ─── DOM-элементы ────────────────────────────────────────────────────────────
 
-const headerStatus  = () => document.getElementById('header-status');
-const heroStatus    = () => document.getElementById('hero-status');
-const connectBtn    = () => document.getElementById('connect-btn');
-const connectText   = () => document.getElementById('connect-btn-text');
-const connectIcon   = () => document.getElementById('connect-btn-icon');
-const strategySelect = () => document.getElementById('strategy-select');
+const $ = id => document.getElementById(id);
 
 // ─── Загрузка списка стратегий ────────────────────────────────────────────────
 
 async function loadStrategies() {
-    const sel = strategySelect();
+    const sel = $('strategy-select');
     try {
         const strategies = await invoke('get_strategies');
 
@@ -23,7 +21,6 @@ async function loadStrategies() {
             return;
         }
 
-        // «general» — первым, остальные идут по алфавиту (уже отсортированы Rust-ом)
         strategies.forEach(name => {
             const opt = document.createElement('option');
             opt.value = name;
@@ -31,9 +28,9 @@ async function loadStrategies() {
             sel.appendChild(opt);
         });
 
-        // Выбираем «general» по умолчанию если он есть
-        const generalOpt = Array.from(sel.options).find(o => o.value === 'general');
-        if (generalOpt) generalOpt.selected = true;
+        // Выбираем «general» по умолчанию если есть
+        const general = Array.from(sel.options).find(o => o.value === 'general');
+        if (general) general.selected = true;
 
     } catch (err) {
         console.error('Ошибка загрузки стратегий:', err);
@@ -44,25 +41,22 @@ async function loadStrategies() {
 // ─── Обновление UI по статусу ─────────────────────────────────────────────────
 
 function updateUI(status) {
-    const btn  = connectBtn();
-    const sel  = strategySelect();
+    const sel = $('strategy-select');
 
     if (status.running) {
-        // ── Подключено ──
         const label = status.strategy ?? 'Connected';
 
-        headerStatus().textContent = `Status: ${label}`;
-        headerStatus().className =
+        $('header-status').textContent = `Status: ${label}`;
+        $('header-status').className =
             'text-[10px] font-bold uppercase tracking-[0.2em] opacity-80 text-secondary';
 
-        heroStatus().textContent = 'Connected';
-        heroStatus().className = 'text-secondary';
+        $('hero-status').textContent = 'Connected';
+        $('hero-status').className = 'text-secondary';
 
-        connectText().textContent = 'Disconnect';
-        connectIcon().textContent = 'power_settings_new';
-        btn.dataset.action = 'stop';
+        $('connect-btn-text').textContent = 'Disconnect';
+        $('connect-btn-icon').textContent = 'power_settings_new';
+        $('connect-btn').dataset.action = 'stop';
 
-        // Синхронизируем dropdown с активной стратегией
         if (status.strategy) {
             const match = Array.from(sel.options).find(o => o.value === status.strategy);
             if (match) match.selected = true;
@@ -70,17 +64,16 @@ function updateUI(status) {
         sel.disabled = true;
 
     } else {
-        // ── Отключено ──
-        headerStatus().textContent = 'Status: Disconnected';
-        headerStatus().className =
+        $('header-status').textContent = 'Status: Disconnected';
+        $('header-status').className =
             'text-[10px] text-error-dim font-bold uppercase tracking-[0.2em] opacity-80';
 
-        heroStatus().textContent = 'Disconnected';
-        heroStatus().className = 'text-error-dim';
+        $('hero-status').textContent = 'Disconnected';
+        $('hero-status').className = 'text-error-dim';
 
-        connectText().textContent = 'Establish Connection';
-        connectIcon().textContent = 'bolt';
-        btn.dataset.action = 'start';
+        $('connect-btn-text').textContent = 'Establish Connection';
+        $('connect-btn-icon').textContent = 'bolt';
+        $('connect-btn').dataset.action = 'start';
 
         sel.disabled = false;
     }
@@ -100,29 +93,24 @@ async function pollStatus() {
 // ─── Кнопка Connect / Disconnect ─────────────────────────────────────────────
 
 async function handleConnectClick() {
-    const btn    = connectBtn();
+    const btn = $('connect-btn');
     const action = btn.dataset.action;
 
     btn.disabled = true;
 
     try {
         if (action === 'start') {
-            const strategy = strategySelect().value;
-            if (!strategy) {
-                btn.disabled = false;
-                return;
-            }
+            const strategy = $('strategy-select').value;
+            if (!strategy) return;
             await invoke('start_zapret', { strategy });
         } else {
             await invoke('stop_zapret');
         }
-        // Сразу обновляем UI после действия
         await pollStatus();
     } catch (err) {
         console.error('Ошибка действия:', err);
-        // Показываем ошибку в hero-заголовке на 3 секунды
-        heroStatus().textContent = `Ошибка: ${err}`;
-        heroStatus().className = 'text-error-dim text-2xl';
+        $('hero-status').textContent = `Ошибка: ${err}`;
+        $('hero-status').className = 'text-error-dim text-2xl';
         setTimeout(pollStatus, 3000);
     } finally {
         btn.disabled = false;
@@ -134,9 +122,6 @@ async function handleConnectClick() {
 window.addEventListener('DOMContentLoaded', async () => {
     await loadStrategies();
     await pollStatus();
-
-    // Поллинг каждые 2 секунды
     setInterval(pollStatus, 2000);
-
-    connectBtn().addEventListener('click', handleConnectClick);
+    $('connect-btn').addEventListener('click', handleConnectClick);
 });
