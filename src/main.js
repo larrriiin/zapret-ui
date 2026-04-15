@@ -39,20 +39,27 @@ async function loadStrategies() {
 
 function updateStatusUI(status) {
     const sel = $('strategy-select');
+    const tempBtn = $('connect-temp-btn');
 
     if (status.running) {
         const label = status.strategy ?? 'Connected';
+        const modeLabel = status.mode === 'service' ? ' (Service)' : ' (Temp)';
 
-        $('header-status').textContent = `Status: ${label}`;
+        $('header-status').textContent = `Status: ${label}${modeLabel}`;
         $('header-status').className =
             'text-[10px] font-bold uppercase tracking-[0.2em] opacity-80 text-secondary';
 
-        $('hero-status').textContent = 'Connected';
+        $('hero-status').textContent = `Connected${modeLabel}`;
         $('hero-status').className = 'text-secondary';
 
         $('connect-btn-text').textContent = 'Disconnect';
         $('connect-btn-icon').textContent = 'power_settings_new';
         $('connect-btn').dataset.action = 'stop';
+
+        if (tempBtn) {
+            tempBtn.disabled = true;
+            tempBtn.classList.add('hidden');
+        }
 
         // Выбираем активную стратегию в dropdown
         if (status.strategy) {
@@ -69,9 +76,14 @@ function updateStatusUI(status) {
         $('hero-status').textContent = 'Disconnected';
         $('hero-status').className = 'text-error-dim';
 
-        $('connect-btn-text').textContent = 'Establish Connection';
+        $('connect-btn-text').textContent = 'Run as Service';
         $('connect-btn-icon').textContent = 'bolt';
         $('connect-btn').dataset.action = 'start';
+
+        if (tempBtn) {
+            tempBtn.disabled = false;
+            tempBtn.classList.remove('hidden');
+        }
 
         sel.disabled = false;
     }
@@ -134,18 +146,34 @@ async function pollFilters() {
     }
 }
 
+async function handleGameFilterChange(mode) {
+    try {
+        await invoke('set_game_filter', { mode });
+        await pollFilters();
+    } catch (err) {
+        console.error('Ошибка смены Game Filter:', err);
+    }
+}
+
 // ─── Кнопка Connect / Disconnect ─────────────────────────────────────────────
 
-async function handleConnectClick() {
-    const btn = $('connect-btn');
+async function handleConnectClick(event) {
+    // Определяем по какой кнопке кликнули
+    const btn = event.currentTarget;
     const action = btn.dataset.action;
-    btn.disabled = true;
+    const mode = btn.dataset.mode || 'service';
+
+    const mainBtn = $('connect-btn');
+    const tempBtn = $('connect-temp-btn');
+
+    if (mainBtn) mainBtn.disabled = true;
+    if (tempBtn) tempBtn.disabled = true;
 
     try {
         if (action === 'start') {
             const strategy = $('strategy-select').value;
             if (!strategy) return;
-            await invoke('start_zapret', { strategy });
+            await invoke('start_zapret', { strategy, mode });
         } else {
             await invoke('stop_zapret');
         }
@@ -156,7 +184,9 @@ async function handleConnectClick() {
         $('hero-status').className = 'text-error-dim text-2xl';
         setTimeout(pollStatus, 3000);
     } finally {
-        btn.disabled = false;
+        if (mainBtn) mainBtn.disabled = false;
+        if (tempBtn) tempBtn.disabled = false;
+        await pollStatus(); // Обновит UI (кнопки и т.д.)
     }
 }
 
@@ -176,4 +206,17 @@ window.addEventListener('DOMContentLoaded', async () => {
     }, 2000);
 
     $('connect-btn').addEventListener('click', handleConnectClick);
+    const tempBtn = $('connect-temp-btn');
+    if (tempBtn) {
+        tempBtn.addEventListener('click', handleConnectClick);
+    }
+
+    // Слушатели для Game Filter
+    $('game-toggle').addEventListener('click', () => {
+        const isOn = $('game-toggle').classList.contains('is-on');
+        handleGameFilterChange(isOn ? 'disabled' : 'all');
+    });
+    $('game-all').addEventListener('click', () => handleGameFilterChange('all'));
+    $('game-tcp').addEventListener('click', () => handleGameFilterChange('tcp'));
+    $('game-udp').addEventListener('click', () => handleGameFilterChange('udp'));
 });

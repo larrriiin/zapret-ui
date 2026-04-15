@@ -137,14 +137,24 @@
                     </div>
                 </div>
 
-                <button id="connect-btn" data-action="start"
-                    class="group relative w-full py-4 bg-primary rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:shadow-[0_0_40px_rgba(186,158,255,0.3)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">
-                    <span
-                        class="flex items-center justify-center gap-3 text-on-primary font-headline font-bold text-sm tracking-widest uppercase">
-                        <span id="connect-btn-text">Establish Connection</span>
-                        <span id="connect-btn-icon" class="material-symbols-outlined group-hover:rotate-12 transition-transform">bolt</span>
-                    </span>
-                </button>
+                <div class="flex flex-col gap-2 w-full">
+                    <button id="connect-btn" data-action="start" data-mode="service"
+                        class="group relative w-full py-4 bg-primary rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:shadow-[0_0_40px_rgba(186,158,255,0.3)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">
+                        <span
+                            class="flex items-center justify-center gap-3 text-on-primary font-headline font-bold text-sm tracking-widest uppercase">
+                            <span id="connect-btn-text">Run as Service</span>
+                            <span id="connect-btn-icon" class="material-symbols-outlined group-hover:rotate-12 transition-transform">bolt</span>
+                        </span>
+                    </button>
+                    <button id="connect-temp-btn" data-action="start" data-mode="temporary"
+                        class="group relative w-full py-3 bg-surface-container-highest border border-outline-variant/30 rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:bg-surface-container-high hover:border-primary/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hidden">
+                        <span
+                            class="flex items-center justify-center gap-2 text-primary font-headline font-bold text-xs tracking-widest uppercase">
+                            <span id="connect-temp-btn-text">Run Temporarily</span>
+                            <span id="connect-temp-btn-icon" class="material-symbols-outlined text-[16px]">play_arrow</span>
+                        </span>
+                    </button>
+                </div>
         </section>
 
         <div class="grid grid-cols-2 gap-8 items-start">

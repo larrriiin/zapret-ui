@@ -3,6 +3,11 @@ use std::process::Command;
 use std::sync::Mutex;
 use tauri::State;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 struct AppState {
     active_strategy: Mutex<Option<String>>,
 }
@@ -11,6 +16,7 @@ struct AppState {
 struct ZapretStatus {
     running: bool,
     strategy: Option<String>,
+    mode: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -54,7 +60,82 @@ fn find_binaries_dir() -> PathBuf {
     PathBuf::from("binaries")
 }
 
+fn parse_bat_args(strategy: &str) -> Result<String, String> {
+    let dir = find_binaries_dir();
+    let bat_path = dir.join(format!("{}.bat", strategy));
+    let content = std::fs::read_to_string(&bat_path)
+        .map_err(|e| format!("Не удалось прочитать {}.bat: {}", strategy, e))?;
+
+    // Читаем текущие значения фильтров для подстановки
+    let filters = get_filters_status();
+    let game_filter_mode = filters.game_filter;
+
+    let (gf, gftcp, gfudp) = match game_filter_mode.as_str() {
+        "all" => ("1024-65535", "1024-65535", "1024-65535"),
+        "tcp" => ("1024-65535", "1024-65535", "12"),
+        "udp" => ("1024-65535", "12", "1024-65535"),
+        _ => ("12", "12", "12"),
+    };
+
+    let bin_path = dir.join("bin").to_str().unwrap_or("").to_string() + "\\";
+    let lists_path = dir.join("lists").to_str().unwrap_or("").to_string() + "\\";
+    let root_path = dir.to_str().unwrap_or("").to_string() + "\\";
+
+    // Ищем строку с запуском winws.exe
+    for line in content.lines() {
+        let line_lower = line.to_lowercase();
+        if line_lower.contains("winws.exe") {
+            let mut args = String::new();
+            if let Some(pos) = line_lower.find("winws.exe\"") {
+                args = line[pos + "winws.exe\"".len()..].to_string();
+            } else if let Some(pos) = line_lower.find("winws.exe ") {
+                args = line[pos + "winws.exe ".len()..].to_string();
+            }
+
+            // Убираем символы продолжения строки `^`
+            args = args.replace("^", "");
+
+            // Подстановка переменных (эмуляция service.bat)
+            args = args.replace("%GameFilter%", gf);
+            args = args.replace("%GameFilterTCP%", gftcp);
+            args = args.replace("%GameFilterUDP%", gfudp);
+            args = args.replace("%BIN%", &bin_path);
+            args = args.replace("%LISTS%", &lists_path);
+
+            // Замена @ на абсолютный путь к корню binaries
+            let mut final_args = String::new();
+            for word in args.split_whitespace() {
+                let mut w = word.to_string();
+                if w.starts_with("\"@") {
+                    w = format!("\"{}{}", root_path, &w[2..]);
+                }
+                // Экранируем кавычки для SC CREATE
+                w = w.replace("\"", "\\\"");
+                final_args.push_str(&w);
+                final_args.push(' ');
+            }
+
+            return Ok(final_args.trim().to_string());
+        }
+    }
+
+    Ok("".to_string())
+}
+
 /// Проверяет, запущен ли winws.exe через tasklist.
+fn is_zapret_service_running() -> bool {
+    let output = Command::new("sc")
+        .args(["query", "zapret"])
+        .output();
+    match output {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout).to_lowercase();
+            stdout.contains("running") || stdout.contains("start_pending")
+        },
+        Err(_) => false,
+    }
+}
+
 fn is_winws_running() -> bool {
     let output = Command::new("tasklist")
         .args(["/fi", "IMAGENAME eq winws.exe", "/fo", "csv", "/nh"])
@@ -129,16 +210,23 @@ fn get_strategies() -> Result<Vec<String>, String> {
 /// Текущий статус zapret: запущен ли и какая стратегия.
 #[tauri::command]
 fn get_zapret_status(state: State<'_, AppState>) -> ZapretStatus {
-    let running = is_winws_running();
+    let mut running = is_winws_running();
+    let is_service = is_zapret_service_running();
+    if is_service {
+        running = true;
+    }
+
     let mut strategy_lock = state.active_strategy.lock().unwrap();
 
     if !running {
         *strategy_lock = None;
-        return ZapretStatus { running: false, strategy: None };
+        return ZapretStatus { running: false, strategy: None, mode: None };
     }
 
+    let mode = if is_service { Some("service".to_string()) } else { Some("temporary".to_string()) };
+
     if strategy_lock.is_some() {
-        return ZapretStatus { running: true, strategy: strategy_lock.clone() };
+        return ZapretStatus { running: true, strategy: strategy_lock.clone(), mode };
     }
 
     // Пробуем определить из реестра (если запущен как Windows-сервис)
@@ -147,7 +235,7 @@ fn get_zapret_status(state: State<'_, AppState>) -> ZapretStatus {
         *strategy_lock = from_reg.clone();
     }
 
-    ZapretStatus { running: true, strategy: from_reg }
+    ZapretStatus { running: true, strategy: from_reg, mode }
 }
 
 /// Состояние Game Filter и IPSet Filter по файлам конфигурации.
@@ -192,26 +280,78 @@ fn get_filters_status() -> FiltersStatus {
     FiltersStatus { game_filter, ipset }
 }
 
+#[tauri::command]
+fn set_game_filter(mode: String) -> Result<(), String> {
+    let dir = find_binaries_dir();
+    let game_flag = dir.join("utils").join("game_filter.enabled");
+
+    if mode == "disabled" {
+        if game_flag.exists() {
+            let _ = std::fs::remove_file(game_flag);
+        }
+    } else {
+        std::fs::write(&game_flag, mode).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Запускает стратегию по имени .bat файла.
 #[tauri::command]
-fn start_zapret(strategy: String, state: State<'_, AppState>) -> Result<String, String> {
-    // Убиваем текущий процесс (без прав сервис остановится через bat)
+fn start_zapret(strategy: String, mode: String, state: State<'_, AppState>) -> Result<String, String> {
+    // Убиваем текущий процесс
     let _ = Command::new("taskkill").args(["/f", "/im", "winws.exe"]).output();
 
-    let bat_path = find_binaries_dir().join(format!("{}.bat", strategy));
+    let dir = find_binaries_dir();
+    let bat_path = dir.join(format!("{}.bat", strategy));
     if !bat_path.exists() {
         return Err(format!("Файл стратегии не найден: {}.bat", strategy));
     }
 
-    let bat_str = bat_path
-        .to_str()
-        .ok_or("Невалидный путь к bat-файлу")?
-        .to_string();
+    if mode == "service" {
+        let args = parse_bat_args(&strategy)?;
+        let bin_path = dir.join("bin").join("winws.exe");
+        let bin_str = bin_path.to_str().unwrap_or_default();
 
-    Command::new("cmd")
-        .args(["/c", &bat_str])
-        .spawn()
-        .map_err(|e| format!("Не удалось запустить стратегию: {}", e))?;
+        let bat_content = format!(
+            "@echo off\r\n\
+             net stop zapret 2>nul\r\n\
+             sc delete zapret 2>nul\r\n\
+             sc create zapret binPath= \"\\\"{}\\\" {}\" DisplayName= \"zapret\" start= auto\r\n\
+             sc description zapret \"Zapret DPI bypass software\"\r\n\
+             sc start zapret\r\n\
+             reg add \"HKLM\\System\\CurrentControlSet\\Services\\zapret\" /v zapret-discord-youtube /t REG_SZ /d \"{}\" /f\r\n",
+             bin_str, args, strategy
+        );
+
+        let bat_path = std::env::temp_dir().join("zapret_start.bat");
+        if std::fs::write(&bat_path, bat_content).is_ok() {
+            let mut cmd = Command::new("powershell");
+            cmd.args([
+                "-NoProfile",
+                "-WindowStyle", "Hidden",
+                "-Command",
+                "Start-Process cmd.exe -ArgumentList '/c %TEMP%\\zapret_start.bat' -Verb RunAs -Wait -WindowStyle Hidden",
+            ]);
+            #[cfg(windows)]
+            cmd.creation_flags(CREATE_NO_WINDOW);
+            let _ = cmd.output();
+        } else {
+            return Err("Не удалось создать bat-файл для запуска сервиса".to_string());
+        }
+    } else {
+        let bat_str = bat_path
+            .to_str()
+            .ok_or("Невалидный путь к bat-файлу")?
+            .to_string();
+
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/c", &bat_str]);
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        cmd.spawn()
+            .map_err(|e| format!("Не удалось запустить стратегию: {}", e))?;
+    }
 
     *state.active_strategy.lock().unwrap() = Some(strategy);
     Ok("Connected".into())
@@ -267,6 +407,7 @@ pub fn run() {
             get_strategies,
             get_zapret_status,
             get_filters_status,
+            set_game_filter,
             start_zapret,
             stop_zapret,
         ])
