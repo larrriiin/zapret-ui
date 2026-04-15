@@ -2,6 +2,11 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 use tauri::State;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 struct AppState {
     active_strategy: Mutex<Option<String>>,
@@ -19,6 +24,17 @@ struct FiltersStatus {
     game_filter: String,
     /// "none" | "any" | "loaded"
     ipset: String,
+    /// "disabled" | "all" | "tcp" | "udp"
+    game_filter_raw: String,
+    /// Человекочитаемый статус как в service.bat
+    game_filter_label: String,
+}
+
+#[derive(serde::Serialize)]
+struct ServiceStatus {
+    installed: bool,
+    running: bool,
+    strategy: Option<String>,
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -95,6 +111,35 @@ fn get_strategy_from_registry() -> Option<String> {
     None
 }
 
+fn is_service_installed(name: &str) -> bool {
+    Command::new("sc")
+        .args(["query", name])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn is_service_running(name: &str) -> bool {
+    let output = Command::new("sc")
+        .args(["query", name])
+        .output();
+    match output {
+        Ok(out) => String::from_utf8_lossy(&out.stdout).contains("RUNNING"),
+        Err(_) => false,
+    }
+}
+
+fn run_hidden_cmd_with_args(args: &[&str]) -> Result<(), String> {
+    let mut cmd = Command::new("cmd");
+    cmd.args(args);
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    cmd.spawn()
+        .map_err(|e| format!("Не удалось запустить процесс: {}", e))?;
+    Ok(())
+}
+
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
 /// Список стратегий — имена .bat файлов из binaries/ (без service.bat).
@@ -150,6 +195,23 @@ fn get_zapret_status(state: State<'_, AppState>) -> ZapretStatus {
     ZapretStatus { running: true, strategy: from_reg }
 }
 
+#[tauri::command]
+fn get_service_status() -> ServiceStatus {
+    let installed = is_service_installed("zapret");
+    let running = if installed {
+        is_service_running("zapret")
+    } else {
+        false
+    };
+    let strategy = if installed { get_strategy_from_registry() } else { None };
+
+    ServiceStatus {
+        installed,
+        running,
+        strategy,
+    }
+}
+
 /// Состояние Game Filter и IPSet Filter по файлам конфигурации.
 #[tauri::command]
 fn get_filters_status() -> FiltersStatus {
@@ -172,6 +234,12 @@ fn get_filters_status() -> FiltersStatus {
             _ => "all".to_string(),
         }
     };
+    let game_filter_label = match game_filter.as_str() {
+        "disabled" => "disabled".to_string(),
+        "tcp" => "enabled (TCP)".to_string(),
+        "udp" => "enabled (UDP)".to_string(),
+        _ => "enabled (TCP and UDP)".to_string(),
+    };
 
     // ── IPSet Filter: binaries/lists/ipset-all.txt ──
     let ipset_file = dir.join("lists").join("ipset-all.txt");
@@ -189,7 +257,12 @@ fn get_filters_status() -> FiltersStatus {
         }
     };
 
-    FiltersStatus { game_filter, ipset }
+    FiltersStatus {
+        game_filter_raw: game_filter.clone(),
+        game_filter,
+        game_filter_label,
+        ipset,
+    }
 }
 
 /// Запускает стратегию по имени .bat файла.
@@ -208,13 +281,78 @@ fn start_zapret(strategy: String, state: State<'_, AppState>) -> Result<String, 
         .ok_or("Невалидный путь к bat-файлу")?
         .to_string();
 
-    Command::new("cmd")
-        .args(["/c", &bat_str])
-        .spawn()
+    run_hidden_cmd_with_args(&["/c", &bat_str])
         .map_err(|e| format!("Не удалось запустить стратегию: {}", e))?;
 
     *state.active_strategy.lock().unwrap() = Some(strategy);
     Ok("Connected".into())
+}
+
+#[tauri::command]
+fn start_zapret_service(strategy: String, state: State<'_, AppState>) -> Result<String, String> {
+    let binaries_dir = find_binaries_dir();
+    let service_bat = binaries_dir.join("service.bat");
+    if !service_bat.exists() {
+        return Err("service.bat не найден в папке binaries".to_string());
+    }
+
+    // Индекс стратегии как в service.bat (алфавитная сортировка .bat, без service*)
+    let mut files: Vec<String> = std::fs::read_dir(&binaries_dir)
+        .map_err(|e| format!("Не удалось прочитать binaries: {}", e))?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.path().file_name().and_then(|n| n.to_str()).map(|s| s.to_string()))
+        .filter(|name| name.to_ascii_lowercase().ends_with(".bat"))
+        .filter(|name| !name.to_ascii_lowercase().starts_with("service"))
+        .collect();
+    files.sort();
+
+    let target = format!("{}.bat", strategy);
+    let index = files
+        .iter()
+        .position(|f| f.eq_ignore_ascii_case(&target))
+        .map(|i| i + 1)
+        .ok_or_else(|| format!("Стратегия не найдена для установки в сервис: {}", strategy))?;
+
+    // Автоматизируем меню service.bat:
+    // 1 -> Install Service, далее индекс стратегии, потом 0 -> Exit
+    let automation = format!("echo 1&echo {}&echo 0", index);
+    let cmdline = format!(
+        "cd /d \"{}\" && ({}) | \"{}\" admin",
+        binaries_dir.to_string_lossy(),
+        automation,
+        service_bat.to_string_lossy()
+    );
+
+    Command::new("cmd")
+        .args(["/c", &cmdline])
+        .output()
+        .map_err(|e| format!("Не удалось запустить установку сервиса: {}", e))?;
+
+    *state.active_strategy.lock().unwrap() = Some(strategy);
+    Ok("Service mode enabled".into())
+}
+
+#[tauri::command]
+fn remove_zapret_service(state: State<'_, AppState>) -> Result<String, String> {
+    let binaries_dir = find_binaries_dir();
+    let service_bat = binaries_dir.join("service.bat");
+    if !service_bat.exists() {
+        return Err("service.bat не найден в папке binaries".to_string());
+    }
+
+    // 2 -> Remove Services, 0 -> Exit
+    let cmdline = format!(
+        "cd /d \"{}\" && (echo 2&echo 0) | \"{}\" admin",
+        binaries_dir.to_string_lossy(),
+        service_bat.to_string_lossy()
+    );
+    Command::new("cmd")
+        .args(["/c", &cmdline])
+        .output()
+        .map_err(|e| format!("Не удалось удалить сервис: {}", e))?;
+
+    *state.active_strategy.lock().unwrap() = None;
+    Ok("Service mode disabled".into())
 }
 
 /// Полностью останавливает zapret.
@@ -268,7 +406,10 @@ pub fn run() {
             get_zapret_status,
             get_filters_status,
             start_zapret,
+            start_zapret_service,
             stop_zapret,
+            remove_zapret_service,
+            get_service_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

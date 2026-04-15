@@ -37,6 +37,8 @@ async function loadStrategies() {
 
 // ─── Статус zapret ────────────────────────────────────────────────────────────
 
+let serviceInstalled = false;
+
 function updateStatusUI(status) {
     const sel = $('strategy-select');
 
@@ -77,12 +79,42 @@ function updateStatusUI(status) {
     }
 }
 
+function updateServiceUI(status) {
+    serviceInstalled = !!status.installed;
+    const label = $('service-status-label');
+    const tempBtn = $('temporary-start-btn');
+    const serviceBtn = $('service-enable-btn');
+
+    if (status.installed) {
+        const mode = status.running ? 'running' : 'installed';
+        const strategy = status.strategy ? ` (${status.strategy})` : '';
+        label.textContent = `${mode}${strategy}`;
+        tempBtn.disabled = true;
+        tempBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        serviceBtn.textContent = 'Disable service';
+    } else {
+        label.textContent = 'disabled';
+        tempBtn.disabled = false;
+        tempBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        serviceBtn.textContent = 'Enable service';
+    }
+}
+
 async function pollStatus() {
     try {
         const status = await invoke('get_zapret_status');
         updateStatusUI(status);
     } catch (err) {
         console.error('Ошибка опроса статуса:', err);
+    }
+}
+
+async function pollService() {
+    try {
+        const status = await invoke('get_service_status');
+        updateServiceUI(status);
+    } catch (err) {
+        console.error('Ошибка опроса service:', err);
     }
 }
 
@@ -118,11 +150,13 @@ function updateFiltersUI(filters) {
     setCardActive('ipset-any',    filters.ipset === 'any');
 
     // ── Game Filter ──
-    const gameOn = filters.game_filter !== 'disabled';
+    const gameMode = filters.game_filter_raw ?? filters.game_filter;
+    const gameOn = gameMode !== 'disabled';
     setToggle('game-toggle', gameOn);
-    setCardActive('game-all', filters.game_filter === 'all');
-    setCardActive('game-tcp', filters.game_filter === 'tcp');
-    setCardActive('game-udp', filters.game_filter === 'udp');
+    setCardActive('game-all', gameMode === 'all');
+    setCardActive('game-tcp', gameMode === 'tcp');
+    setCardActive('game-udp', gameMode === 'udp');
+    $('game-filter-mode').textContent = `Mode: ${filters.game_filter_label ?? gameMode}`;
 }
 
 async function pollFilters() {
@@ -143,6 +177,11 @@ async function handleConnectClick() {
 
     try {
         if (action === 'start') {
+            if (serviceInstalled) {
+                $('hero-status').textContent = 'Service mode is enabled';
+                $('hero-status').className = 'text-secondary';
+                return;
+            }
             const strategy = $('strategy-select').value;
             if (!strategy) return;
             await invoke('start_zapret', { strategy });
@@ -160,6 +199,38 @@ async function handleConnectClick() {
     }
 }
 
+async function handleServiceToggle() {
+    const btn = $('service-enable-btn');
+    btn.disabled = true;
+    try {
+        const strategy = $('strategy-select').value;
+        if (!serviceInstalled) {
+            if (!strategy) return;
+            await invoke('start_zapret_service', { strategy });
+        } else {
+            await invoke('remove_zapret_service');
+        }
+        await pollService();
+        await pollStatus();
+    } catch (err) {
+        console.error('Ошибка переключения service mode:', err);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function handleTemporaryStart() {
+    if (serviceInstalled) return;
+    const strategy = $('strategy-select').value;
+    if (!strategy) return;
+    try {
+        await invoke('start_zapret', { strategy });
+        await pollStatus();
+    } catch (err) {
+        console.error('Ошибка временного запуска:', err);
+    }
+}
+
 // ─── Инициализация ────────────────────────────────────────────────────────────
 
 window.addEventListener('DOMContentLoaded', async () => {
@@ -167,13 +238,17 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     // Сначала получаем статус — чтобы в dropdown сразу встала активная стратегия
     await pollStatus();
+    await pollService();
     await pollFilters();
 
     // Поллинг каждые 2 секунды
     setInterval(async () => {
         await pollStatus();
+        await pollService();
         await pollFilters();
     }, 2000);
 
     $('connect-btn').addEventListener('click', handleConnectClick);
+    $('service-enable-btn').addEventListener('click', handleServiceToggle);
+    $('temporary-start-btn').addEventListener('click', handleTemporaryStart);
 });

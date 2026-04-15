@@ -135,6 +135,26 @@
                             </select>
                         </div>
                     </div>
+
+                    <div class="w-full space-y-3 mb-8 text-left">
+                        <h3 class="font-headline text-[10px] font-bold uppercase tracking-[0.2em] text-primary/70 ml-2">
+                            Launch Mode</h3>
+                        <div class="glass-panel rounded-2xl p-4 border border-primary/10 space-y-2">
+                            <div class="text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">
+                                Service status: <span id="service-status-label">checking…</span>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <button id="service-enable-btn"
+                                    class="w-full py-2 rounded-xl border border-primary/20 text-xs uppercase tracking-wider hover:border-primary/60 transition-colors">
+                                    Enable service
+                                </button>
+                                <button id="temporary-start-btn"
+                                    class="w-full py-2 rounded-xl border border-primary/20 text-xs uppercase tracking-wider hover:border-primary/60 transition-colors">
+                                    Temporary run
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <button id="connect-btn" data-action="start"
@@ -177,6 +197,7 @@
                 <div class="flex items-center justify-between px-2 h-6">
                     <h3 class="font-headline text-xs font-bold uppercase tracking-[0.2em] text-primary/70">Game Filter
                     </h3>
+                    <span id="game-filter-mode" class="text-[10px] uppercase tracking-[0.2em] text-on-surface-variant">Mode: disabled</span>
                     <button id="game-toggle"
                         class="toggle-btn is-on relative w-12 h-6 flex items-center rounded-full p-1">
                         <div class="toggle-thumb w-4 h-4 bg-primary rounded-full shadow-[0_0_10px_#ba9eff]"></div>
