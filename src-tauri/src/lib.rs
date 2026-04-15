@@ -13,10 +13,18 @@ struct ZapretStatus {
     strategy: Option<String>,
 }
 
-/// Пытается найти папку binaries рядом с exe (продакшен)
-/// или относительно рабочей директории (режим разработки).
+#[derive(serde::Serialize)]
+struct FiltersStatus {
+    /// "disabled" | "all" | "tcp" | "udp"
+    game_filter: String,
+    /// "none" | "any" | "loaded"
+    ipset: String,
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Ищет папку binaries/ рядом с exe (продакшен) или поднимаясь вверх (dev).
 fn find_binaries_dir() -> PathBuf {
-    // Сначала проверяем рядом с исполняемым файлом (продакшен)
     if let Ok(exe) = std::env::current_exe() {
         let mut dir = exe.parent().map(|p| p.to_path_buf());
         for _ in 0..4 {
@@ -31,35 +39,61 @@ fn find_binaries_dir() -> PathBuf {
             }
         }
     }
-
-    // Фолбэк: относительно рабочей директории (работает при `tauri dev`)
     PathBuf::from("binaries")
 }
 
-/// Проверяет, запущен ли winws.exe через tasklist
+/// Проверяет, запущен ли winws.exe через tasklist.
 fn is_winws_running() -> bool {
     let output = Command::new("tasklist")
         .args(["/fi", "IMAGENAME eq winws.exe", "/fo", "csv", "/nh"])
         .output();
-
     match output {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            stdout.to_lowercase().contains("winws.exe")
-        }
+        Ok(out) => String::from_utf8_lossy(&out.stdout)
+            .to_lowercase()
+            .contains("winws.exe"),
         Err(_) => false,
     }
 }
 
-/// Возвращает список стратегий — названия .bat файлов из папки binaries (без service.bat)
+/// Пытается прочитать активную стратегию из реестра Windows
+/// (записывается при установке zapret как Windows-сервис).
+fn get_strategy_from_registry() -> Option<String> {
+    let out = Command::new("reg")
+        .args([
+            "query",
+            "HKLM\\System\\CurrentControlSet\\Services\\zapret",
+            "/v",
+            "zapret-discord-youtube",
+        ])
+        .output()
+        .ok()?;
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    // Строка выглядит как: "    zapret-discord-youtube    REG_SZ    general (ALT)"
+    for line in stdout.lines() {
+        if line.contains("REG_SZ") {
+            if let Some(pos) = line.find("REG_SZ") {
+                let value = line[pos + "REG_SZ".len()..].trim();
+                if !value.is_empty() {
+                    return Some(value.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+// ─── Commands ─────────────────────────────────────────────────────────────────
+
+/// Список стратегий — имена .bat файлов из binaries/ (без service.bat).
 #[tauri::command]
 fn get_strategies() -> Result<Vec<String>, String> {
-    let binaries_dir = find_binaries_dir();
+    let dir = find_binaries_dir();
+    let entries = std::fs::read_dir(&dir)
+        .map_err(|e| format!("Не удалось прочитать binaries ({:?}): {}", dir, e))?;
 
-    let entries = std::fs::read_dir(&binaries_dir)
-        .map_err(|e| format!("Не удалось прочитать папку binaries ({:?}): {}", binaries_dir, e))?;
-
-    let mut strategies: Vec<String> = entries
+    let mut list: Vec<String> = entries
         .filter_map(|e| e.ok())
         .filter(|e| {
             e.path()
@@ -77,38 +111,88 @@ fn get_strategies() -> Result<Vec<String>, String> {
         .filter(|name| name != "service")
         .collect();
 
-    strategies.sort();
-    Ok(strategies)
+    list.sort();
+    Ok(list)
 }
 
-/// Возвращает текущее состояние zapret: запущен ли и какая стратегия активна
+/// Текущий статус zapret: запущен ли и какая стратегия.
+/// Если запущен внешне — пробуем определить стратегию из реестра.
 #[tauri::command]
 fn get_zapret_status(state: State<'_, AppState>) -> ZapretStatus {
     let running = is_winws_running();
     let mut strategy_lock = state.active_strategy.lock().unwrap();
 
     if !running {
-        // Если процесс завершился сам — сбрасываем запомненную стратегию
         *strategy_lock = None;
+        return ZapretStatus { running: false, strategy: None };
+    }
+
+    // Уже знаем стратегию (запустили сами)
+    if strategy_lock.is_some() {
+        return ZapretStatus {
+            running: true,
+            strategy: strategy_lock.clone(),
+        };
+    }
+
+    // Пробуем определить из реестра (если запущен как Windows-сервис)
+    let from_reg = get_strategy_from_registry();
+    if from_reg.is_some() {
+        *strategy_lock = from_reg.clone();
     }
 
     ZapretStatus {
-        running,
-        strategy: strategy_lock.clone(),
+        running: true,
+        strategy: from_reg,
     }
 }
 
-/// Запускает указанную стратегию (по имени .bat файла без расширения)
+/// Состояние Game Filter и IPSet Filter.
+#[tauri::command]
+fn get_filters_status() -> FiltersStatus {
+    let dir = find_binaries_dir();
+
+    // ── Game Filter ──
+    let game_flag = dir.join("utils").join("game_filter.enabled");
+    let game_filter = if !game_flag.exists() {
+        "disabled".to_string()
+    } else {
+        let content = std::fs::read_to_string(&game_flag).unwrap_or_default();
+        match content.trim().to_lowercase().as_str() {
+            "tcp" => "tcp".to_string(),
+            "udp" => "udp".to_string(),
+            _ => "all".to_string(), // "all" или любое другое значение
+        }
+    };
+
+    // ── IPSet Filter ──
+    let ipset_file = dir.join("lists").join("ipset-all.txt");
+    let ipset = if !ipset_file.exists() {
+        "any".to_string()
+    } else {
+        let content = std::fs::read_to_string(&ipset_file).unwrap_or_default();
+        let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
+        if lines.is_empty() {
+            "any".to_string()
+        } else if lines.iter().any(|l| l.trim() == "203.0.113.113/32") {
+            "none".to_string()
+        } else {
+            "loaded".to_string()
+        }
+    };
+
+    FiltersStatus { game_filter, ipset }
+}
+
+/// Запускает стратегию по имени .bat файла.
 #[tauri::command]
 fn start_zapret(strategy: String, state: State<'_, AppState>) -> Result<String, String> {
-    // Убиваем уже запущенный winws.exe, если есть
-    let _ = Command::new("taskkill")
-        .args(["/f", "/im", "winws.exe"])
-        .output();
+    // Останавливаем предыдущий процесс и сервис
+    let _ = Command::new("taskkill").args(["/f", "/im", "winws.exe"]).output();
+    let _ = Command::new("net").args(["stop", "zapret"]).output();
+    let _ = Command::new("sc").args(["delete", "zapret"]).output();
 
-    let binaries_dir = find_binaries_dir();
-    let bat_path = binaries_dir.join(format!("{}.bat", strategy));
-
+    let bat_path = find_binaries_dir().join(format!("{}.bat", strategy));
     if !bat_path.exists() {
         return Err(format!("Файл стратегии не найден: {}.bat", strategy));
     }
@@ -127,15 +211,17 @@ fn start_zapret(strategy: String, state: State<'_, AppState>) -> Result<String, 
     Ok("Connected".into())
 }
 
-/// Останавливает zapret через taskkill
+/// Полностью останавливает zapret:
+/// убивает winws.exe, останавливает и удаляет Windows-сервис.
 #[tauri::command]
 fn stop_zapret(state: State<'_, AppState>) {
-    let _ = Command::new("taskkill")
-        .args(["/f", "/im", "winws.exe"])
-        .output();
-
+    let _ = Command::new("taskkill").args(["/f", "/im", "winws.exe"]).output();
+    let _ = Command::new("net").args(["stop", "zapret"]).output();
+    let _ = Command::new("sc").args(["delete", "zapret"]).output();
     *state.active_strategy.lock().unwrap() = None;
 }
+
+// ─── Entry point ──────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -147,8 +233,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_strategies,
             get_zapret_status,
+            get_filters_status,
             start_zapret,
-            stop_zapret
+            stop_zapret,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

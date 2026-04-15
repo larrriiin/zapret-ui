@@ -62,6 +62,20 @@
             background: #1c253e;
             border-radius: 10px;
         }
+
+        /* Активная карточка фильтра */
+        .card-active {
+            border-color: rgba(186, 158, 255, 0.6) !important;
+            box-shadow: 0 0 16px rgba(186, 158, 255, 0.2);
+        }
+
+        /* Состояния тумблера */
+        .toggle-btn { transition: background 0.2s; }
+        .toggle-btn.is-on  { background: rgba(186, 158, 255, 0.2); }
+        .toggle-btn.is-off { background: rgba(65, 71, 91, 0.3); }
+        .toggle-thumb { transition: transform 0.2s; }
+        .toggle-btn.is-on  .toggle-thumb { transform: translateX(24px); }
+        .toggle-btn.is-off .toggle-thumb { transform: translateX(0px); }
     </style>
 </head>
 
@@ -140,20 +154,19 @@
                 <div class="flex items-center justify-between px-2 h-6">
                     <h3 class="font-headline text-xs font-bold uppercase tracking-[0.2em] text-primary/70">IPSet Filter
                     </h3>
-                    <button class="relative w-12 h-6 flex items-center bg-primary/20 rounded-full p-1 group">
-                        <div
-                            class="w-4 h-4 bg-primary rounded-full shadow-[0_0_10px_#ba9eff] translate-x-6 transition-transform">
-                        </div>
+                    <button id="ipset-toggle"
+                        class="toggle-btn is-on relative w-12 h-6 flex items-center rounded-full p-1">
+                        <div class="toggle-thumb w-4 h-4 bg-primary rounded-full shadow-[0_0_10px_#ba9eff]"></div>
                     </button>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
-                    <div
+                    <div id="ipset-loaded"
                         class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
                         <span class="material-symbols-outlined text-primary text-xl">download_done</span>
                         <span
                             class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Loaded</span>
                     </div>
-                    <div
+                    <div id="ipset-any"
                         class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
                         <span class="material-symbols-outlined text-secondary text-xl">all_inclusive</span>
                         <span class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Any</span>
@@ -165,27 +178,26 @@
                 <div class="flex items-center justify-between px-2 h-6">
                     <h3 class="font-headline text-xs font-bold uppercase tracking-[0.2em] text-primary/70">Game Filter
                     </h3>
-                    <button class="relative w-12 h-6 flex items-center bg-primary/20 rounded-full p-1 group">
-                        <div
-                            class="w-4 h-4 bg-primary rounded-full shadow-[0_0_10px_#ba9eff] translate-x-6 transition-transform">
-                        </div>
+                    <button id="game-toggle"
+                        class="toggle-btn is-on relative w-12 h-6 flex items-center rounded-full p-1">
+                        <div class="toggle-thumb w-4 h-4 bg-primary rounded-full shadow-[0_0_10px_#ba9eff]"></div>
                     </button>
                 </div>
                 <div class="grid grid-cols-3 gap-3">
-                    <div
+                    <div id="game-all"
                         class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
                         <span class="material-symbols-outlined text-primary text-xl">Layers</span>
                         <span
                             class="text-[10px] font-bold uppercase tracking-tighter text-on-surface-variant text-center leading-none">TCP
                             + UDP</span>
                     </div>
-                    <div
+                    <div id="game-tcp"
                         class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
                         <span class="material-symbols-outlined text-secondary text-xl">terminal</span>
                         <span
                             class="text-[10px] font-bold uppercase tracking-tighter text-on-surface-variant">TCP</span>
                     </div>
-                    <div
+                    <div id="game-udp"
                         class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
                         <span class="material-symbols-outlined text-tertiary text-xl">router</span>
                         <span

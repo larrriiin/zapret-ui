@@ -3,17 +3,14 @@ function invoke(cmd, args) {
     return window.__TAURI__.core.invoke(cmd, args);
 }
 
-// ─── DOM-элементы ────────────────────────────────────────────────────────────
-
 const $ = id => document.getElementById(id);
 
-// ─── Загрузка списка стратегий ────────────────────────────────────────────────
+// ─── Стратегии ────────────────────────────────────────────────────────────────
 
 async function loadStrategies() {
     const sel = $('strategy-select');
     try {
         const strategies = await invoke('get_strategies');
-
         sel.innerHTML = '';
 
         if (!strategies || strategies.length === 0) {
@@ -28,7 +25,7 @@ async function loadStrategies() {
             sel.appendChild(opt);
         });
 
-        // Выбираем «general» по умолчанию если есть
+        // general — по умолчанию, если есть
         const general = Array.from(sel.options).find(o => o.value === 'general');
         if (general) general.selected = true;
 
@@ -38,9 +35,9 @@ async function loadStrategies() {
     }
 }
 
-// ─── Обновление UI по статусу ─────────────────────────────────────────────────
+// ─── Статус zapret ────────────────────────────────────────────────────────────
 
-function updateUI(status) {
+function updateStatusUI(status) {
     const sel = $('strategy-select');
 
     if (status.running) {
@@ -57,6 +54,7 @@ function updateUI(status) {
         $('connect-btn-icon').textContent = 'power_settings_new';
         $('connect-btn').dataset.action = 'stop';
 
+        // Выбираем активную стратегию в dropdown
         if (status.strategy) {
             const match = Array.from(sel.options).find(o => o.value === status.strategy);
             if (match) match.selected = true;
@@ -79,14 +77,60 @@ function updateUI(status) {
     }
 }
 
-// ─── Поллинг статуса ──────────────────────────────────────────────────────────
-
 async function pollStatus() {
     try {
         const status = await invoke('get_zapret_status');
-        updateUI(status);
+        updateStatusUI(status);
     } catch (err) {
         console.error('Ошибка опроса статуса:', err);
+    }
+}
+
+// ─── Фильтры ─────────────────────────────────────────────────────────────────
+
+function setCardActive(id, active) {
+    const el = $(id);
+    if (!el) return;
+    if (active) {
+        el.classList.add('card-active');
+    } else {
+        el.classList.remove('card-active');
+    }
+}
+
+function setToggle(id, on) {
+    const btn = $(id);
+    if (!btn) return;
+    if (on) {
+        btn.classList.remove('is-off');
+        btn.classList.add('is-on');
+    } else {
+        btn.classList.remove('is-on');
+        btn.classList.add('is-off');
+    }
+}
+
+function updateFiltersUI(filters) {
+    // ── IPSet ──
+    const ipsetOn = filters.ipset !== 'none';
+    setToggle('ipset-toggle', ipsetOn);
+    setCardActive('ipset-loaded', filters.ipset === 'loaded');
+    setCardActive('ipset-any',    filters.ipset === 'any');
+
+    // ── Game Filter ──
+    const gameOn = filters.game_filter !== 'disabled';
+    setToggle('game-toggle', gameOn);
+    setCardActive('game-all', filters.game_filter === 'all');
+    setCardActive('game-tcp', filters.game_filter === 'tcp');
+    setCardActive('game-udp', filters.game_filter === 'udp');
+}
+
+async function pollFilters() {
+    try {
+        const filters = await invoke('get_filters_status');
+        updateFiltersUI(filters);
+    } catch (err) {
+        console.error('Ошибка опроса фильтров:', err);
     }
 }
 
@@ -95,7 +139,6 @@ async function pollStatus() {
 async function handleConnectClick() {
     const btn = $('connect-btn');
     const action = btn.dataset.action;
-
     btn.disabled = true;
 
     try {
@@ -121,7 +164,16 @@ async function handleConnectClick() {
 
 window.addEventListener('DOMContentLoaded', async () => {
     await loadStrategies();
+
+    // Сначала получаем статус — чтобы в dropdown сразу встала активная стратегия
     await pollStatus();
-    setInterval(pollStatus, 2000);
+    await pollFilters();
+
+    // Поллинг каждые 2 секунды
+    setInterval(async () => {
+        await pollStatus();
+        await pollFilters();
+    }, 2000);
+
     $('connect-btn').addEventListener('click', handleConnectClick);
 });
