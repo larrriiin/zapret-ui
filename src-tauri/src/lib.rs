@@ -23,12 +23,15 @@ struct FiltersStatus {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Ищет папку binaries/ рядом с exe (продакшен) или поднимаясь вверх (dev).
+/// Ищет папку binaries/:
+/// 1. Поднимается вверх от exe (продакшен и dev-режим)
+/// 2. Проверяет текущую рабочую директорию
 fn find_binaries_dir() -> PathBuf {
+    // Обход дерева вверх от исполняемого файла
     if let Ok(exe) = std::env::current_exe() {
         let mut dir = exe.parent().map(|p| p.to_path_buf());
-        for _ in 0..4 {
-            if let Some(d) = dir {
+        for _ in 0..5 {
+            if let Some(d) = &dir {
                 let candidate = d.join("binaries");
                 if candidate.exists() {
                     return candidate;
@@ -39,6 +42,15 @@ fn find_binaries_dir() -> PathBuf {
             }
         }
     }
+
+    // Проверяем текущую рабочую директорию (работает в `tauri dev`)
+    if let Ok(cwd) = std::env::current_dir() {
+        let candidate = cwd.join("binaries");
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
     PathBuf::from("binaries")
 }
 
@@ -55,7 +67,7 @@ fn is_winws_running() -> bool {
     }
 }
 
-/// Пытается прочитать активную стратегию из реестра Windows
+/// Читает активную стратегию из реестра Windows
 /// (записывается при установке zapret как Windows-сервис).
 fn get_strategy_from_registry() -> Option<String> {
     let out = Command::new("reg")
@@ -69,8 +81,7 @@ fn get_strategy_from_registry() -> Option<String> {
         .ok()?;
 
     let stdout = String::from_utf8_lossy(&out.stdout);
-
-    // Строка выглядит как: "    zapret-discord-youtube    REG_SZ    general (ALT)"
+    // Строка: "    zapret-discord-youtube    REG_SZ    general (ALT)"
     for line in stdout.lines() {
         if line.contains("REG_SZ") {
             if let Some(pos) = line.find("REG_SZ") {
@@ -116,7 +127,6 @@ fn get_strategies() -> Result<Vec<String>, String> {
 }
 
 /// Текущий статус zapret: запущен ли и какая стратегия.
-/// Если запущен внешне — пробуем определить стратегию из реестра.
 #[tauri::command]
 fn get_zapret_status(state: State<'_, AppState>) -> ZapretStatus {
     let running = is_winws_running();
@@ -127,12 +137,8 @@ fn get_zapret_status(state: State<'_, AppState>) -> ZapretStatus {
         return ZapretStatus { running: false, strategy: None };
     }
 
-    // Уже знаем стратегию (запустили сами)
     if strategy_lock.is_some() {
-        return ZapretStatus {
-            running: true,
-            strategy: strategy_lock.clone(),
-        };
+        return ZapretStatus { running: true, strategy: strategy_lock.clone() };
     }
 
     // Пробуем определить из реестра (если запущен как Windows-сервис)
@@ -141,31 +147,33 @@ fn get_zapret_status(state: State<'_, AppState>) -> ZapretStatus {
         *strategy_lock = from_reg.clone();
     }
 
-    ZapretStatus {
-        running: true,
-        strategy: from_reg,
-    }
+    ZapretStatus { running: true, strategy: from_reg }
 }
 
-/// Состояние Game Filter и IPSet Filter.
+/// Состояние Game Filter и IPSet Filter по файлам конфигурации.
 #[tauri::command]
 fn get_filters_status() -> FiltersStatus {
     let dir = find_binaries_dir();
 
-    // ── Game Filter ──
+    // ── Game Filter: binaries/utils/game_filter.enabled ──
     let game_flag = dir.join("utils").join("game_filter.enabled");
     let game_filter = if !game_flag.exists() {
         "disabled".to_string()
     } else {
         let content = std::fs::read_to_string(&game_flag).unwrap_or_default();
-        match content.trim().to_lowercase().as_str() {
+        // Убираем BOM, пробелы, CRLF
+        let mode = content
+            .trim_start_matches('\u{FEFF}')
+            .trim()
+            .to_lowercase();
+        match mode.as_str() {
             "tcp" => "tcp".to_string(),
             "udp" => "udp".to_string(),
-            _ => "all".to_string(), // "all" или любое другое значение
+            _ => "all".to_string(),
         }
     };
 
-    // ── IPSet Filter ──
+    // ── IPSet Filter: binaries/lists/ipset-all.txt ──
     let ipset_file = dir.join("lists").join("ipset-all.txt");
     let ipset = if !ipset_file.exists() {
         "any".to_string()
@@ -187,10 +195,8 @@ fn get_filters_status() -> FiltersStatus {
 /// Запускает стратегию по имени .bat файла.
 #[tauri::command]
 fn start_zapret(strategy: String, state: State<'_, AppState>) -> Result<String, String> {
-    // Останавливаем предыдущий процесс и сервис
+    // Убиваем текущий процесс (без прав сервис остановится через bat)
     let _ = Command::new("taskkill").args(["/f", "/im", "winws.exe"]).output();
-    let _ = Command::new("net").args(["stop", "zapret"]).output();
-    let _ = Command::new("sc").args(["delete", "zapret"]).output();
 
     let bat_path = find_binaries_dir().join(format!("{}.bat", strategy));
     if !bat_path.exists() {
@@ -211,13 +217,40 @@ fn start_zapret(strategy: String, state: State<'_, AppState>) -> Result<String, 
     Ok("Connected".into())
 }
 
-/// Полностью останавливает zapret:
-/// убивает winws.exe, останавливает и удаляет Windows-сервис.
+/// Полностью останавливает zapret.
+/// Требует прав администратора — запрашивает их через PowerShell -Verb RunAs.
 #[tauri::command]
 fn stop_zapret(state: State<'_, AppState>) {
-    let _ = Command::new("taskkill").args(["/f", "/im", "winws.exe"]).output();
-    let _ = Command::new("net").args(["stop", "zapret"]).output();
-    let _ = Command::new("sc").args(["delete", "zapret"]).output();
+    // Пишем bat-файл со всеми командами остановки во временную папку
+    let bat_path = std::env::temp_dir().join("zapret_stop.bat");
+
+    let bat_content = concat!(
+        "@echo off\r\n",
+        // Останавливаем и удаляем сервис zapret
+        "net stop zapret 2>nul\r\n",
+        "sc delete zapret 2>nul\r\n",
+        // Убиваем процесс winws.exe
+        "taskkill /F /IM winws.exe 2>nul\r\n",
+        // Останавливаем и удаляем WinDivert
+        "net stop WinDivert 2>nul\r\n",
+        "sc delete WinDivert 2>nul\r\n",
+        "net stop WinDivert14 2>nul\r\n",
+        "sc delete WinDivert14 2>nul\r\n"
+    );
+
+    if std::fs::write(&bat_path, bat_content).is_ok() {
+        // Запускаем bat с правами администратора через PowerShell RunAs.
+        // %TEMP% в аргументе cmd.exe раскрывается самим cmd, избегая проблем с пробелами в пути.
+        let _ = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-WindowStyle", "Hidden",
+                "-Command",
+                "Start-Process cmd.exe -ArgumentList '/c %TEMP%\\zapret_stop.bat' -Verb RunAs -Wait -WindowStyle Hidden",
+            ])
+            .output();
+    }
+
     *state.active_strategy.lock().unwrap() = None;
 }
 
