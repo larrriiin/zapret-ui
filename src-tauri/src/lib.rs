@@ -597,6 +597,24 @@ fn start_zapret(strategy: String, mode: String, state: State<'_, AppState>) -> R
         return Err(format!("Файл стратегии не найден: {}.bat", strategy));
     }
 
+    // Убеждаемся, что пользовательские списки существуют, иначе winws не запустится
+    let lists_dir = dir.join("lists");
+    if !lists_dir.exists() {
+        let _ = std::fs::create_dir_all(&lists_dir);
+    }
+    let ipset_user = lists_dir.join("ipset-exclude-user.txt");
+    if !ipset_user.exists() {
+        let _ = std::fs::write(&ipset_user, "203.0.113.113/32\r\n");
+    }
+    let list_general_user = lists_dir.join("list-general-user.txt");
+    if !list_general_user.exists() {
+        let _ = std::fs::write(&list_general_user, "domain.example.abc\r\n");
+    }
+    let list_exclude_user = lists_dir.join("list-exclude-user.txt");
+    if !list_exclude_user.exists() {
+        let _ = std::fs::write(&list_exclude_user, "domain.example.abc\r\n");
+    }
+
     if mode == "service" {
         let args = parse_bat_args(&strategy)?;
         let bin_path = dir.join("bin").join("winws.exe");

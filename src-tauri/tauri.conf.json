@@ -39,6 +39,7 @@
     ],
     "windows": {
       "nsis": {
+        "installerIcon": "icons/icon.ico",
         "installMode": "both",
         "compression": "lzma",
         "languages": ["English", "Russian"]
