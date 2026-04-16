@@ -731,26 +731,65 @@ window.addEventListener('DOMContentLoaded', async () => {
     $('update-now').addEventListener('click', async () => {
         const statusEl = $('update-status');
         const updateNowBtn = $('update-now');
-        
+
         statusEl.classList.remove('hidden');
-        statusEl.textContent = 'Downloading and installing...';
         statusEl.className = 'mt-4 text-sm text-secondary';
         updateNowBtn.disabled = true;
-        
+
+        let zapretWasRunning = false;
+        let zapretStrategy = null;
+        let zapretMode = 'service';
+
         try {
+            // 1. Check if zapret is currently running
+            statusEl.textContent = 'Checking service status...';
+            const status = await invoke('get_zapret_status');
+            if (status.running) {
+                zapretWasRunning = true;
+                zapretStrategy = status.strategy;
+                zapretMode = status.mode || 'service';
+
+                statusEl.textContent = 'Stopping zapret before update...';
+                await invoke('stop_zapret');
+            }
+
+            // 2. Download and install
+            statusEl.textContent = 'Downloading and installing update...';
             const result = await invoke('download_and_install_update');
-            statusEl.textContent = result;
+
             statusEl.className = 'mt-4 text-sm text-secondary';
-            
-            // Show restart button instead of update button
-            updateNowBtn.textContent = 'Restart App';
+
+            // 3. Restart if was running
+            if (zapretWasRunning && zapretStrategy) {
+                statusEl.textContent = 'Update installed. Restarting zapret...';
+                try {
+                    await invoke('start_zapret', { strategy: zapretStrategy, mode: zapretMode });
+                    await pollStatus();
+                    statusEl.textContent = result + ' Zapret restarted successfully.';
+                } catch (restartErr) {
+                    statusEl.textContent = result + ' Warning: failed to restart zapret: ' + restartErr;
+                    statusEl.className = 'mt-4 text-sm text-primary';
+                }
+            } else {
+                statusEl.textContent = result;
+            }
+
+            updateNowBtn.textContent = 'Done';
             updateNowBtn.disabled = false;
-            updateNowBtn.onclick = () => {
-                location.reload();
-            };
+            updateNowBtn.onclick = () => hideUpdateModal();
+
         } catch (err) {
             statusEl.textContent = 'Error: ' + err;
             statusEl.className = 'mt-4 text-sm text-error-dim';
+
+            // Try to restore zapret even if update failed
+            if (zapretWasRunning && zapretStrategy) {
+                try {
+                    await invoke('start_zapret', { strategy: zapretStrategy, mode: zapretMode });
+                    await pollStatus();
+                } catch (_) {}
+            }
+
             updateNowBtn.disabled = false;
         }
     });
@@ -1019,8 +1058,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
     
     if (cancelTestsBtn) {
-        cancelTestsBtn.addEventListener('click', () => {
-            testsStatus.textContent = 'Cancel requested...';
+        cancelTestsBtn.addEventListener('click', async () => {
+            testsStatus.textContent = 'Cancelling...';
+            cancelTestsBtn.disabled = true;
+            try {
+                await invoke('cancel_tests');
+            } catch (err) {
+                console.error('Cancel error:', err);
+            }
         });
     }
 });

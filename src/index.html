@@ -334,36 +334,38 @@
     <div id="section-ips" class="hidden fixed top-[30px] right-0 bottom-0 left-0 ml-20 pt-20 overflow-y-auto bg-surface z-10 p-8 space-y-6">
         <h2 class="font-headline text-2xl font-bold text-primary mb-4">IP Settings</h2>
         
-        <!-- Update IPSet List Button -->
-        <div class="glass-panel rounded-2xl border border-primary/10 p-6 max-w-2xl">
-            <div class="flex items-center justify-between">
-                <div>
-                    <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-secondary">Update IPSet List</h3>
-                    <p class="text-xs text-on-surface-variant mt-1">Download latest IP ranges from remote source</p>
+        <div class="grid grid-cols-2 gap-6 items-start">
+            <!-- Update IPSet List Button -->
+            <div class="glass-panel rounded-2xl border border-primary/10 p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-secondary">Update IPSet List</h3>
+                        <p class="text-xs text-on-surface-variant mt-1">Download latest IP ranges from remote source</p>
+                    </div>
+                    <button id="ipset-update-btn" class="px-6 py-3 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors flex items-center gap-2">
+                        <span class="material-symbols-outlined text-sm">download</span>
+                        Update
+                    </button>
                 </div>
-                <button id="ipset-update-btn" class="px-6 py-3 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors flex items-center gap-2">
-                    <span class="material-symbols-outlined text-sm">download</span>
-                    Update
-                </button>
+                <div id="ipset-update-status" class="hidden mt-4 text-sm"></div>
             </div>
-            <div id="ipset-update-status" class="hidden mt-4 text-sm"></div>
-        </div>
 
-        <!-- IP Exclude List -->
-        <div class="glass-panel rounded-2xl border border-primary/10 p-6 max-w-2xl">
-            <div class="flex items-center justify-between mb-4">
-                <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-tertiary">IP Exclude</h3>
-                <span class="material-symbols-outlined text-tertiary">block</span>
-            </div>
-            <div class="flex gap-2 mb-4">
-                <input type="text" id="ip-exclude-input" placeholder="192.168.1.1 or 10.0.0.0/24" 
-                    class="flex-1 bg-surface-container-highest border border-outline-variant/30 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary/50">
-                <button id="ip-exclude-add" class="px-4 py-2 bg-tertiary rounded-xl text-white font-bold text-xs uppercase tracking-wider hover:opacity-80 transition-colors">
-                    Add
-                </button>
-            </div>
-            <div id="ip-exclude-list" class="space-y-2 max-h-[400px] overflow-y-auto">
-                <!-- Dynamic list -->
+            <!-- IP Exclude List -->
+            <div class="glass-panel rounded-2xl border border-primary/10 p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-tertiary">IP Exclude</h3>
+                    <span class="material-symbols-outlined text-tertiary">block</span>
+                </div>
+                <div class="flex gap-2 mb-4">
+                    <input type="text" id="ip-exclude-input" placeholder="192.168.1.1 or 10.0.0.0/24"
+                        class="flex-1 bg-surface-container-highest border border-outline-variant/30 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary/50">
+                    <button id="ip-exclude-add" class="px-4 py-2 bg-tertiary rounded-xl text-white font-bold text-xs uppercase tracking-wider hover:opacity-80 transition-colors">
+                        Add
+                    </button>
+                </div>
+                <div id="ip-exclude-list" class="space-y-2 max-h-[400px] overflow-y-auto">
+                    <!-- Dynamic list -->
+                </div>
             </div>
         </div>
     </div>

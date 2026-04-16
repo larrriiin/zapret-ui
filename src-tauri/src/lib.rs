@@ -16,6 +16,7 @@ const GITHUB_RELEASE_URL: &str = "https://github.com/Flowseal/zapret-discord-you
 
 struct AppState {
     active_strategy: Mutex<Option<String>>,
+    test_process_pid: Mutex<Option<u32>>,
 }
 
 #[derive(serde::Serialize)]
@@ -1402,6 +1403,21 @@ struct TestProgress {
     config_name: String,
 }
 
+/// Cancels a running test process
+#[tauri::command]
+fn cancel_tests(state: State<'_, AppState>) {
+    let mut pid_lock = state.test_process_pid.lock().unwrap();
+    if let Some(pid) = pid_lock.take() {
+        // Kill process tree (/T = tree, /F = force)
+        let _ = Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .output();
+    }
+    // Remove temp script if it still exists
+    let temp_script = find_binaries_dir().join("utils").join("test_zapret_ui.ps1");
+    let _ = std::fs::remove_file(&temp_script);
+}
+
 /// Runs configuration tests with real-time streaming output via Tauri events
 #[tauri::command]
 async fn run_tests(app: tauri::AppHandle, test_type: String, test_mode: String) -> Result<Vec<TestResult>, String> {
@@ -1442,7 +1458,13 @@ async fn run_tests(app: tauri::AppHandle, test_type: String, test_mode: String) 
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Failed to spawn test process: {}", e))?;
-    
+
+    // Store PID so cancel_tests / window-close can kill the process
+    {
+        let mut pid_lock = app.state::<AppState>().test_process_pid.lock().unwrap();
+        *pid_lock = Some(child.id());
+    }
+
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
     let reader = BufReader::new(stdout);
     
@@ -1480,7 +1502,13 @@ async fn run_tests(app: tauri::AppHandle, test_type: String, test_mode: String) 
     }
     
     let _ = child.wait();
-    
+
+    // Clear PID — process finished (or was killed)
+    {
+        let mut pid_lock = app.state::<AppState>().test_process_pid.lock().unwrap();
+        *pid_lock = None;
+    }
+
     // Clean up temp script
     let _ = std::fs::remove_file(&temp_script);
     
@@ -1547,6 +1575,19 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             active_strategy: Mutex::new(None),
+            test_process_pid: Mutex::new(None),
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                // Kill any running test process when the window is closed
+                let state = window.app_handle().state::<AppState>();
+                let mut pid_lock = state.test_process_pid.lock().unwrap();
+                if let Some(pid) = pid_lock.take() {
+                    let _ = Command::new("taskkill")
+                        .args(["/F", "/T", "/PID", &pid.to_string()])
+                        .output();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_strategies,
@@ -1567,6 +1608,7 @@ pub fn run() {
             clear_discord_cache,
             check_admin_privileges,
             run_tests,
+            cancel_tests,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
