@@ -3,7 +3,12 @@ function invoke(cmd, args) {
     return window.__TAURI__.core.invoke(cmd, args);
 }
 
+const listen = (event, handler) => {
+    return window.__TAURI__.event.listen(event, handler);
+}
+
 const $ = id => document.getElementById(id);
+
 
 // ─── Custom Strategy Dropdown ─────────────────────────────────────────────────
 
@@ -524,6 +529,61 @@ window.addEventListener('DOMContentLoaded', async () => {
     await loadStrategies();
     initStrategyDropdown();
 
+    // Check if binaries are present (first launch)
+    try {
+        const binariesPresent = await invoke('ensure_binaries_present');
+        if (!binariesPresent) {
+            // Show first-launch modal and auto-download
+            const modal = $('first-launch-modal');
+            const statusEl = $('first-launch-status');
+            const progressBar = $('first-launch-progress-bar');
+            const progressText = $('first-launch-progress-text');
+            
+            if (modal) modal.classList.remove('hidden');
+            if (statusEl) statusEl.textContent = 'Initializing download...';
+
+            listen('download-progress', (event) => {
+                const pct = event.payload;
+                if (progressBar) progressBar.style.width = pct + '%';
+                if (progressText) progressText.textContent = pct + '%';
+                if (statusEl && pct < 90) statusEl.textContent = 'Downloading core components...';
+                if (statusEl && pct >= 90) statusEl.textContent = 'Extracting and installing...';
+            });
+
+            try {
+                await invoke('download_and_install_update');
+                if (statusEl) statusEl.textContent = 'Installation complete! Reloading...';
+                if (progressBar) progressBar.style.width = '100%';
+                if (progressText) progressText.textContent = '100%';
+                await new Promise(r => setTimeout(r, 1000));
+                location.reload();
+            } catch(err) {
+                if (statusEl) statusEl.textContent = 'Download failed: ' + err + '\n\nPlease check your internet connection and restart the app.';
+            }
+            return; 
+        }
+    } catch (err) {
+        console.error('Failed to check binaries:', err);
+    }
+
+    
+    // Load versions dynamically
+    try {
+        const localVersion = await invoke('get_local_version_cmd');
+        const uiVersion = await invoke('get_ui_version_cmd');
+        
+        const versionDisplays = ['version-display', 'latest-version-number', 'update-current-version'];
+        versionDisplays.forEach(id => {
+            const el = $(id);
+            if (el) el.textContent = id === 'version-display' ? 'v' + localVersion : localVersion;
+        });
+
+        const uiEl = $('ui-version-display');
+        if (uiEl) uiEl.textContent = 'v' + uiVersion;
+    } catch (e) {
+        console.error('Failed to get versions:', e);
+    }
+
     // Сначала получаем статус — чтобы в dropdown сразу встала активная стратегия
     await pollStatus();
     await pollFilters();
@@ -731,26 +791,96 @@ window.addEventListener('DOMContentLoaded', async () => {
     $('update-now').addEventListener('click', async () => {
         const statusEl = $('update-status');
         const updateNowBtn = $('update-now');
-        
+
         statusEl.classList.remove('hidden');
-        statusEl.textContent = 'Downloading and installing...';
         statusEl.className = 'mt-4 text-sm text-secondary';
         updateNowBtn.disabled = true;
-        
+
+        let zapretWasRunning = false;
+        let zapretStrategy = null;
+        let zapretMode = 'service';
+
         try {
-            const result = await invoke('download_and_install_update');
-            statusEl.textContent = result;
-            statusEl.className = 'mt-4 text-sm text-secondary';
+            // 1. Check if zapret is currently running
+            statusEl.textContent = 'Checking service status...';
+            const status = await invoke('get_zapret_status');
+            if (status.running) {
+                zapretWasRunning = true;
+                zapretStrategy = status.strategy;
+                zapretMode = status.mode || 'service';
+
+                statusEl.textContent = 'Stopping zapret before update...';
+                await invoke('stop_zapret');
+            }
+
+            // 2. Download and install
+            const progressContainer = $('update-status-container');
+            const progressText = $('update-progress-text');
+            const progressBar = $('update-progress-bar');
             
-            // Show restart button instead of update button
-            updateNowBtn.textContent = 'Restart App';
+            if (progressContainer) {
+                progressContainer.classList.remove('hidden');
+                statusEl.textContent = 'Downloading and installing update...';
+            }
+
+            const unlisten = await listen('download-progress', (event) => {
+                const pct = event.payload;
+                if (progressBar) progressBar.style.width = pct + '%';
+                if (progressText) progressText.textContent = pct + '%';
+                if (statusEl && pct >= 90) statusEl.textContent = 'Extracting and installing...';
+            });
+
+            const result = await invoke('download_and_install_update');
+            if (unlisten) unlisten();
+
+            if (progressBar) progressBar.style.width = '100%';
+            if (progressText) progressText.textContent = '100%';
+            statusEl.className = 'text-xs text-secondary font-mono mb-3 text-center';
+
+            // 3. Restart if was running
+            if (zapretWasRunning && zapretStrategy) {
+                statusEl.textContent = 'Update installed. Restarting zapret...';
+                try {
+                    await invoke('start_zapret', { strategy: zapretStrategy, mode: zapretMode });
+                    await pollStatus();
+                    statusEl.textContent = result + ' Zapret restarted successfully.';
+                } catch (restartErr) {
+                    statusEl.textContent = result + ' Warning: failed to restart: ' + restartErr;
+                    statusEl.className = 'text-xs text-primary font-mono mb-3 text-center';
+                }
+            } else {
+                statusEl.textContent = result;
+            }
+
+            // Update the local version string on UI immediately
+            try {
+                const refreshedVersion = await invoke('get_local_version_cmd');
+                const versionDisplays = ['version-display', 'latest-version-number', 'update-current-version'];
+                versionDisplays.forEach(id => {
+                    const el = $(id);
+                    if (el) el.textContent = id === 'version-display' ? 'v' + refreshedVersion : refreshedVersion;
+                });
+            } catch (e) {
+                console.error("Failed to refresh version:", e);
+            }
+
+            updateNowBtn.textContent = 'Done';
             updateNowBtn.disabled = false;
-            updateNowBtn.onclick = () => {
-                location.reload();
-            };
+            updateNowBtn.onclick = () => location.reload(); // Reload after update to refresh versions
+
+
         } catch (err) {
             statusEl.textContent = 'Error: ' + err;
             statusEl.className = 'mt-4 text-sm text-error-dim';
+
+            // Try to restore zapret even if update failed
+            if (zapretWasRunning && zapretStrategy) {
+                try {
+                    await invoke('start_zapret', { strategy: zapretStrategy, mode: zapretMode });
+                    await pollStatus();
+                } catch (_) {}
+            }
+
             updateNowBtn.disabled = false;
         }
     });
@@ -1019,8 +1149,38 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
     
     if (cancelTestsBtn) {
-        cancelTestsBtn.addEventListener('click', () => {
-            testsStatus.textContent = 'Cancel requested...';
+        cancelTestsBtn.addEventListener('click', async () => {
+            testsStatus.textContent = 'Cancelling...';
+            cancelTestsBtn.disabled = true;
+            try {
+                await invoke('cancel_tests');
+            } catch (err) {
+                console.error('Cancel error:', err);
+            }
+        });
+    }
+
+    const checkStatusBtn = $('check-status-btn');
+    const statusModal = $('status-modal');
+    const statusContent = $('status-content');
+    const statusModalClose = $('status-modal-close');
+
+    if (checkStatusBtn && statusModal && statusContent) {
+        checkStatusBtn.addEventListener('click', async () => {
+            statusContent.textContent = 'Checking status in real-time...';
+            statusModal.classList.remove('hidden');
+            try {
+                const status = await invoke('check_status_full');
+                statusContent.textContent = status;
+            } catch (err) {
+                statusContent.textContent = 'Error checking status: ' + err;
+            }
+        });
+    }
+
+    if (statusModalClose && statusModal) {
+        statusModalClose.addEventListener('click', () => {
+            statusModal.classList.add('hidden');
         });
     }
 });

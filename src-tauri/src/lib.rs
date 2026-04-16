@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
+use tauri::Manager;
 use tauri::State;
 use tauri::Emitter;
 use std::io::{BufRead, BufReader};
@@ -10,12 +11,12 @@ use std::process::Stdio;
 use std::os::windows::process::CommandExt;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
-const LOCAL_VERSION: &str = "1.9.7b";
 const GITHUB_VERSION_URL: &str = "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt";
 const GITHUB_RELEASE_URL: &str = "https://github.com/Flowseal/zapret-discord-youtube/releases/latest";
 
 struct AppState {
     active_strategy: Mutex<Option<String>>,
+    test_process_pid: Mutex<Option<u32>>,
 }
 
 #[derive(serde::Serialize)]
@@ -35,11 +36,18 @@ struct FiltersStatus {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Ищет папку binaries/:
-/// 1. Поднимается вверх от exe (продакшен и dev-режим)
-/// 2. Проверяет текущую рабочую директорию
 fn find_binaries_dir() -> PathBuf {
-    // Обход дерева вверх от исполняемого файла
+    // 1. Direct sibling of the exe (production after first download)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let candidate = parent.join("binaries");
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+
+    // 2. Climb up from exe (dev mode: exe is deep inside src-tauri/target/debug)
     if let Ok(exe) = std::env::current_exe() {
         let mut dir = exe.parent().map(|p| p.to_path_buf());
         for _ in 0..5 {
@@ -55,7 +63,7 @@ fn find_binaries_dir() -> PathBuf {
         }
     }
 
-    // Проверяем текущую рабочую директорию (работает в `tauri dev`)
+    // 3. CWD fallback (tauri dev)
     if let Ok(cwd) = std::env::current_dir() {
         let candidate = cwd.join("binaries");
         if candidate.exists() {
@@ -63,7 +71,73 @@ fn find_binaries_dir() -> PathBuf {
         }
     }
 
+    // 4. Default: next to exe (will be created on first download)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            return parent.join("binaries");
+        }
+    }
+
     PathBuf::from("binaries")
+}
+
+fn get_local_version() -> String {
+    let dir = find_binaries_dir();
+    let service_bat = dir.join("service.bat");
+    if let Ok(content) = std::fs::read_to_string(service_bat) {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.to_lowercase().starts_with("set \"local_version=") {
+                let parts: Vec<&str> = trimmed.split('=').collect();
+                if parts.len() > 1 {
+                    let version = parts[1].trim_matches('"');
+                    return version.to_string();
+                }
+            }
+        }
+    }
+    "Unknown".to_string()
+}
+
+#[tauri::command]
+fn get_local_version_cmd() -> String {
+    get_local_version()
+}
+
+fn get_ui_version() -> String {
+    // 1. Check bundled resources path in production (version.txt IS bundled here)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let version_file = parent.join("resources").join("version.txt");
+            if let Ok(v) = std::fs::read_to_string(&version_file) {
+                return v.trim().to_string();
+            }
+        }
+    }
+
+    // 2. Check next to binaries/ (dev mode)
+    let bin_dir = find_binaries_dir();
+    if let Some(root) = bin_dir.parent() {
+        let version_file = root.join("version.txt");
+        if let Ok(v) = std::fs::read_to_string(version_file) {
+            return v.trim().to_string();
+        }
+    }
+    "0.1.0".to_string()
+}
+
+#[tauri::command]
+fn get_ui_version_cmd() -> String {
+    get_ui_version()
+}
+
+#[tauri::command]
+fn ensure_binaries_present() -> bool {
+    let bin_dir = find_binaries_dir();
+    // In production, binaries is a folder inside resources.
+    // In dev, it's next to src-tauri.
+    // find_binaries_dir already handles this.
+    bin_dir.exists() && bin_dir.join("service.bat").exists()
 }
 
 fn parse_bat_args(strategy: &str) -> Result<String, String> {
@@ -153,6 +227,7 @@ fn parse_bat_args(strategy: &str) -> Result<String, String> {
 fn is_zapret_service_running() -> bool {
     let output = Command::new("sc")
         .args(["query", "zapret"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     match output {
         Ok(out) => {
@@ -166,6 +241,7 @@ fn is_zapret_service_running() -> bool {
 fn is_winws_running() -> bool {
     let output = Command::new("tasklist")
         .args(["/fi", "IMAGENAME eq winws.exe", "/fo", "csv", "/nh"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     match output {
         Ok(out) => String::from_utf8_lossy(&out.stdout)
@@ -185,6 +261,7 @@ fn get_strategy_from_registry() -> Option<String> {
             "/v",
             "zapret-discord-youtube",
         ])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .ok()?;
 
@@ -204,6 +281,81 @@ fn get_strategy_from_registry() -> Option<String> {
 }
 
 // ─── Commands ─────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn check_status_full() -> Result<String, String> {
+    let mut output = String::new();
+
+    // 1. Check Strategy
+    let reg_out = Command::new("reg")
+        .args(["query", "HKLM\\System\\CurrentControlSet\\Services\\zapret", "/v", "zapret-discord-youtube"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    if let Ok(out) = reg_out {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        for line in stdout.lines() {
+            if let Some(pos) = line.find("REG_SZ") {
+                let strategy = line[pos + "REG_SZ".len()..].trim();
+                if !strategy.is_empty() {
+                    output.push_str(&format!("Service strategy installed from \"{}\"\n", strategy));
+                }
+                break;
+            }
+        }
+    }
+
+    // 2. Check zapret service
+    let zapret_svc = Command::new("sc").args(["query", "zapret"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    if let Ok(out) = zapret_svc {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        if stdout.contains("RUNNING") {
+            output.push_str("\"zapret\" service is RUNNING.\n");
+        } else if stdout.contains("STOPPED") {
+            output.push_str("\"zapret\" service is STOPPED.\n");
+        } else if stdout.contains("FAILED 1060") || stdout.contains("1060") {
+             // 1060 means service does not exist
+        } else {
+            // Might be start_pending or other
+            output.push_str(&format!("\"zapret\" service state is UNKNOWN.\n"));
+        }
+    }
+
+    // 3. Check WinDivert service
+    let windivert_svc = Command::new("sc").args(["query", "WinDivert"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    if let Ok(out) = windivert_svc {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        if stdout.contains("RUNNING") {
+            output.push_str("\"WinDivert\" service is RUNNING.\n");
+        } else if stdout.contains("STOPPED") {
+            output.push_str("\"WinDivert\" service is STOPPED.\n");
+        }
+    }
+
+    // 4. Check bypass (winws.exe)
+    output.push_str("\n");
+    let task = Command::new("tasklist").args(["/FI", "IMAGENAME eq winws.exe"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    if let Ok(out) = task {
+        let stdout = String::from_utf8_lossy(&out.stdout).to_lowercase();
+        if stdout.contains("winws.exe") {
+            output.push_str("Bypass (winws.exe) is RUNNING.\n");
+        } else {
+            output.push_str("Bypass (winws.exe) is NOT running.\n");
+        }
+    }
+
+    let trimmed = output.trim().to_string();
+    if trimmed.is_empty() {
+        Ok("Zapret service is not installed.".to_string())
+    } else {
+        Ok(trimmed)
+    }
+}
 
 /// Список стратегий — имена .bat файлов из binaries/ (без service.bat).
 #[tauri::command]
@@ -435,7 +587,9 @@ fn set_ipset_filter(mode: String) -> Result<(), String> {
 #[tauri::command]
 fn start_zapret(strategy: String, mode: String, state: State<'_, AppState>) -> Result<String, String> {
     // Убиваем текущий процесс
-    let _ = Command::new("taskkill").args(["/f", "/im", "winws.exe"]).output();
+    let _ = Command::new("taskkill").args(["/f", "/im", "winws.exe"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
 
     let dir = find_binaries_dir();
     let bat_path = dir.join(format!("{}.bat", strategy));
@@ -453,8 +607,14 @@ fn start_zapret(strategy: String, mode: String, state: State<'_, AppState>) -> R
             return Err("Не удалось распарсить аргументы из bat файла".to_string());
         }
 
+        let bin_dir_path = std::path::Path::new(&bin_str).parent().unwrap_or(std::path::Path::new(""));
+        let bin_name = std::path::Path::new(&bin_str).file_name().unwrap_or_default().to_str().unwrap_or("winws.exe");
+
         let bat_content = format!(
             "@echo off\r\n\
+             echo Initializing WinDivert driver (elevated probe)...\r\n\
+             cd /d \"{}\"\r\n\
+             \"{}\" --version >nul 2>&1\r\n\
              echo Stopping existing service...\r\n\
              net stop zapret 2>nul\r\n\
              sc delete zapret 2>nul\r\n\
@@ -464,12 +624,13 @@ fn start_zapret(strategy: String, mode: String, state: State<'_, AppState>) -> R
              echo Starting service...\r\n\
              sc start zapret\r\n\
              if %errorlevel% neq 0 (\r\n\
-                 echo Failed to start service\r\n\
+                 echo Failed to start service. Checking error...\r\n\
+                 sc query zapret\r\n\
                  exit /b 1\r\n\
              )\r\n\
              echo Service started successfully\r\n\
              reg add \"HKLM\\System\\CurrentControlSet\\Services\\zapret\" /v zapret-discord-youtube /t REG_SZ /d \"{}\" /f\r\n",
-             bin_str, args, strategy
+             bin_dir_path.display(), bin_name, bin_str, args, strategy
         );
 
         let bat_path = std::env::temp_dir().join("zapret_start.bat");
@@ -541,7 +702,6 @@ fn stop_zapret(state: State<'_, AppState>) {
 
     if std::fs::write(&bat_path, bat_content).is_ok() {
         // Запускаем bat с правами администратора через PowerShell RunAs.
-        // %TEMP% в аргументе cmd.exe раскрывается самим cmd, избегая проблем с пробелами в пути.
         let _ = Command::new("powershell")
             .args([
                 "-NoProfile",
@@ -549,6 +709,7 @@ fn stop_zapret(state: State<'_, AppState>) {
                 "-Command",
                 "Start-Process cmd.exe -ArgumentList '/c %TEMP%\\zapret_stop.bat' -Verb RunAs -Wait -WindowStyle Hidden",
             ])
+            .creation_flags(CREATE_NO_WINDOW)
             .output();
     }
 
@@ -664,6 +825,7 @@ async fn update_ipset_list() -> Result<String, String> {
     let output = if curl_path.exists() {
         Command::new(curl_path)
             .args(["-L", "-o", list_file.to_str().unwrap_or(""), url])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
     } else {
         // Fallback to PowerShell
@@ -674,6 +836,7 @@ async fn update_ipset_list() -> Result<String, String> {
         );
         Command::new("powershell")
             .args(["-NoProfile", "-Command", &ps_cmd])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
     };
     
@@ -712,30 +875,32 @@ async fn check_for_updates() -> Result<UpdateCheckResult, String> {
     
     let output = Command::new("powershell")
         .args(["-NoProfile", "-Command", &ps_cmd])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     
     match output {
         Ok(out) if out.status.success() => {
             let latest = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let local_version = get_local_version();
             if latest.is_empty() || latest == "$null" {
                 return Ok(UpdateCheckResult {
-                    current_version: LOCAL_VERSION.to_string(),
+                    current_version: local_version,
                     latest_version: None,
                     has_update: false,
                     download_url: GITHUB_RELEASE_URL.to_string(),
                 });
             }
             
-            let has_update = latest != LOCAL_VERSION;
+            let has_update = latest != local_version;
             Ok(UpdateCheckResult {
-                current_version: LOCAL_VERSION.to_string(),
+                current_version: local_version,
                 latest_version: Some(latest),
                 has_update,
                 download_url: GITHUB_RELEASE_URL.to_string(),
             })
         }
         _ => Ok(UpdateCheckResult {
-            current_version: LOCAL_VERSION.to_string(),
+            current_version: get_local_version(),
             latest_version: None,
             has_update: false,
             download_url: GITHUB_RELEASE_URL.to_string(),
@@ -743,94 +908,146 @@ async fn check_for_updates() -> Result<UpdateCheckResult, String> {
     }
 }
 
-/// Downloads and installs the latest update
-/// Preserves user list files during update
 #[tauri::command]
-async fn download_and_install_update() -> Result<String, String> {
+async fn download_and_install_update(window: tauri::Window) -> Result<String, String> {
     let dir = find_binaries_dir();
     let temp_dir = std::env::temp_dir().join("zapret_update");
     
     // Create temp directory
+    let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir)
         .map_err(|e| format!("Failed to create temp dir: {}", e))?;
     
     // Backup user files
-    let user_files = ["ipset-exclude-user.txt", "list-exclude-user.txt", "list-general-user.txt"];
     let lists_dir = dir.join("lists");
     let backup_dir = temp_dir.join("backup");
     std::fs::create_dir_all(&backup_dir).ok();
     
-    for file in &user_files {
-        let src = lists_dir.join(file);
-        if src.exists() {
-            std::fs::copy(&src, backup_dir.join(file)).ok();
+    if lists_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&lists_dir) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    if name.contains("user") {
+                        let _ = std::fs::copy(entry.path(), backup_dir.join(name));
+                    }
+                }
+            }
         }
     }
     
-    // Download latest release
-    let download_url = "https://github.com/Flowseal/zapret-discord-youtube/releases/latest/download/zapret-discord-youtube.zip";
-    let zip_path = temp_dir.join("update.zip");
+    window.emit("download-progress", 5).ok();
+
+    // Fetch version
+    let version_cmd = format!(
+        "try {{ (Invoke-WebRequest -Uri '{}' -Headers @{{'Cache-Control'='no-cache'}} -UseBasicParsing -TimeoutSec 10).Content.Trim() }} catch {{ exit 1 }}",
+        GITHUB_VERSION_URL
+    );
+    let out = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &version_cmd])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+        
+    let latest_version = match out {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => return Err("Failed to fetch latest version tag".to_string()),
+    };
     
+    window.emit("download-progress", 10).ok();
+
+    // Download — use the simple Invoke-WebRequest (proven reliable)
+    let download_url = format!("https://github.com/Flowseal/zapret-discord-youtube/releases/download/{}/zapret-discord-youtube-{}.zip", latest_version, latest_version);
+    let zip_path = temp_dir.join("update.zip");
+
     let ps_cmd = format!(
-        "try {{ Invoke-WebRequest -Uri '{}' -OutFile '{}' -TimeoutSec 120 -UseBasicParsing }} catch {{ exit 1 }}",
+        "$ProgressPreference = 'SilentlyContinue'; \
+         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
+         try {{ Invoke-WebRequest -Uri '{}' -OutFile '{}' -TimeoutSec 300 -UseBasicParsing; Write-Host 'DONE' }} catch {{ Write-Host ('ERR:' + $_.Exception.Message); exit 1 }}",
         download_url,
         zip_path.to_str().unwrap_or("")
     );
-    
-    let output = Command::new("powershell")
+
+    // Spawn a background thread that sends fake progress ticks every 2s
+    // Progress goes 10 → 88, then we jump to 92 after download completes
+    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+    let done_flag = Arc::new(AtomicBool::new(false));
+    let done_flag_thread = done_flag.clone();
+    let window_clone = window.clone();
+    std::thread::spawn(move || {
+        let steps: &[u16] = &[15, 20, 28, 35, 42, 50, 58, 65, 72, 78, 83, 88];
+        for pct in steps {
+            if done_flag_thread.load(Ordering::Relaxed) { break; }
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            if done_flag_thread.load(Ordering::Relaxed) { break; }
+            window_clone.emit("download-progress", *pct).ok();
+        }
+    });
+
+    let out = Command::new("powershell")
         .args(["-NoProfile", "-Command", &ps_cmd])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
-    
-    match output {
-        Ok(out) if out.status.success() => {
-            // Extract zip
-            let extract_dir = temp_dir.join("extracted");
-            std::fs::create_dir_all(&extract_dir).ok();
-            
-            let extract_cmd = format!(
-                "try {{ Expand-Archive -Path '{}' -DestinationPath '{}' -Force }} catch {{ exit 1 }}",
-                zip_path.to_str().unwrap_or(""),
-                extract_dir.to_str().unwrap_or("")
-            );
-            
-            let extract_output = Command::new("powershell")
-                .args(["-NoProfile", "-Command", &extract_cmd])
-                .output();
-            
-            if extract_output.is_err() || !extract_output.unwrap().status.success() {
-                return Err("Failed to extract update archive".to_string());
-            }
-            
-            // Find the extracted folder (should be zapret-discord-youtube-*)
-            let extracted_folder = std::fs::read_dir(&extract_dir)
-                .ok()
-                .and_then(|mut entries| entries.next())
-                .and_then(|e| e.ok())
-                .map(|e| e.path())
-                .ok_or("Could not find extracted folder")?;
-            
-            // Copy new files to binaries directory, preserving user files
-            copy_dir_contents(&extracted_folder, &dir)?;
-            
-            // Restore user files
-            for file in &user_files {
-                let backup = backup_dir.join(file);
-                if backup.exists() {
-                    std::fs::copy(&backup, lists_dir.join(file)).ok();
-                }
-            }
-            
-            // Cleanup
-            std::fs::remove_dir_all(&temp_dir).ok();
-            
-            Ok("Update installed successfully. Please restart the application.".to_string())
+
+    done_flag.store(true, Ordering::Relaxed);
+
+    match out {
+        Ok(o) if o.status.success() => {}
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            return Err(format!("Download failed: {} {}", stderr.trim(), stdout.trim()));
         }
-        Ok(out) => {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            Err(format!("Failed to download update: {}", stderr))
-        }
-        Err(e) => Err(format!("Failed to execute download: {}", e)),
+        Err(e) => return Err(format!("Failed to launch download: {}", e)),
     }
+
+    if !zip_path.exists() {
+        return Err("Download failed: output file not found".to_string());
+    }
+
+    // Extraction
+    window.emit("download-progress", 92).ok();
+    let extract_dir = temp_dir.join("extracted");
+    let _ = std::fs::create_dir_all(&extract_dir);
+    
+    let extract_cmd = format!(
+        "Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
+        zip_path.to_str().unwrap_or(""),
+        extract_dir.to_str().unwrap_or("")
+    );
+    
+    let ex_status = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &extract_cmd])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
+
+    if ex_status.is_err() || !ex_status.unwrap().success() {
+        return Err("Extraction failed".to_string());
+    }
+    
+    window.emit("download-progress", 95).ok();
+    
+    let mut extracted_folder = extract_dir.clone();
+    if let Ok(entries) = std::fs::read_dir(&extract_dir) {
+        let items: Vec<_> = entries.flatten().collect();
+        if items.len() == 1 && items[0].path().is_dir() {
+            extracted_folder = items[0].path();
+        }
+    }
+    
+    copy_dir_contents(&extracted_folder, &dir)?;
+    
+    // Restore
+    let new_lists_dir = dir.join("lists");
+    let _ = std::fs::create_dir_all(&new_lists_dir);
+    if let Ok(entries) = std::fs::read_dir(&backup_dir) {
+        for entry in entries.flatten() {
+            let _ = std::fs::copy(entry.path(), new_lists_dir.join(entry.file_name()));
+        }
+    }
+    
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    window.emit("download-progress", 100).ok();
+    
+    Ok("Update successful".to_string())
 }
 
 /// Recursively copies directory contents
@@ -842,10 +1059,19 @@ fn copy_dir_contents(src: &PathBuf, dst: &PathBuf) -> Result<(), String> {
         let dest_path = dst.join(&file_name);
         
         if path.is_dir() {
-            std::fs::create_dir_all(&dest_path).map_err(|e| e.to_string())?;
-            copy_dir_contents(&path, &dest_path)?;
+            let _ = std::fs::create_dir_all(&dest_path);
+            let _ = copy_dir_contents(&path, &dest_path);
         } else {
-            std::fs::copy(&path, &dest_path).map_err(|e| e.to_string())?;
+            if std::fs::copy(&path, &dest_path).is_err() {
+                // If it fails (likely due to lock), try to rename the locked destination file first
+                let mut old_path = dest_path.clone();
+                let new_name = format!("{}.old", file_name.to_str().unwrap_or("locked"));
+                old_path.set_file_name(new_name);
+                let _ = std::fs::rename(&dest_path, &old_path); // ignore rename errors
+                
+                // Attempt copy again
+                let _ = std::fs::copy(&path, &dest_path);
+            }
         }
     }
     Ok(())
@@ -874,6 +1100,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     // 1. Base Filtering Engine check
     let bfe_check = Command::new("sc")
         .args(["query", "BFE"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     match bfe_check {
         Ok(out) => {
@@ -911,6 +1138,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
             "-Command",
             "try { $val = Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyEnable -ErrorAction Stop; if ($val.ProxyEnable -eq 1) { $srv = Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyServer -ErrorAction SilentlyContinue; Write-Host \"PROXY_ENABLED:$($srv.ProxyServer)\" } else { Write-Host \"PROXY_DISABLED\" } } catch { Write-Host \"PROXY_DISABLED\" }"
         ])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     match proxy_check {
         Ok(out) => {
@@ -949,6 +1177,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
             "-Command",
             "$out = netsh interface tcp show global; if ($out -match 'RFC 1323.*enabled') { Write-Host 'TIMESTAMPS_ENABLED' } else { Write-Host 'TIMESTAMPS_DISABLED' }"
         ])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     match tcp_check {
         Ok(out) => {
@@ -964,6 +1193,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
                 // Try to enable
                 let _ = Command::new("netsh")
                     .args(["interface", "tcp", "set", "global", "timestamps=enabled"])
+                    .creation_flags(CREATE_NO_WINDOW)
                     .output();
                 checks.push(DiagnosticCheck {
                     name: "TCP Timestamps".to_string(),
@@ -986,6 +1216,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     // 4. Adguard check
     let adguard_check = Command::new("tasklist")
         .args(["/FI", "IMAGENAME eq AdguardSvc.exe", "/FO", "CSV", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     match adguard_check {
         Ok(out) => {
@@ -1019,6 +1250,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     // 5. Killer services check
     let killer_check = Command::new("sc")
         .args(["query"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     match killer_check {
         Ok(out) => {
@@ -1052,6 +1284,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     // 6. Intel Connectivity check
     let intel_check = Command::new("sc")
         .args(["query"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     match intel_check {
         Ok(out) => {
@@ -1085,6 +1318,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     // 7. Check Point check
     let checkpoint_check = Command::new("sc")
         .args(["query"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     match checkpoint_check {
         Ok(out) => {
@@ -1118,6 +1352,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     // 8. SmartByte check
     let smartbyte_check = Command::new("sc")
         .args(["query"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     match smartbyte_check {
         Ok(out) => {
@@ -1151,6 +1386,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     // 9. VPN services check
     let vpn_check = Command::new("sc")
         .args(["query"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     match vpn_check {
         Ok(out) => {
@@ -1196,6 +1432,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
             "-Command",
             "try { $count = Get-ChildItem -Recurse -Path 'HKLM:System\\CurrentControlSet\\Services\\Dnscache\\InterfaceSpecificParameters\\' | Get-ItemProperty | Where-Object { $_.DohFlags -gt 0 } | Measure-Object | Select-Object -ExpandProperty Count; Write-Host \"DOH:$count\" } catch { Write-Host \"DOH:0\" }"
         ])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     match doh_check {
         Ok(out) => {
@@ -1252,6 +1489,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     // 12. WinDivert check
     let windivert_check = Command::new("sc")
         .args(["query", "WinDivert"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     match windivert_check {
         Ok(out) => {
@@ -1297,6 +1535,7 @@ fn clear_discord_cache() -> Result<String, String> {
     for process in &discord_processes {
         let check_output = Command::new("tasklist")
             .args(["/FI", &format!("IMAGENAME eq {}", process), "/FO", "CSV", "/NH"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output();
         
         if let Ok(out) = check_output {
@@ -1308,6 +1547,7 @@ fn clear_discord_cache() -> Result<String, String> {
                 // Kill the process
                 let _ = Command::new("taskkill")
                     .args(["/F", "/IM", process])
+                    .creation_flags(CREATE_NO_WINDOW)
                     .output();
             }
         }
@@ -1374,6 +1614,7 @@ fn check_admin_privileges() -> Result<bool, String> {
             "-Command",
             "$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)"
         ])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
     
     match output {
@@ -1400,6 +1641,25 @@ struct TestProgress {
     current: usize,
     total: usize,
     config_name: String,
+}
+
+/// Cancels a running test process
+#[tauri::command]
+fn cancel_tests(state: State<'_, AppState>) {
+    let mut pid_lock = state.test_process_pid.lock().unwrap();
+    if let Some(pid) = pid_lock.take() {
+        // Kill process tree (/T = tree, /F = force)
+        let _ = Command::new("taskkill")
+            .arg("/F")
+            .arg("/T")
+            .arg("/PID")
+            .arg(pid.to_string())
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
+    // Remove temp script if it still exists
+    let temp_script = find_binaries_dir().join("utils").join("test_zapret_ui.ps1");
+    let _ = std::fs::remove_file(&temp_script);
 }
 
 /// Runs configuration tests with real-time streaming output via Tauri events
@@ -1438,11 +1698,19 @@ async fn run_tests(app: tauri::AppHandle, test_type: String, test_mode: String) 
     let mut child = std::process::Command::new("powershell")
         .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", temp_script.to_str().unwrap_or("")])
         .current_dir(&dir)
+        .creation_flags(CREATE_NO_WINDOW)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Failed to spawn test process: {}", e))?;
-    
+
+    // Store PID so cancel_tests / window-close can kill the process
+    {
+        let state = app.state::<AppState>();
+        let mut pid_lock = state.test_process_pid.lock().unwrap();
+        *pid_lock = Some(child.id());
+    }
+
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
     let reader = BufReader::new(stdout);
     
@@ -1480,7 +1748,14 @@ async fn run_tests(app: tauri::AppHandle, test_type: String, test_mode: String) 
     }
     
     let _ = child.wait();
-    
+
+    // Clear PID — process finished (or was killed)
+    {
+        let state = app.state::<AppState>();
+        let mut pid_lock = state.test_process_pid.lock().unwrap();
+        *pid_lock = None;
+    }
+
     // Clean up temp script
     let _ = std::fs::remove_file(&temp_script);
     
@@ -1547,9 +1822,28 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             active_strategy: Mutex::new(None),
+            test_process_pid: Mutex::new(None),
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                // Kill any running test process when the window is closed
+                let state = window.app_handle().state::<AppState>();
+                let mut pid_lock = state.test_process_pid.lock().unwrap();
+                if let Some(pid) = pid_lock.take() {
+                    let _ = Command::new("taskkill")
+                        .arg("/F")
+                        .arg("/T")
+                        .arg("/PID")
+                        .arg(pid.to_string())
+                        .creation_flags(CREATE_NO_WINDOW)
+                        .output();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_strategies,
+            get_local_version_cmd,
+            get_ui_version_cmd,
             get_zapret_status,
             get_filters_status,
             set_game_filter,
@@ -1567,6 +1861,9 @@ pub fn run() {
             clear_discord_cache,
             check_admin_privileges,
             run_tests,
+            check_status_full,
+            ensure_binaries_present,
+            cancel_tests,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
