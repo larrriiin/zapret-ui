@@ -109,4 +109,21 @@ button {
   button:active {
     background-color: #0f0f0f69;
   }
+
+  /* Dark theme for select dropdowns */
+  select {
+    background-color: #0f172a;
+    color: #f6f6f6;
+    border: 1px solid rgba(99, 102, 241, 0.3);
+  }
+  
+  select option {
+    background-color: #0f172a;
+    color: #f6f6f6;
+  }
+  
+  select:focus {
+    border-color: #6366f1;
+    outline: none;
+  }
 }

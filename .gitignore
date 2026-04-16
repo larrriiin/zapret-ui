@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+*.backup
+binaries/lists/list-exclude-user.txt
+/binaries/utils/test results
