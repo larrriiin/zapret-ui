@@ -81,6 +81,47 @@ fn find_binaries_dir() -> PathBuf {
     PathBuf::from("binaries")
 }
 
+fn is_admin() -> bool {
+    // net session — самый быстрый и надежный способ проверки прав администратора на Windows
+    Command::new("net")
+        .arg("session")
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn elevate_if_needed() {
+    if !is_admin() {
+        if let Ok(exe) = std::env::current_exe() {
+            let args: Vec<String> = std::env::args().skip(1).collect();
+            
+            let ps_args = if args.is_empty() {
+                String::new()
+            } else {
+                let formatted = args.iter()
+                    .map(|s| format!("'{}'", s.replace("'", "''")))
+                    .collect::<Vec<String>>()
+                    .join(",");
+                format!("-ArgumentList @({})", formatted)
+            };
+
+            let ps_command = format!(
+                "Start-Process -FilePath '{}' {} -Verb RunAs", 
+                exe.to_string_lossy().replace("'", "''"),
+                ps_args
+            );
+
+            let _ = Command::new("powershell")
+                .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps_command])
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn();
+            
+            std::process::exit(0);
+        }
+    }
+}
+
 fn get_local_version() -> String {
     let dir = find_binaries_dir();
     let service_bat = dir.join("service.bat");
@@ -1626,22 +1667,7 @@ fn clear_discord_cache() -> Result<String, String> {
 /// Checks if running with administrator privileges
 #[tauri::command]
 fn check_admin_privileges() -> Result<bool, String> {
-    let output = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            "$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)"
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    
-    match output {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
-            Ok(stdout == "true")
-        }
-        Err(e) => Err(format!("Failed to check admin privileges: {}", e)),
-    }
+    Ok(is_admin())
 }
 
 #[derive(serde::Serialize)]
@@ -1655,6 +1681,7 @@ struct TestResult {
 }
 
 #[derive(serde::Serialize)]
+#[allow(dead_code)]
 struct TestProgress {
     current: usize,
     total: usize,
@@ -1836,6 +1863,9 @@ fn extract_number(text: &str, prefix: &str) -> i32 {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(windows)]
+    elevate_if_needed();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
