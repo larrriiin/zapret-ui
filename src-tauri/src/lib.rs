@@ -206,14 +206,14 @@ fn parse_bat_args(strategy: &str) -> Result<String, String> {
     args = args.replace("%LISTS%", &lists_path);
 
     // Замена @ на абсолютный путь к корню binaries
+    // Возвращаем аргументы БЕЗ экранирования кавычек — вызывающий сам решает,
+    // нужно ли экранировать (для sc create) или передавать как есть (для прямого запуска).
     let mut final_args = String::new();
     for word in args.split_whitespace() {
         let mut w = word.to_string();
         if w.starts_with("\"@") {
             w = format!("\"{}{}", root_path, &w[2..]);
         }
-        // Экранируем кавычки для SC CREATE
-        w = w.replace("\"", "\\\"");
         final_args.push_str(&w);
         final_args.push(' ');
     }
@@ -598,39 +598,75 @@ fn start_zapret(strategy: String, mode: String, state: State<'_, AppState>) -> R
     }
 
     if mode == "service" {
-        let args = parse_bat_args(&strategy)?;
-        let bin_path = dir.join("bin").join("winws.exe");
-        let bin_str = bin_path.to_str().unwrap_or_default();
+        let raw_args = parse_bat_args(&strategy)?;
 
         // Проверяем что аргументы не пустые
-        if args.is_empty() {
+        if raw_args.is_empty() {
             return Err("Не удалось распарсить аргументы из bat файла".to_string());
         }
+
+        // Экранируем кавычки для использования внутри `sc create binPath= "..."`.
+        let esc_args = raw_args.replace("\"", "\\\"");
+
+        let bin_path = dir.join("bin").join("winws.exe");
+        let bin_str = bin_path.to_str().unwrap_or_default();
 
         let bin_dir_path = std::path::Path::new(&bin_str).parent().unwrap_or(std::path::Path::new(""));
         let bin_name = std::path::Path::new(&bin_str).file_name().unwrap_or_default().to_str().unwrap_or("winws.exe");
 
+        // На свежей установке SCM запускает winws.exe из-под LocalSystem с
+        // CWD=%SystemRoot%\System32. В этой директории WinDivert.dll не может
+        // найти WinDivert64.sys для установки драйвера, поэтому сервис падает
+        // сразу после старта (пользователь видит: стратегия в реестре есть,
+        // но zapret/WinDivert/winws.exe не запущены).
+        //
+        // Обходим это: перед созданием сервиса коротко запускаем winws.exe как
+        // обычный (но уже elevated) пользовательский процесс с правильным CWD.
+        // Это даёт WinDivert.dll возможность распаковать .sys в
+        // System32\drivers\ и зарегистрировать драйвер. После этого убиваем
+        // пробный winws.exe и уже спокойно создаём и стартуем Windows-сервис.
         let bat_content = format!(
             "@echo off\r\n\
-             echo Initializing WinDivert driver (elevated probe)...\r\n\
              cd /d \"{}\"\r\n\
-             \"{}\" --version >nul 2>&1\r\n\
-             echo Stopping existing service...\r\n\
-             net stop zapret 2>nul\r\n\
-             sc delete zapret 2>nul\r\n\
-             echo Creating service...\r\n\
+             \r\n\
+             REM Включаем TCP timestamps — требуются некоторыми стратегиями winws.\r\n\
+             netsh interface tcp set global timestamps=enabled >nul 2>&1\r\n\
+             \r\n\
+             echo Removing any existing zapret service...\r\n\
+             net stop zapret >nul 2>&1\r\n\
+             sc delete zapret >nul 2>&1\r\n\
+             taskkill /f /im winws.exe >nul 2>&1\r\n\
+             \r\n\
+             echo Initializing WinDivert driver...\r\n\
+             REM Пробный запуск winws.exe от имени текущего (админ) процесса,\r\n\
+             REM чтобы WinDivert.dll установил драйвер WinDivert в System32\\drivers.\r\n\
+             REM Без этого на свежей установке сервис падает, т.к. LocalSystem\r\n\
+             REM не может найти WinDivert64.sys (CWD=System32).\r\n\
+             start \"\" /B \"{}\" {}\r\n\
+             REM Ждём ~4 секунды, чтобы драйвер успел установиться\r\n\
+             ping 127.0.0.1 -n 5 >nul 2>&1\r\n\
+             REM Убиваем пробный winws.exe — сервис WinDivert остаётся установленным\r\n\
+             taskkill /f /im winws.exe >nul 2>&1\r\n\
+             \r\n\
+             echo Creating zapret service...\r\n\
              sc create zapret binPath= \"\\\"{}\\\" {}\" DisplayName= \"zapret\" start= auto\r\n\
              sc description zapret \"Zapret DPI bypass software\"\r\n\
+             \r\n\
              echo Starting service...\r\n\
              sc start zapret\r\n\
-             if %errorlevel% neq 0 (\r\n\
+             if errorlevel 1 (\r\n\
                  echo Failed to start service. Checking error...\r\n\
                  sc query zapret\r\n\
                  exit /b 1\r\n\
              )\r\n\
              echo Service started successfully\r\n\
              reg add \"HKLM\\System\\CurrentControlSet\\Services\\zapret\" /v zapret-discord-youtube /t REG_SZ /d \"{}\" /f\r\n",
-             bin_dir_path.display(), bin_name, bin_str, args, strategy
+             bin_dir_path.display(), // cd /d
+             bin_name,               // start "" /B "winws.exe" (CWD уже на bin/)
+             raw_args,               // сырые аргументы для прямого запуска
+             bin_str,                // полный путь к winws.exe для sc create
+             esc_args,               // аргументы с экранированными " для sc create
+             strategy                // имя стратегии в реестр
         );
 
         let bat_path = std::env::temp_dir().join("zapret_start.bat");
