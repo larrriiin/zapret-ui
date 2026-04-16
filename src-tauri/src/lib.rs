@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
+use tauri::Manager;
 use tauri::State;
 use tauri::Emitter;
 use std::io::{BufRead, BufReader};
@@ -10,7 +11,6 @@ use std::process::Stdio;
 use std::os::windows::process::CommandExt;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
-const LOCAL_VERSION: &str = "1.9.7b";
 const GITHUB_VERSION_URL: &str = "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt";
 const GITHUB_RELEASE_URL: &str = "https://github.com/Flowseal/zapret-discord-youtube/releases/latest";
 
@@ -65,6 +65,46 @@ fn find_binaries_dir() -> PathBuf {
     }
 
     PathBuf::from("binaries")
+}
+
+fn get_local_version() -> String {
+    let dir = find_binaries_dir();
+    let service_bat = dir.join("service.bat");
+    if let Ok(content) = std::fs::read_to_string(service_bat) {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.to_lowercase().starts_with("set \"local_version=") {
+                let parts: Vec<&str> = trimmed.split('=').collect();
+                if parts.len() > 1 {
+                    let version = parts[1].trim_matches('"');
+                    return version.to_string();
+                }
+            }
+        }
+    }
+    "Unknown".to_string()
+}
+
+#[tauri::command]
+fn get_local_version_cmd() -> String {
+    get_local_version()
+}
+
+fn get_ui_version() -> String {
+    let bin_dir = find_binaries_dir();
+    // Assuming version.txt is in the same directory as the binaries/ folder
+    if let Some(root) = bin_dir.parent() {
+        let version_file = root.join("version.txt");
+        if let Ok(v) = std::fs::read_to_string(version_file) {
+            return v.trim().to_string();
+        }
+    }
+    "0.1.0".to_string() // Fallback
+}
+
+#[tauri::command]
+fn get_ui_version_cmd() -> String {
+    get_ui_version()
 }
 
 fn parse_bat_args(strategy: &str) -> Result<String, String> {
@@ -205,6 +245,74 @@ fn get_strategy_from_registry() -> Option<String> {
 }
 
 // ─── Commands ─────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn check_status_full() -> Result<String, String> {
+    let mut output = String::new();
+
+    // 1. Check Strategy
+    let reg_out = Command::new("reg")
+        .args(["query", "HKLM\\System\\CurrentControlSet\\Services\\zapret", "/v", "zapret-discord-youtube"])
+        .output();
+    if let Ok(out) = reg_out {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        for line in stdout.lines() {
+            if let Some(pos) = line.find("REG_SZ") {
+                let strategy = line[pos + "REG_SZ".len()..].trim();
+                if !strategy.is_empty() {
+                    output.push_str(&format!("Service strategy installed from \"{}\"\n", strategy));
+                }
+                break;
+            }
+        }
+    }
+
+    // 2. Check zapret service
+    let zapret_svc = Command::new("sc").args(["query", "zapret"]).output();
+    if let Ok(out) = zapret_svc {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        if stdout.contains("RUNNING") {
+            output.push_str("\"zapret\" service is RUNNING.\n");
+        } else if stdout.contains("STOPPED") {
+            output.push_str("\"zapret\" service is STOPPED.\n");
+        } else if stdout.contains("FAILED 1060") || stdout.contains("1060") {
+             // 1060 means service does not exist
+        } else {
+            // Might be start_pending or other
+            output.push_str(&format!("\"zapret\" service state is UNKNOWN.\n"));
+        }
+    }
+
+    // 3. Check WinDivert service
+    let windivert_svc = Command::new("sc").args(["query", "WinDivert"]).output();
+    if let Ok(out) = windivert_svc {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        if stdout.contains("RUNNING") {
+            output.push_str("\"WinDivert\" service is RUNNING.\n");
+        } else if stdout.contains("STOPPED") {
+            output.push_str("\"WinDivert\" service is STOPPED.\n");
+        }
+    }
+
+    // 4. Check bypass (winws.exe)
+    output.push_str("\n");
+    let task = Command::new("tasklist").args(["/FI", "IMAGENAME eq winws.exe"]).output();
+    if let Ok(out) = task {
+        let stdout = String::from_utf8_lossy(&out.stdout).to_lowercase();
+        if stdout.contains("winws.exe") {
+            output.push_str("Bypass (winws.exe) is RUNNING.\n");
+        } else {
+            output.push_str("Bypass (winws.exe) is NOT running.\n");
+        }
+    }
+
+    let trimmed = output.trim().to_string();
+    if trimmed.is_empty() {
+        Ok("Zapret service is not installed.".to_string())
+    } else {
+        Ok(trimmed)
+    }
+}
 
 /// Список стратегий — имена .bat файлов из binaries/ (без service.bat).
 #[tauri::command]
@@ -718,25 +826,26 @@ async fn check_for_updates() -> Result<UpdateCheckResult, String> {
     match output {
         Ok(out) if out.status.success() => {
             let latest = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let local_version = get_local_version();
             if latest.is_empty() || latest == "$null" {
                 return Ok(UpdateCheckResult {
-                    current_version: LOCAL_VERSION.to_string(),
+                    current_version: local_version,
                     latest_version: None,
                     has_update: false,
                     download_url: GITHUB_RELEASE_URL.to_string(),
                 });
             }
             
-            let has_update = latest != LOCAL_VERSION;
+            let has_update = latest != local_version;
             Ok(UpdateCheckResult {
-                current_version: LOCAL_VERSION.to_string(),
+                current_version: local_version,
                 latest_version: Some(latest),
                 has_update,
                 download_url: GITHUB_RELEASE_URL.to_string(),
             })
         }
         _ => Ok(UpdateCheckResult {
-            current_version: LOCAL_VERSION.to_string(),
+            current_version: get_local_version(),
             latest_version: None,
             has_update: false,
             download_url: GITHUB_RELEASE_URL.to_string(),
@@ -755,21 +864,39 @@ async fn download_and_install_update() -> Result<String, String> {
     std::fs::create_dir_all(&temp_dir)
         .map_err(|e| format!("Failed to create temp dir: {}", e))?;
     
-    // Backup user files
-    let user_files = ["ipset-exclude-user.txt", "list-exclude-user.txt", "list-general-user.txt"];
+    // Backup ALL user files from lists directory
     let lists_dir = dir.join("lists");
     let backup_dir = temp_dir.join("backup");
     std::fs::create_dir_all(&backup_dir).ok();
     
-    for file in &user_files {
-        let src = lists_dir.join(file);
-        if src.exists() {
-            std::fs::copy(&src, backup_dir.join(file)).ok();
+    if lists_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&lists_dir) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    if name.contains("user") {
+                        std::fs::copy(entry.path(), backup_dir.join(name)).ok();
+                    }
+                }
+            }
         }
     }
     
+    // Fetch latest version string properly first for building zip URL
+    let version_cmd = format!(
+        "try {{ (Invoke-WebRequest -Uri '{}' -Headers @{{'Cache-Control'='no-cache'}} -UseBasicParsing -TimeoutSec 10).Content.Trim() }} catch {{ exit 1 }}",
+        GITHUB_VERSION_URL
+    );
+    let version_output = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &version_cmd])
+        .output();
+        
+    let latest_version = match version_output {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        _ => return Err("Failed to fetch latest version tag".to_string()),
+    };
+    
     // Download latest release
-    let download_url = "https://github.com/Flowseal/zapret-discord-youtube/releases/latest/download/zapret-discord-youtube.zip";
+    let download_url = format!("https://github.com/Flowseal/zapret-discord-youtube/releases/download/{}/zapret-discord-youtube-{}.zip", latest_version, latest_version);
     let zip_path = temp_dir.join("update.zip");
     
     let ps_cmd = format!(
@@ -803,28 +930,32 @@ async fn download_and_install_update() -> Result<String, String> {
             }
             
             // Find the extracted folder (should be zapret-discord-youtube-*)
-            let extracted_folder = std::fs::read_dir(&extract_dir)
-                .ok()
-                .and_then(|mut entries| entries.next())
-                .and_then(|e| e.ok())
-                .map(|e| e.path())
-                .ok_or("Could not find extracted folder")?;
+            // If the zip contains a single wrapper directory, use that. Otherwise use extract_dir itself.
+            let mut extracted_folder = extract_dir.clone();
+            if let Ok(entries) = std::fs::read_dir(&extract_dir) {
+                let items: Vec<_> = entries.flatten().collect();
+                if items.len() == 1 && items[0].path().is_dir() {
+                    extracted_folder = items[0].path();
+                }
+            }
             
-            // Copy new files to binaries directory, preserving user files
+            // Not clearing the old binaries directory to prevent breaking the installation if a driver is locked.
+            // Copy new files to binaries directory 
             copy_dir_contents(&extracted_folder, &dir)?;
             
             // Restore user files
-            for file in &user_files {
-                let backup = backup_dir.join(file);
-                if backup.exists() {
-                    std::fs::copy(&backup, lists_dir.join(file)).ok();
+            let new_lists_dir = dir.join("lists");
+            std::fs::create_dir_all(&new_lists_dir).ok();
+            if let Ok(entries) = std::fs::read_dir(&backup_dir) {
+                for entry in entries.flatten() {
+                    std::fs::copy(entry.path(), new_lists_dir.join(entry.file_name())).ok();
                 }
             }
             
             // Cleanup
             std::fs::remove_dir_all(&temp_dir).ok();
             
-            Ok("Update installed successfully. Please restart the application.".to_string())
+            Ok("Update installed successfully!".to_string())
         }
         Ok(out) => {
             let stderr = String::from_utf8_lossy(&out.stderr);
@@ -843,10 +974,19 @@ fn copy_dir_contents(src: &PathBuf, dst: &PathBuf) -> Result<(), String> {
         let dest_path = dst.join(&file_name);
         
         if path.is_dir() {
-            std::fs::create_dir_all(&dest_path).map_err(|e| e.to_string())?;
-            copy_dir_contents(&path, &dest_path)?;
+            let _ = std::fs::create_dir_all(&dest_path);
+            let _ = copy_dir_contents(&path, &dest_path);
         } else {
-            std::fs::copy(&path, &dest_path).map_err(|e| e.to_string())?;
+            if std::fs::copy(&path, &dest_path).is_err() {
+                // If it fails (likely due to lock), try to rename the locked destination file first
+                let mut old_path = dest_path.clone();
+                let new_name = format!("{}.old", file_name.to_str().unwrap_or("locked"));
+                old_path.set_file_name(new_name);
+                let _ = std::fs::rename(&dest_path, &old_path); // ignore rename errors
+                
+                // Attempt copy again
+                let _ = std::fs::copy(&path, &dest_path);
+            }
         }
     }
     Ok(())
@@ -1410,7 +1550,10 @@ fn cancel_tests(state: State<'_, AppState>) {
     if let Some(pid) = pid_lock.take() {
         // Kill process tree (/T = tree, /F = force)
         let _ = Command::new("taskkill")
-            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .arg("/F")
+            .arg("/T")
+            .arg("/PID")
+            .arg(pid.to_string())
             .output();
     }
     // Remove temp script if it still exists
@@ -1461,7 +1604,8 @@ async fn run_tests(app: tauri::AppHandle, test_type: String, test_mode: String) 
 
     // Store PID so cancel_tests / window-close can kill the process
     {
-        let mut pid_lock = app.state::<AppState>().test_process_pid.lock().unwrap();
+        let state = app.state::<AppState>();
+        let mut pid_lock = state.test_process_pid.lock().unwrap();
         *pid_lock = Some(child.id());
     }
 
@@ -1505,7 +1649,8 @@ async fn run_tests(app: tauri::AppHandle, test_type: String, test_mode: String) 
 
     // Clear PID — process finished (or was killed)
     {
-        let mut pid_lock = app.state::<AppState>().test_process_pid.lock().unwrap();
+        let state = app.state::<AppState>();
+        let mut pid_lock = state.test_process_pid.lock().unwrap();
         *pid_lock = None;
     }
 
@@ -1584,13 +1729,18 @@ pub fn run() {
                 let mut pid_lock = state.test_process_pid.lock().unwrap();
                 if let Some(pid) = pid_lock.take() {
                     let _ = Command::new("taskkill")
-                        .args(["/F", "/T", "/PID", &pid.to_string()])
+                        .arg("/F")
+                        .arg("/T")
+                        .arg("/PID")
+                        .arg(pid.to_string())
                         .output();
                 }
             }
         })
         .invoke_handler(tauri::generate_handler![
             get_strategies,
+            get_local_version_cmd,
+            get_ui_version_cmd,
             get_zapret_status,
             get_filters_status,
             set_game_filter,
@@ -1608,6 +1758,7 @@ pub fn run() {
             clear_discord_cache,
             check_admin_privileges,
             run_tests,
+            check_status_full,
             cancel_tests,
         ])
         .run(tauri::generate_context!())

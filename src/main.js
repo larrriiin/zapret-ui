@@ -523,6 +523,23 @@ window.addEventListener('DOMContentLoaded', async () => {
     
     await loadStrategies();
     initStrategyDropdown();
+    
+    // Load versions dynamically
+    try {
+        const localVersion = await invoke('get_local_version_cmd');
+        const uiVersion = await invoke('get_ui_version_cmd');
+        
+        const versionDisplays = ['version-display', 'latest-version-number', 'update-current-version'];
+        versionDisplays.forEach(id => {
+            const el = $(id);
+            if (el) el.textContent = id === 'version-display' ? 'v' + localVersion : localVersion;
+        });
+
+        const uiEl = $('ui-version-display');
+        if (uiEl) uiEl.textContent = 'v' + uiVersion;
+    } catch (e) {
+        console.error('Failed to get versions:', e);
+    }
 
     // Сначала получаем статус — чтобы в dropdown сразу встала активная стратегия
     await pollStatus();
@@ -772,6 +789,18 @@ window.addEventListener('DOMContentLoaded', async () => {
                 }
             } else {
                 statusEl.textContent = result;
+            }
+
+            // Update the local version string on UI immediately
+            try {
+                const refreshedVersion = await invoke('get_local_version_cmd');
+                const versionDisplays = ['version-display', 'latest-version-number', 'update-current-version'];
+                versionDisplays.forEach(id => {
+                    const el = $(id);
+                    if (el) el.textContent = id === 'version-display' ? 'v' + refreshedVersion : refreshedVersion;
+                });
+            } catch (e) {
+                console.error("Failed to refresh version:", e);
             }
 
             updateNowBtn.textContent = 'Done';
@@ -1066,6 +1095,30 @@ window.addEventListener('DOMContentLoaded', async () => {
             } catch (err) {
                 console.error('Cancel error:', err);
             }
+        });
+    }
+
+    const checkStatusBtn = $('check-status-btn');
+    const statusModal = $('status-modal');
+    const statusContent = $('status-content');
+    const statusModalClose = $('status-modal-close');
+
+    if (checkStatusBtn && statusModal && statusContent) {
+        checkStatusBtn.addEventListener('click', async () => {
+            statusContent.textContent = 'Checking status in real-time...';
+            statusModal.classList.remove('hidden');
+            try {
+                const status = await invoke('check_status_full');
+                statusContent.textContent = status;
+            } catch (err) {
+                statusContent.textContent = 'Error checking status: ' + err;
+            }
+        });
+    }
+
+    if (statusModalClose && statusModal) {
+        statusModalClose.addEventListener('click', () => {
+            statusModal.classList.add('hidden');
         });
     }
 });
