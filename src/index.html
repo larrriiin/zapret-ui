@@ -564,7 +564,13 @@
                     Update Now
                 </button>
             </div>
-            <div id="update-status" class="hidden mt-4 text-sm text-center"></div>
+            <div id="update-status-container" class="hidden mt-6">
+                <div id="update-status-text" class="text-xs text-on-surface-variant font-mono mb-3 text-center">Checking...</div>
+                <div class="h-1.5 bg-surface-container-high rounded-full overflow-hidden border border-white/5">
+                    <div id="update-progress-bar" class="h-full bg-secondary rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
+                </div>
+                <div class="mt-2 text-[10px] text-secondary/50 text-right uppercase tracking-tighter" id="update-progress-text">0%</div>
+            </div>
         </div>
     </div>
 
@@ -588,7 +594,26 @@
         </div>
     </div>
 
+    <!-- First Launch Setup Modal -->
+    <div id="first-launch-modal"
+        class="hidden fixed inset-0 bg-[#060d1a]/95 backdrop-blur-md z-[100] flex items-center justify-center">
+        <div class="glass-panel rounded-2xl border border-primary/30 p-10 max-w-md w-full mx-4 text-center">
+            <div class="flex justify-center mb-6">
+                <span class="material-symbols-outlined text-primary text-5xl animate-pulse">download</span>
+            </div>
+            <h2 class="font-headline text-xl font-bold text-on-surface uppercase tracking-widest mb-2">First Time Setup</h2>
+            <p class="text-on-surface-variant text-sm mb-6">Downloading Zapret core components from GitHub. This will take about a minute.</p>
+            <div class="bg-[#0a1022] rounded-xl p-5 font-mono text-sm text-primary/90 border border-outline-variant/10 whitespace-pre-wrap text-left min-h-[60px]"
+                id="first-launch-status">Preparing download...</div>
+            <div class="mt-4 h-2 bg-surface-container-high rounded-full overflow-hidden border border-white/5">
+                <div id="first-launch-progress-bar" class="h-full bg-primary rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
+            </div>
+            <div class="mt-2 text-[10px] text-primary/50 text-right uppercase tracking-tighter" id="first-launch-progress-text">0%</div>
+        </div>
+    </div>
+
     <!-- Status Modal -->
+
     <div id="status-modal"
         class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
         <div class="glass-panel rounded-2xl border border-secondary/30 p-8 max-w-lg w-full mx-4">

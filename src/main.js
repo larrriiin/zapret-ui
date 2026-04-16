@@ -3,7 +3,12 @@ function invoke(cmd, args) {
     return window.__TAURI__.core.invoke(cmd, args);
 }
 
+const listen = (event, handler) => {
+    return window.__TAURI__.event.listen(event, handler);
+}
+
 const $ = id => document.getElementById(id);
+
 
 // ─── Custom Strategy Dropdown ─────────────────────────────────────────────────
 
@@ -523,6 +528,44 @@ window.addEventListener('DOMContentLoaded', async () => {
     
     await loadStrategies();
     initStrategyDropdown();
+
+    // Check if binaries are present (first launch)
+    try {
+        const binariesPresent = await invoke('ensure_binaries_present');
+        if (!binariesPresent) {
+            // Show first-launch modal and auto-download
+            const modal = $('first-launch-modal');
+            const statusEl = $('first-launch-status');
+            const progressBar = $('first-launch-progress-bar');
+            const progressText = $('first-launch-progress-text');
+            
+            if (modal) modal.classList.remove('hidden');
+            if (statusEl) statusEl.textContent = 'Initializing download...';
+
+            listen('download-progress', (event) => {
+                const pct = event.payload;
+                if (progressBar) progressBar.style.width = pct + '%';
+                if (progressText) progressText.textContent = pct + '%';
+                if (statusEl && pct < 90) statusEl.textContent = 'Downloading core components...';
+                if (statusEl && pct >= 90) statusEl.textContent = 'Extracting and installing...';
+            });
+
+            try {
+                await invoke('download_and_install_update');
+                if (statusEl) statusEl.textContent = 'Installation complete! Reloading...';
+                if (progressBar) progressBar.style.width = '100%';
+                if (progressText) progressText.textContent = '100%';
+                await new Promise(r => setTimeout(r, 1000));
+                location.reload();
+            } catch(err) {
+                if (statusEl) statusEl.textContent = 'Download failed: ' + err + '\n\nPlease check your internet connection and restart the app.';
+            }
+            return; 
+        }
+    } catch (err) {
+        console.error('Failed to check binaries:', err);
+    }
+
     
     // Load versions dynamically
     try {
@@ -771,10 +814,28 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
 
             // 2. Download and install
-            statusEl.textContent = 'Downloading and installing update...';
-            const result = await invoke('download_and_install_update');
+            const progressContainer = $('update-status-container');
+            const progressText = $('update-progress-text');
+            const progressBar = $('update-progress-bar');
+            
+            if (progressContainer) {
+                progressContainer.classList.remove('hidden');
+                statusEl.textContent = 'Downloading and installing update...';
+            }
 
-            statusEl.className = 'mt-4 text-sm text-secondary';
+            const unlisten = await listen('download-progress', (event) => {
+                const pct = event.payload;
+                if (progressBar) progressBar.style.width = pct + '%';
+                if (progressText) progressText.textContent = pct + '%';
+                if (statusEl && pct >= 90) statusEl.textContent = 'Extracting and installing...';
+            });
+
+            const result = await invoke('download_and_install_update');
+            if (unlisten) unlisten();
+
+            if (progressBar) progressBar.style.width = '100%';
+            if (progressText) progressText.textContent = '100%';
+            statusEl.className = 'text-xs text-secondary font-mono mb-3 text-center';
 
             // 3. Restart if was running
             if (zapretWasRunning && zapretStrategy) {
@@ -784,8 +845,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                     await pollStatus();
                     statusEl.textContent = result + ' Zapret restarted successfully.';
                 } catch (restartErr) {
-                    statusEl.textContent = result + ' Warning: failed to restart zapret: ' + restartErr;
-                    statusEl.className = 'mt-4 text-sm text-primary';
+                    statusEl.textContent = result + ' Warning: failed to restart: ' + restartErr;
+                    statusEl.className = 'text-xs text-primary font-mono mb-3 text-center';
                 }
             } else {
                 statusEl.textContent = result;
@@ -805,7 +866,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 
             updateNowBtn.textContent = 'Done';
             updateNowBtn.disabled = false;
-            updateNowBtn.onclick = () => hideUpdateModal();
+            updateNowBtn.onclick = () => location.reload(); // Reload after update to refresh versions
+
 
         } catch (err) {
             statusEl.textContent = 'Error: ' + err;
