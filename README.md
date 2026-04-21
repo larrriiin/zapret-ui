@@ -1,7 +1,40 @@
-# Tauri + Vanilla
+# Zapret UI
 
-This template should help get you started developing with Tauri in vanilla HTML, CSS and Javascript.
+[Русский](#russian) | [English](#english)
 
-## Recommended IDE Setup
+<a name="russian"></a>
+## Описание (RU)
+**Zapret UI** — это современный графический интерфейс для утилиты `zapret`, предназначенной для обхода систем анализа трафика (DPI). Приложение упрощает настройку и управление службой, позволяя легко переключать стратегии, редактировать списки доменов и следить за состоянием сервиса.
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+### Основные возможности
+- **Управление службой**: Запуск zapret как полноценного Windows-сервиса или в режиме временного процесса.
+- **Гибкие стратегии**: Быстрое переключение между готовыми пресетами обхода.
+- **Управление списками**: Удобный интерфейс для редактирования белых и черных списков доменов и IP-адресов.
+- **Автоматизация**: Встроенная проверка обновлений ядра и графического интерфейса.
+- **Диагностика**: Инструментарий для проверки интернет-соединения и очистки кэша сервисов (например, Discord).
+
+### Установка
+1. Скачайте последнюю версию со страницы [Releases](https://github.com/larrriiin/zapret-ui/releases).
+2. Запустите инсталлятор и следуйте инструкциям.
+3. При первом запуске приложение предложит загрузить необходимые бинарные файлы ядра.
+
+---
+
+<a name="english"></a>
+## Description (EN)
+**Zapret UI** is a modern graphical interface for the `zapret` utility, designed to bypass Deep Packet Inspection (DPI) systems. This application simplifies configuration and service management, allowing you to easily switch strategies, manage domain lists, and monitor the service status.
+
+### Key Features
+- **Service Management**: Run zapret as a full Windows service or as a temporary process.
+- **Flexible Strategies**: Quickly switch between pre-defined bypass presets.
+- **List Management**: User-friendly interface for editing domain/IP allowlists and blocklists.
+- **Automation**: Built-in update checks for both the core engine and the UI.
+- **Diagnostics**: Built-in tools for testing connection and clearing service caches (e.g., Discord).
+
+### Installation
+1. Download the latest version from the [Releases](https://github.com/larrriiin/zapret-ui/releases) page.
+2. Run the installer and follow the prompts.
+3. On the first launch, the app will offer to download the necessary core binaries.
+
+## License
+MIT

@@ -45,5 +45,13 @@
         "languages": ["English", "Russian"]
       }
     }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/larrriiin/zapret-ui/releases/latest/download/latest.json"
+      ],
+      "pubkey": "CONTENT_OF_YOUR_PUBLIC_KEY_HERE"
+    }
   }
 }

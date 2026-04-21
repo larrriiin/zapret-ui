@@ -184,6 +184,19 @@ fn get_local_version_cmd() -> String {
     get_local_version()
 }
 
+#[tauri::command]
+async fn get_remote_core_version() -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get("https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt")
+        .send()
+        .await
+        .map_err(|e: reqwest::Error| e.to_string())?;
+    
+    let text = response.text().await.map_err(|e: reqwest::Error| e.to_string())?;
+    Ok(text.trim().to_string())
+}
+
 fn get_ui_version() -> String {
     // 1. Check bundled resources path in production (version.txt IS bundled here)
     if let Ok(exe) = std::env::current_exe() {
@@ -2090,6 +2103,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState {
             active_strategy: Mutex::new(None),
             test_process_pid: Mutex::new(None),
@@ -2304,7 +2318,7 @@ pub fn run() {
             add_to_user_list,
             remove_from_user_list,
             update_ipset_list,
-            check_for_updates,
+            get_remote_core_version,
             download_and_install_update,
             run_diagnostics,
             clear_discord_cache,

@@ -121,5 +121,9 @@ window.i18n_ru = {
     "tray_toggle_off": "Выключить Zapret",
     "tray_change_strategy": "Сменить стратегию",
     "tray_minimized_title": "Zapret свернут",
-    "tray_minimized_body": "Приложение продолжает работу в системном трее."
+    "tray_minimized_body": "Приложение продолжает работу в системном трее.",
+    "app_ui": "Графический интерфейс",
+    "zapret_core": "Ядро Zapret",
+    "up_to_date": "Актуально",
+    "update_available_short": "Доступно обновление"
 };

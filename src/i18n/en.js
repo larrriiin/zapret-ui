@@ -121,5 +121,9 @@ window.i18n_en = {
     "tray_toggle_off": "Turn Off Zapret",
     "tray_change_strategy": "Change strategy",
     "tray_minimized_title": "Zapret minimized",
-    "tray_minimized_body": "The app is still running in the system tray."
+    "tray_minimized_body": "The app is still running in the system tray.",
+    "app_ui": "Application UI",
+    "zapret_core": "Zapret Core",
+    "up_to_date": "Up to date",
+    "update_available_short": "Update available"
 };

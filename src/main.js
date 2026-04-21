@@ -1038,31 +1038,46 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
     
     async function checkForUpdates(manual = false) {
+        if (!window.__TAURI__) return;
+        const { check } = window.__TAURI__.updater;
+
         if (manual && checkUpdatesBtn) {
             checkUpdatesBtn.disabled = true;
             checkUpdatesBtn.innerHTML = `<span class="material-symbols-outlined text-sm animate-spin">refresh</span> ${t('updating')}`;
         }
         
         try {
-            const result = await invoke('check_for_updates');
+            // Get current local UI version from the DOM or default
+            const uiLocalVersion = ($('ui-version-display')?.textContent || '0.1.0').replace('v', '');
+
+            // Run both checks in parallel
+            const [uiUpdate, coreRemoteVersion, coreLocalVersion] = await Promise.all([
+                check(),
+                invoke('get_remote_core_version').catch(() => 'Unknown'),
+                invoke('get_local_version_cmd').catch(() => 'Unknown')
+            ]);
             
-            // Update version display
-            if ($('version-display')) {
-                $('version-display').textContent = 'v' + result.current_version;
-            }
+            const hasUIUpdate = !!uiUpdate;
+            const hasCoreUpdate = coreRemoteVersion !== 'Unknown' && coreLocalVersion !== 'Unknown' && coreRemoteVersion !== coreLocalVersion;
             
-            if (result.has_update) {
-                showUpdateModal(result);
-            } else if (manual) {
-                // Show "latest version installed" modal
-                showLatestVersionModal(result.current_version);
+            if (hasUIUpdate || hasCoreUpdate || manual) {
+                showDualUpdateModal({
+                    ui: {
+                        available: hasUIUpdate,
+                        current: uiLocalVersion,
+                        latest: hasUIUpdate ? uiUpdate.version : uiLocalVersion,
+                        updateObj: uiUpdate
+                    },
+                    core: {
+                        available: hasCoreUpdate,
+                        current: coreLocalVersion,
+                        latest: coreRemoteVersion
+                    }
+                }, manual);
             }
         } catch (err) {
             console.error('Error checking for updates:', err);
-            if (manual) {
-                // Show error in UI instead of alert
-                showLatestVersionModal('Unknown');
-            }
+            if (manual) showDualUpdateModal(null, true);
         } finally {
             if (manual && checkUpdatesBtn) {
                 checkUpdatesBtn.disabled = false;
@@ -1070,6 +1085,98 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
         }
     }
+
+    async function downloadAndInstallCoreUpdate() {
+        try {
+            const modalTitle = document.querySelector('#update-modal h3');
+            if (modalTitle) modalTitle.textContent = t('downloading_installing');
+            
+            await invoke('download_and_install_update');
+            
+            if (modalTitle) modalTitle.textContent = t('update_installed_restarting');
+            setTimeout(() => location.reload(), 1500);
+        } catch (err) {
+            console.error('Core update failed:', err);
+            alert('Core update failed: ' + err);
+        }
+    }
+
+    function showDualUpdateModal(data, manual = false) {
+        // Clean up previous modal
+        const oldModal = $('update-modal');
+        if (oldModal) oldModal.remove();
+
+        if (!data && manual) {
+            // Fallback object if we couldn't fetch anything but were triggered manually
+            data = {
+                ui: { available: false, current: uiLocalVersion || '0.1.0', latest: uiLocalVersion || '0.1.0' },
+                core: { available: false, current: 'Unknown', latest: 'Unknown' }
+            };
+        }
+
+        const modal = document.createElement('div');
+        modal.id = 'update-modal';
+        modal.className = 'fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-background/80 backdrop-blur-md animate-fade-in';
+        
+        const uiStatus = data.ui.available ? 
+            `<span class="px-2 py-0.5 bg-primary/20 text-primary text-[10px] font-bold rounded-full uppercase">${t('update_available_short')}</span>` : 
+            `<span class="text-on-surface-variant/50 text-[10px] font-bold uppercase">${t('up_to_date')}</span>`;
+            
+        const coreStatus = data.core.available ? 
+            `<span class="px-2 py-0.5 bg-secondary/20 text-secondary text-[10px] font-bold rounded-full uppercase">${t('update_available_short')}</span>` : 
+            `<span class="text-on-surface-variant/50 text-[10px] font-bold uppercase">${t('up_to_date')}</span>`;
+
+        modal.innerHTML = `
+            <div class="bg-surface-container-high border border-outline-variant/30 rounded-3xl p-8 max-w-lg w-full shadow-2xl animate-scale-in">
+                <div class="flex flex-col items-center">
+                    <div class="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mb-6">
+                        <span class="material-symbols-outlined text-3xl text-primary">system_update_alt</span>
+                    </div>
+                    <h3 class="font-headline text-2xl font-black text-on-surface mb-6 uppercase tracking-tight">${t('check_updates')}</h3>
+                    
+                    <div class="w-full space-y-3 mb-8">
+                        <!-- Application UI Row -->
+                        <div class="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
+                            <div class="flex flex-col items-start text-left">
+                                <span class="text-[10px] font-bold text-primary/70 uppercase tracking-wider mb-1">${t('app_ui')}</span>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-sm font-bold text-on-surface">v${data.ui.current}</span>
+                                    ${data.ui.available ? `<span class="material-symbols-outlined text-xs text-on-surface-variant/40">arrow_forward</span> <span class="text-sm font-bold text-primary">v${data.ui.latest}</span>` : ''}
+                                </div>
+                            </div>
+                            <div class="flex flex-col items-end gap-2">
+                                ${uiStatus}
+                                ${data.ui.available ? `<button class="text-[11px] font-black text-primary uppercase hover:underline" onclick="window.downloadAndInstallUIUpdate(window.currentUpdateObject)">${t('update')}</button>` : ''}
+                            </div>
+                        </div>
+
+                        <!-- Zapret Core Row -->
+                        <div class="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
+                            <div class="flex flex-col items-start text-left">
+                                <span class="text-[10px] font-bold text-secondary/70 uppercase tracking-wider mb-1">${t('zapret_core')}</span>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-sm font-bold text-on-surface">v${data.core.current}</span>
+                                    ${data.core.available ? `<span class="material-symbols-outlined text-xs text-on-surface-variant/40">arrow_forward</span> <span class="text-sm font-bold text-secondary">v${data.core.latest}</span>` : ''}
+                                </div>
+                            </div>
+                            <div class="flex flex-col items-end gap-2">
+                                ${coreStatus}
+                                ${data.core.available ? `<button class="text-[11px] font-black text-secondary uppercase hover:underline" onclick="window.downloadAndInstallCoreUpdate()">${t('update')}</button>` : ''}
+                            </div>
+                        </div>
+                    </div>
+
+                    <button class="w-full px-4 py-3 bg-white/5 text-on-surface-variant rounded-xl font-bold hover:bg-white/10 transition-all uppercase text-xs tracking-widest" onclick="this.closest('#update-modal').remove()">
+                        ${t('close')}
+                    </button>
+                </div>
+            </div>
+        `;
+        window.currentUpdateObject = data.ui.updateObj;
+        document.body.appendChild(modal);
+    }
+    
+    window.downloadAndInstallCoreUpdate = downloadAndInstallCoreUpdate;
     
     // Auto-check on startup (after a short delay)
     setTimeout(() => checkForUpdates(false), 3000);
@@ -1424,6 +1531,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                         const score = r.http_ok + r.ping_ok - r.http_error * 2 - r.ping_fail;
                         if (score > bestScore) { bestScore = score; bestStrategy = r; }
                     });
+
+                    window.downloadAndInstallCoreUpdate = downloadAndInstallCoreUpdate;
 
                     if (bestStrategy) {
                         const bestRow = document.createElement('div');
