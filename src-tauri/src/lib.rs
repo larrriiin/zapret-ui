@@ -1022,57 +1022,7 @@ async fn update_ipset_list() -> Result<String, String> {
     }
 }
 
-#[derive(serde::Serialize)]
-struct UpdateCheckResult {
-    current_version: String,
-    latest_version: Option<String>,
-    has_update: bool,
-    download_url: String,
-}
 
-/// Checks for updates by comparing local version with remote version
-#[tauri::command]
-async fn check_for_updates() -> Result<UpdateCheckResult, String> {
-    // Fetch latest version from GitHub
-    let ps_cmd = format!(
-        "try {{ (Invoke-WebRequest -Uri '{}' -Headers @{{'Cache-Control'='no-cache'}} -UseBasicParsing -TimeoutSec 10).Content.Trim() }} catch {{ $null }}",
-        GITHUB_VERSION_URL
-    );
-
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-Command", &ps_cmd])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-
-    match output {
-        Ok(out) if out.status.success() => {
-            let latest = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            let local_version = get_local_version();
-            if latest.is_empty() || latest == "$null" {
-                return Ok(UpdateCheckResult {
-                    current_version: local_version,
-                    latest_version: None,
-                    has_update: false,
-                    download_url: GITHUB_RELEASE_URL.to_string(),
-                });
-            }
-
-            let has_update = latest != local_version;
-            Ok(UpdateCheckResult {
-                current_version: local_version,
-                latest_version: Some(latest),
-                has_update,
-                download_url: GITHUB_RELEASE_URL.to_string(),
-            })
-        }
-        _ => Ok(UpdateCheckResult {
-            current_version: get_local_version(),
-            latest_version: None,
-            has_update: false,
-            download_url: GITHUB_RELEASE_URL.to_string(),
-        }),
-    }
-}
 
 #[tauri::command]
 async fn download_and_install_update(window: tauri::Window) -> Result<String, String> {

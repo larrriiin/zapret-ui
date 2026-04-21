@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Zapret",
-  "version": "0.1.0",
+  "version": "2026.4.3",
   "identifier": "com.alexx.zapret-ui",
   "build": {
     "frontendDist": "../src"
@@ -42,7 +42,10 @@
         "installerIcon": "icons/icon.ico",
         "installMode": "both",
         "compression": "lzma",
-        "languages": ["English", "Russian"]
+        "languages": [
+          "English",
+          "Russian"
+        ]
       }
     }
   },
@@ -51,7 +54,7 @@
       "endpoints": [
         "https://github.com/larrriiin/zapret-ui/releases/latest/download/latest.json"
       ],
-      "pubkey": "CONTENT_OF_YOUR_PUBLIC_KEY_HERE"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVDQTQ5RUMyNkNERDc4NQpSV1NGMTgwbTdFbktCWElIazBuSSt4c3NySzBmdDRncFZBdXEzSDFCdEMzSUN6RGhaVjdwSEZqaQo="
     }
   }
 }

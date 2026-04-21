@@ -42,3 +42,5 @@ binaries/
 # Tauri specific
 src-tauri/zapret-ui-manifest.rc
 src-tauri/zapret-ui.manifest
+~/.tauri/zapret-ui.key
+/~
