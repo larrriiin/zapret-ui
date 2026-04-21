@@ -31,14 +31,15 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: 'src-tauri'
+          shared-key: 'zapret-ui-rust-cache'
       - name: install frontend dependencies
         run: npm install
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__ # the action automatically replaces this with the app version
-          releaseName: "Zapret-UI v__VERSION__"
+          tagName: ${{ github.ref_name }}
+          releaseName: "Zapret-UI ${{ github.ref_name }}"
           releaseBody: "See the assets below for the latest installers and update artifacts."
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false

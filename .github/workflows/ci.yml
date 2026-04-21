@@ -24,6 +24,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: 'src-tauri'
+          shared-key: 'zapret-ui-rust-cache'
           
       - name: install frontend dependencies
         run: npm install
