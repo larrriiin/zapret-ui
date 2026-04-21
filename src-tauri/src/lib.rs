@@ -18,8 +18,6 @@ use tauri_plugin_notification::NotificationExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const GITHUB_VERSION_URL: &str =
     "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt";
-const GITHUB_RELEASE_URL: &str =
-    "https://github.com/Flowseal/zapret-discord-youtube/releases/latest";
 
 struct AppState {
     active_strategy: Mutex<Option<String>>,
