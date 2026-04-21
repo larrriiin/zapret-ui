@@ -206,25 +206,8 @@ async fn get_remote_core_version() -> Result<String, String> {
 }
 
 fn get_ui_version() -> String {
-    // 1. Check bundled resources path in production (version.txt IS bundled here)
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            let version_file = parent.join("resources").join("version.txt");
-            if let Ok(v) = std::fs::read_to_string(&version_file) {
-                return v.trim().to_string();
-            }
-        }
-    }
-
-    // 2. Check next to binaries/ (dev mode)
-    let bin_dir = find_binaries_dir();
-    if let Some(root) = bin_dir.parent() {
-        let version_file = root.join("version.txt");
-        if let Ok(v) = std::fs::read_to_string(version_file) {
-            return v.trim().to_string();
-        }
-    }
-    "0.1.0".to_string()
+    // APP_VERSION is dynamically set by build.rs from tauri.conf.json
+    env!("APP_VERSION").to_string()
 }
 
 #[tauri::command]

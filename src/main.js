@@ -1047,8 +1047,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
         
         try {
-            // Get current local UI version from the DOM or default
-            const uiLocalVersion = ($('ui-version-display')?.textContent || '0.1.0').replace('v', '');
+            // Get current local UI version from backend (source of truth)
+            const uiLocalVersion = await invoke('get_ui_version_cmd');
 
             // Run both checks in parallel
             const [uiUpdate, coreRemoteVersion, coreLocalVersion] = await Promise.all([
@@ -1110,11 +1110,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (oldModal) oldModal.remove();
 
         if (!data && manual) {
-            // Fallback object if we couldn't fetch anything but were triggered manually
-            const currentUI = ($('ui-version-display')?.textContent || '0.1.0').replace('v', '');
+            // No fallback hardcode here - just empty if truly failed
             data = {
-                ui: { available: false, current: currentUI, latest: currentUI },
-                core: { available: false, current: 'Unknown', latest: 'Unknown' }
+                ui: { available: false, current: '...', latest: '...' },
+                core: { available: false, current: '...', latest: '...' }
             };
         }
 
@@ -1148,9 +1147,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                                     ${data.ui.available ? `<span class="material-symbols-outlined text-xs text-on-surface-variant/40">arrow_forward</span> <span class="text-sm font-bold text-primary">v${data.ui.latest}</span>` : ''}
                                 </div>
                             </div>
-                            <div class="flex flex-col items-end gap-2">
+                            <div class="flex flex-col items-end gap-3">
                                 ${uiStatus}
-                                ${data.ui.available ? `<button class="text-[11px] font-black text-primary uppercase hover:underline" onclick="window.downloadAndInstallUIUpdate(window.currentUpdateObject)">${t('update')}</button>` : ''}
+                                ${data.ui.available ? `<button class="px-4 py-2 bg-primary/20 hover:bg-primary/30 border border-primary/20 rounded-xl text-[10px] font-black text-primary uppercase transition-all active:scale-95 shadow-lg shadow-primary/5" onclick="window.downloadAndInstallUIUpdate(window.currentUpdateObject)">${t('update_now')}</button>` : ''}
                             </div>
                         </div>
 
@@ -1163,9 +1162,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                                     ${data.core.available ? `<span class="material-symbols-outlined text-xs text-on-surface-variant/40">arrow_forward</span> <span class="text-sm font-bold text-secondary">v${data.core.latest}</span>` : ''}
                                 </div>
                             </div>
-                            <div class="flex flex-col items-end gap-2">
+                            <div class="flex flex-col items-end gap-3">
                                 ${coreStatus}
-                                ${data.core.available ? `<button class="text-[11px] font-black text-secondary uppercase hover:underline" onclick="window.downloadAndInstallCoreUpdate()">${t('update')}</button>` : ''}
+                                ${data.core.available ? `<button class="px-4 py-2 bg-secondary/20 hover:bg-secondary/30 border border-secondary/20 rounded-xl text-[10px] font-black text-secondary uppercase transition-all active:scale-95 shadow-lg shadow-secondary/5" onclick="window.downloadAndInstallCoreUpdate()">${t('update_now')}</button>` : ''}
                             </div>
                         </div>
                     </div>

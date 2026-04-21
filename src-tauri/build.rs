@@ -1,30 +1,22 @@
+use std::fs;
+use std::path::Path;
+
 fn main() {
-    if std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() == "windows" {
-        let mut windows = tauri_build::WindowsAttributes::new();
-        
-        let manifest = r#"
-            <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-                <dependency>
-                    <dependentAssembly>
-                        <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*" />
-                    </dependentAssembly>
-                </dependency>
-                <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
-                    <security>
-                        <requestedPrivileges>
-                            <requestedExecutionLevel level="asInvoker" uiAccess="false" />
-                        </requestedPrivileges>
-                    </security>
-                </trustInfo>
-            </assembly>
-        "#;
-        
-        windows = windows.app_manifest(manifest);
-        
-        tauri_build::try_build(
-            tauri_build::Attributes::new().windows_attributes(windows)
-        ).expect("failed to run build script");
-    } else {
-        tauri_build::build();
+    // 1. Read tauri.conf.json to get the "master" version
+    let config_path = Path::new("tauri.conf.json");
+    if let Ok(config_str) = fs::read_to_string(config_path) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&config_str) {
+            if let Some(version) = v["version"].as_str() {
+                // 2. Export version as an environment variable for the Rust code
+                println!("cargo:rustc-env=APP_VERSION={}", version);
+
+                // 3. Keep version.txt in sync automatically (in project root)
+                // Since build.rs runs in src-tauri, the root is one level up
+                let version_txt_path = Path::new("../version.txt");
+                let _ = fs::write(version_txt_path, version);
+            }
+        }
     }
+
+    tauri_build::build();
 }
