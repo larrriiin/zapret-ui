@@ -1,3 +1,95 @@
+// ─── i18n Engine ─────────────────────────────────────────────────────────────
+
+let currentLang = 'ru';
+
+function initI18n() {
+    const saved = localStorage.getItem('zapret_lang');
+    if (saved) {
+        currentLang = saved;
+    } else {
+        const sysLang = navigator.language || navigator.userLanguage;
+        currentLang = sysLang.startsWith('ru') ? 'ru' : 'en';
+    }
+    updatePageTranslations();
+}
+
+function t(key, params = {}) {
+    const dict = currentLang === 'ru' ? window.i18n_ru : window.i18n_en;
+    let translation = dict[key] || key;
+    
+    // Simple placeholder replacement: {name} -> params.name
+    Object.keys(params).forEach(p => {
+        translation = translation.replace(`{${p}}`, params[p]);
+    });
+    
+    return translation;
+}
+
+function updatePageTranslations() {
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.dataset.i18n;
+        const attr = el.dataset.i18nAttr;
+        const translation = t(key);
+        
+        if (attr) {
+            el.setAttribute(attr, translation);
+        } else {
+            // Check if it's an input with placeholder
+            if (el.tagName === 'INPUT' && el.placeholder) {
+                el.placeholder = translation;
+            } else {
+                el.textContent = translation;
+            }
+        }
+    });
+    
+    // Update language switcher text
+    const langBtn = $('lang-text');
+    if (langBtn) langBtn.textContent = currentLang.toUpperCase();
+}
+
+function toggleLanguage() {
+    currentLang = currentLang === 'ru' ? 'en' : 'ru';
+    localStorage.setItem('zapret_lang', currentLang);
+    updatePageTranslations();
+    
+    // Force some UI updates
+    pollStatus();
+    pollFilters();
+    loadStrategies();
+    
+    // Update specific dynamic areas
+    if (typeof updateDiagnosticsUI === 'function') updateDiagnosticsUI();
+
+    // Refresh open info modal if any
+    if (typeof refreshOpenInfoModal === 'function') refreshOpenInfoModal();
+
+    // Sync language with tray
+    syncTrayLocalization();
+}
+
+async function syncTrayLocalization() {
+    try {
+        await invoke('update_tray_translations', {
+            translations: {
+                exit: t('tray_exit'),
+                show: t('tray_show'),
+                status_prefix: t('tray_status_prefix'),
+                strategy_prefix: t('tray_strategy_prefix'),
+                toggle_on: t('tray_toggle_on'),
+                toggle_off: t('tray_toggle_off'),
+                change_strategy: t('tray_change_strategy'),
+                minimized_title: t('tray_minimized_title'),
+                minimized_body: t('tray_minimized_body'),
+                status_on: t('connected'),
+                status_off: t('disconnected')
+            }
+        });
+    } catch (err) {
+        console.error('Failed to sync tray localization:', err);
+    }
+}
+
 // invoke получаем лениво, чтобы не было гонки с инициализацией Tauri
 function invoke(cmd, args) {
     return window.__TAURI__.core.invoke(cmd, args);
@@ -74,7 +166,7 @@ async function loadStrategies() {
         if (sel)  sel.innerHTML  = '';
 
         if (!strategies || strategies.length === 0) {
-            $('strategy-label').textContent = 'No strategies found';
+            $('strategy-label').textContent = t('no_strategies');
             return;
         }
 
@@ -99,6 +191,16 @@ async function loadStrategies() {
                     item.querySelector('.item-icon').style.opacity = '1';
                     setStrategyValue(name, name);
                     closeStrategyDropdown();
+
+                    // Если сервис запущен, сразу переключаем на новую стратегию
+                    invoke('get_zapret_status').then(status => {
+                        if (status.running) {
+                            showRestartStatus(t('switching_strategy'), true);
+                            invoke('start_zapret', { strategy: name, mode: status.mode || 'service' }).then(() => {
+                                setTimeout(pollStatus, 500); // Даем время на старт и обновляем UI
+                            });
+                        }
+                    });
                 });
                 list.appendChild(item);
             }
@@ -117,7 +219,7 @@ async function loadStrategies() {
 
     } catch (err) {
         console.error('Error loading strategies:', err);
-        $('strategy-label').textContent = 'Error: ' + err;
+        $('strategy-label').textContent = t('error') + ': ' + err;
     }
 }
 
@@ -128,16 +230,14 @@ function updateStatusUI(status) {
     const tempBtn = $('connect-temp-btn');
 
     if (status.running) {
-        const label = status.strategy ?? 'Connected';
+        const label = status.strategy ?? t('status_connected');
 
-        $('header-status').textContent = `Status: ${label}`;
-        $('header-status').className =
-            'text-[10px] font-bold uppercase tracking-[0.2em] opacity-80 text-secondary';
-
-        $('hero-status').textContent = 'Connected';
+        $('header-status').innerHTML = `<span class="text-primary"><span data-i18n="status_label">${t('status_label')}</span>:</span> <span class="text-secondary">${label}</span>`;
+        
+        $('hero-status').textContent = t('status_connected');
         $('hero-status').className = 'text-secondary';
 
-        $('connect-btn-text').textContent = 'Disconnect';
+        $('connect-btn-text').textContent = t('stop_service');
         $('connect-btn-icon').textContent = 'power_settings_new';
         $('connect-btn').dataset.action = 'stop';
 
@@ -150,17 +250,15 @@ function updateStatusUI(status) {
         if (status.strategy) {
             setStrategyValue(status.strategy, status.strategy);
         }
-        if (trigger) trigger.disabled = true;
+        // if (trigger) trigger.disabled = true; // Разрешаем смену стратегии во время работы
 
     } else {
-        $('header-status').textContent = 'Status: Disconnected';
-        $('header-status').className =
-            'text-[10px] text-error-dim font-bold uppercase tracking-[0.2em] opacity-80';
+        $('header-status').innerHTML = `<span class="text-primary"><span data-i18n="status_label">${t('status_label')}</span>:</span> <span class="text-error-dim" data-i18n="status_disconnected">${t('status_disconnected')}</span>`;
 
-        $('hero-status').textContent = 'Disconnected';
+        $('hero-status').textContent = t('status_disconnected');
         $('hero-status').className = 'text-error-dim';
 
-        $('connect-btn-text').textContent = 'Run as Service';
+        $('connect-btn-text').textContent = t('run_service');
         $('connect-btn-icon').textContent = 'bolt';
         $('connect-btn').dataset.action = 'start';
 
@@ -264,13 +362,19 @@ async function pollFilters() {
 
 // Функция для отображения статуса перезапуска
 function showRestartStatus(message, isRestarting = false) {
-    $('hero-status').textContent = message;
+    const el = $('hero-status');
+    el.textContent = message;
+    
+    // Добавляем анимацию
+    el.classList.remove('animate-status-change');
+    void el.offsetWidth; // Триггер пересчета стилей для перезапуска анимации
+    el.classList.add('animate-status-change');
+
     if (isRestarting) {
-        $('hero-status').className = 'text-primary';
-        $('header-status').textContent = 'Status: Restarting...';
-        $('header-status').className = 'text-[10px] font-bold uppercase tracking-[0.2em] opacity-80 text-primary';
+        el.className = 'text-primary animate-status-change';
+        $('header-status').innerHTML = `<span class="text-primary"><span data-i18n="status_label">${t('status_label')}</span>:</span> <span class="text-primary" data-i18n="status_restarting">${t('status_restarting')}</span>`;
     } else {
-        $('hero-status').className = 'text-secondary';
+        el.className = 'text-secondary animate-status-change';
     }
 }
 
@@ -278,18 +382,18 @@ function showRestartStatus(message, isRestarting = false) {
 async function restartServiceIfRunning() {
     const status = await invoke('get_zapret_status');
     if (status.running && status.strategy) {
-        showRestartStatus('Restarting...', true);
+        showRestartStatus(t('restarting'), true);
         try {
             await invoke('stop_zapret');
             // Небольшая задержка для корректной остановки
             await new Promise(r => setTimeout(r, 1000));
             await invoke('start_zapret', { strategy: status.strategy, mode: status.mode || 'service' });
-            showRestartStatus('Connected');
+            showRestartStatus(t('status_connected'));
             await pollStatus();
             setTimeout(() => pollStatus(), 2000);
         } catch (err) {
             console.error('Ошибка перезапуска:', err);
-            showRestartStatus('Restart failed: ' + err);
+            showRestartStatus(t('restart_failed') + ': ' + err);
         }
     }
 }
@@ -337,19 +441,19 @@ async function handleConnectClick(event) {
         if (action === 'start') {
             const strategy = getStrategyValue();
             if (!strategy) return;
-            $('hero-status').textContent = 'Starting service...';
+            $('hero-status').textContent = mode === 'service' ? t('starting_service') : t('starting_temp');
             $('hero-status').className = 'text-secondary';
             await invoke('start_zapret', { strategy, mode });
-            $('hero-status').textContent = 'Service started';
+            $('hero-status').textContent = t('service_started');
         } else {
-            $('hero-status').textContent = 'Stopping...';
+            $('hero-status').textContent = t('stopping');
             await invoke('stop_zapret');
-            $('hero-status').textContent = 'Disconnected';
+            $('hero-status').textContent = t('disconnected');
         }
         await pollStatus();
     } catch (err) {
         console.error('Ошибка действия:', err);
-        $('hero-status').textContent = `Error: ${err}`;
+        $('hero-status').textContent = `${t('error')}: ${err}`;
         $('hero-status').className = 'text-error-dim text-2xl';
         setTimeout(pollStatus, 3000);
     } finally {
@@ -387,6 +491,18 @@ pollFilters = async function() {
 // ─── Navigation ───────────────────────────────────────────────────────────────
 
 function showSection(sectionId) {
+    // Navigation Guard Logic - Trigger on ANY section change if pending
+    if (pendingRestart && !restartGuardDismissed && sectionId !== currentSectionId) {
+        window.pendingNavId = sectionId; 
+        showRestartModal();
+        return;
+    }
+    
+    // Safety check: if we are already in this section, do nothing
+    if (sectionId === currentSectionId) return;
+
+    currentSectionId = sectionId;
+
     // Hide all sections
     $('section-home').classList.add('hidden');
     $('section-sites').classList.add('hidden');
@@ -415,6 +531,46 @@ function showSection(sectionId) {
 // ─── User Lists Management ────────────────────────────────────────────────────
 
 let pendingRestart = false;
+let restartGuardDismissed = false;
+let currentSectionId = 'home';
+
+function cleanAndValidateDomain(domain) {
+    let cleaned = domain.trim().toLowerCase();
+    // Strip protocols
+    cleaned = cleaned.replace(/^https?:\/\//, '');
+    // Strip www.
+    cleaned = cleaned.replace(/^www\./, '');
+    // Strip trailing slashes or paths
+    cleaned = cleaned.split('/')[0];
+    
+    // Regex for valid domain
+    const domainRegex = /^([a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,}$/;
+    return domainRegex.test(cleaned) ? cleaned : null;
+}
+
+function validateIP(ip) {
+    const cleaned = ip.trim();
+    // IPv4 with optional CIDR
+    const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:\/(?:3[0-2]|[12]?[0-9]))?$/;
+    return ipRegex.test(cleaned) ? cleaned : null;
+}
+
+function updateRestartBanner() {
+    const banner = $('restart-banner');
+    if (!banner) return;
+    
+    if (pendingRestart) {
+        banner.style.display = 'flex';
+        banner.classList.remove('opacity-0', 'translate-y-full');
+        banner.classList.add('opacity-100', 'translate-y-0');
+    } else {
+        banner.classList.add('opacity-0', 'translate-y-full');
+        banner.classList.remove('opacity-100', 'translate-y-0');
+        setTimeout(() => {
+            if (!pendingRestart) banner.style.display = 'none';
+        }, 300);
+    }
+}
 
 function showRestartModal() {
     $('restart-modal').classList.remove('hidden');
@@ -460,8 +616,14 @@ function renderList(containerId, items, filename) {
             try {
                 await invoke('remove_from_user_list', { filename, entry: item });
                 await loadUserLists();
-                pendingRestart = true;
-                showRestartModal();
+                
+                // Only require restart if service is running
+                const status = await invoke('get_zapret_status');
+                if (status.running) {
+                    pendingRestart = true;
+                    restartGuardDismissed = false;
+                    updateRestartBanner();
+                }
             } catch (err) {
                 console.error('Error removing item:', err);
             }
@@ -479,22 +641,46 @@ function escapeHtml(text) {
 
 async function addToList(inputId, filename) {
     const input = $(inputId);
-    const value = input.value.trim();
+    let value = input.value.trim();
     
     if (!value) return;
+
+    let validatedValue = null;
+    if (filename.includes('ipset')) {
+        validatedValue = validateIP(value);
+        if (!validatedValue) {
+            input.classList.add('border-error-dim');
+            setTimeout(() => input.classList.remove('border-error-dim'), 2000);
+            return;
+        }
+    } else {
+        validatedValue = cleanAndValidateDomain(value);
+        if (!validatedValue) {
+            input.classList.add('border-error-dim');
+            setTimeout(() => input.classList.remove('border-error-dim'), 2000);
+            return;
+        }
+    }
     
     try {
-        await invoke('add_to_user_list', { filename, entry: value });
+        await invoke('add_to_user_list', { filename, entry: validatedValue });
         input.value = '';
         await loadUserLists();
-        pendingRestart = true;
-        showRestartModal();
+
+        // Only require restart if service is running
+        const status = await invoke('get_zapret_status');
+        if (status.running) {
+            pendingRestart = true;
+            restartGuardDismissed = false;
+            updateRestartBanner();
+        }
     } catch (err) {
         console.error('Error adding item:', err);
     }
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
+    initI18n();
     // Disable context menu (right-click)
     document.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -540,25 +726,25 @@ window.addEventListener('DOMContentLoaded', async () => {
             const progressText = $('first-launch-progress-text');
             
             if (modal) modal.classList.remove('hidden');
-            if (statusEl) statusEl.textContent = 'Initializing download...';
+            if (statusEl) statusEl.textContent = t('initializing_download');
 
             listen('download-progress', (event) => {
                 const pct = event.payload;
                 if (progressBar) progressBar.style.width = pct + '%';
                 if (progressText) progressText.textContent = pct + '%';
-                if (statusEl && pct < 90) statusEl.textContent = 'Downloading core components...';
-                if (statusEl && pct >= 90) statusEl.textContent = 'Extracting and installing...';
+                if (statusEl && pct < 90) statusEl.textContent = t('downloading_core');
+                if (statusEl && pct >= 90) statusEl.textContent = t('extracting');
             });
 
             try {
                 await invoke('download_and_install_update');
-                if (statusEl) statusEl.textContent = 'Installation complete! Reloading...';
+                if (statusEl) statusEl.textContent = t('install_complete');
                 if (progressBar) progressBar.style.width = '100%';
                 if (progressText) progressText.textContent = '100%';
                 await new Promise(r => setTimeout(r, 1000));
                 location.reload();
             } catch(err) {
-                if (statusEl) statusEl.textContent = 'Download failed: ' + err + '\n\nPlease check your internet connection and restart the app.';
+                if (statusEl) statusEl.textContent = t('download_failed') + ': ' + err + '\n\n' + t('restart_to_fix');
             }
             return; 
         }
@@ -587,6 +773,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     // Сначала получаем статус — чтобы в dropdown сразу встала активная стратегия
     await pollStatus();
     await pollFilters();
+    
+    // Sync tray on startup
+    syncTrayLocalization();
 
     // Поллинг каждые 2 секунды
     setInterval(async () => {
@@ -613,6 +802,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         e.preventDefault();
         showSection('diagnostics');
     });
+
+    $('lang-switcher').addEventListener('click', toggleLanguage);
 
     $('connect-btn').addEventListener('click', handleConnectClick);
     const tempBtn = $('connect-temp-btn');
@@ -661,31 +852,122 @@ window.addEventListener('DOMContentLoaded', async () => {
         handleIPSetFilterChange('any');
     });
 
-    // User Lists - Sites
-    $('site-include-add').addEventListener('click', () => addToList('site-include-input', 'list-general-user.txt'));
-    $('site-include-input').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') addToList('site-include-input', 'list-general-user.txt');
-    });
-    $('site-exclude-add').addEventListener('click', () => addToList('site-exclude-input', 'list-exclude-user.txt'));
-    $('site-exclude-input').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') addToList('site-exclude-input', 'list-exclude-user.txt');
+    // Info Modals Logic
+    const infoModal = $('info-modal');
+    const infoTitle = $('info-title');
+    const infoContent = $('info-content');
+    const infoClose = $('info-modal-close');
+
+    let currentInfoType = null;
+
+    const getInfoData = () => ({
+        ipset: {
+            title: t('ipset_info_title'),
+            content: t('ipset_info_content')
+        },
+        game: {
+            title: t('game_info_title'),
+            content: t('game_info_content')
+        },
+        include: {
+            title: t('include_info_title'),
+            content: t('include_info_content')
+        },
+        exclude: {
+            title: t('exclude_info_title'),
+            content: t('exclude_info_content')
+        },
+        ip_exclude: {
+            title: t('ip_exclude_info_title'),
+            content: t('ip_exclude_info_content')
+        }
     });
 
-    // User Lists - IPs
-    $('ip-exclude-add').addEventListener('click', () => addToList('ip-exclude-input', 'ipset-exclude-user.txt'));
-    $('ip-exclude-input').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') addToList('ip-exclude-input', 'ipset-exclude-user.txt');
+    const showInfo = (type) => {
+        currentInfoType = type;
+        const infoData = getInfoData();
+        const data = infoData[type];
+        if (!data) return;
+        infoTitle.textContent = data.title;
+        infoContent.innerHTML = data.content;
+        infoModal.classList.remove('hidden');
+    };
+
+    window.refreshOpenInfoModal = () => {
+        if (!infoModal.classList.contains('hidden') && currentInfoType) {
+            showInfo(currentInfoType);
+        }
+    };
+
+    $('ipset-info-btn').addEventListener('click', () => showInfo('ipset'));
+    $('game-info-btn').addEventListener('click', () => showInfo('game'));
+    const incInfo = $('include-info-btn');
+    if (incInfo) incInfo.addEventListener('click', () => showInfo('include'));
+    const excInfo = $('exclude-info-btn');
+    if (excInfo) excInfo.addEventListener('click', () => showInfo('exclude'));
+    const ipExcInfo = $('ip-exclude-info-btn');
+    if (ipExcInfo) ipExcInfo.addEventListener('click', () => showInfo('ip_exclude'));
+
+    infoClose.addEventListener('click', () => {
+        infoModal.classList.add('hidden');
+        currentInfoType = null;
     });
+    infoModal.addEventListener('click', (e) => {
+        if (e.target === infoModal) {
+            infoModal.classList.add('hidden');
+            currentInfoType = null;
+        }
+    });
+
+    // User Lists - sites
+    const bindAddList = (btnId, inputId, filename) => {
+        const btn = $(btnId);
+        const input = $(inputId);
+        if (btn) btn.onclick = () => addToList(inputId, filename);
+        if (input) {
+            input.onkeypress = (e) => {
+                if (e.key === 'Enter') addToList(inputId, filename);
+            };
+        }
+    };
+
+    bindAddList('site-include-add', 'site-include-input', 'list-general-user.txt');
+    bindAddList('site-exclude-add', 'site-exclude-input', 'list-exclude-user.txt');
+    bindAddList('ip-exclude-add', 'ip-exclude-input', 'ipset-exclude-user.txt');
 
     // Restart Modal
     $('restart-later').addEventListener('click', () => {
         hideRestartModal();
+        restartGuardDismissed = true;
+        // Proceed with navigation if the modal was triggered by a guard
+        const lastNavId = window.pendingNavId;
+        if (lastNavId) {
+            window.pendingNavId = null;
+            showSection(lastNavId);
+        }
     });
+
     $('restart-now').addEventListener('click', async () => {
         hideRestartModal();
         if (pendingRestart) {
             await restartServiceIfRunning();
             pendingRestart = false;
+            updateRestartBanner();
+        }
+        // Proceed with navigation if the modal was triggered by a guard
+        const lastNavId = window.pendingNavId;
+        if (lastNavId) {
+            window.pendingNavId = null;
+            showSection(lastNavId);
+        }
+    });
+
+    // Global Restart Banner Button
+    $('restart-banner-btn').addEventListener('click', async () => {
+        if (pendingRestart) {
+            await restartServiceIfRunning();
+            pendingRestart = false;
+            updateRestartBanner();
         }
     });
 
@@ -695,16 +977,29 @@ window.addEventListener('DOMContentLoaded', async () => {
         ipsetUpdateBtn.addEventListener('click', async () => {
             const statusEl = $('ipset-update-status');
             statusEl.classList.remove('hidden');
-            statusEl.textContent = 'Updating...';
+            statusEl.textContent = t('updating');
             statusEl.className = 'mt-4 text-sm text-secondary';
             ipsetUpdateBtn.disabled = true;
             
             try {
                 const result = await invoke('update_ipset_list');
-                statusEl.textContent = result;
+                // result expected to be something like "Updated successfully. 15993 IPs loaded."
+                // Since it's from backend, we might want to try to parse the count if we want full localization, 
+                // but for now let's just use the translated string if we can.
+                // If it's a fixed format, we can parse it.
+                const countMatch = result.match(/\d+/);
+                const count = countMatch ? countMatch[0] : '?';
+                
+                statusEl.textContent = t('update_success', { count });
                 statusEl.className = 'mt-4 text-sm text-secondary';
-                pendingRestart = true;
-                showRestartModal();
+                
+                // Only require restart if service is running
+                const status = await invoke('get_zapret_status');
+                if (status.running) {
+                    pendingRestart = true;
+                    restartGuardDismissed = false;
+                    updateRestartBanner();
+                }
             } catch (err) {
                 statusEl.textContent = 'Error: ' + err;
                 statusEl.className = 'mt-4 text-sm text-error-dim';
@@ -745,7 +1040,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     async function checkForUpdates(manual = false) {
         if (manual && checkUpdatesBtn) {
             checkUpdatesBtn.disabled = true;
-            checkUpdatesBtn.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">refresh</span> Checking...';
+            checkUpdatesBtn.innerHTML = `<span class="material-symbols-outlined text-sm animate-spin">refresh</span> ${t('updating')}`;
         }
         
         try {
@@ -771,7 +1066,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         } finally {
             if (manual && checkUpdatesBtn) {
                 checkUpdatesBtn.disabled = false;
-                checkUpdatesBtn.innerHTML = '<span class="material-symbols-outlined text-sm">update</span> Check Updates';
+                checkUpdatesBtn.innerHTML = `<span class="material-symbols-outlined text-sm">update</span> <span data-i18n="check_updates">${t('check_updates')}</span>`;
             }
         }
     }
@@ -802,14 +1097,14 @@ window.addEventListener('DOMContentLoaded', async () => {
 
         try {
             // 1. Check if zapret is currently running
-            statusEl.textContent = 'Checking service status...';
+            statusEl.textContent = t('checking_service_status');
             const status = await invoke('get_zapret_status');
             if (status.running) {
                 zapretWasRunning = true;
                 zapretStrategy = status.strategy;
                 zapretMode = status.mode || 'service';
 
-                statusEl.textContent = 'Stopping zapret before update...';
+                statusEl.textContent = t('stopping_before_update');
                 await invoke('stop_zapret');
             }
 
@@ -820,14 +1115,14 @@ window.addEventListener('DOMContentLoaded', async () => {
             
             if (progressContainer) {
                 progressContainer.classList.remove('hidden');
-                statusEl.textContent = 'Downloading and installing update...';
+                statusEl.textContent = t('downloading_installing');
             }
 
             const unlisten = await listen('download-progress', (event) => {
                 const pct = event.payload;
                 if (progressBar) progressBar.style.width = pct + '%';
                 if (progressText) progressText.textContent = pct + '%';
-                if (statusEl && pct >= 90) statusEl.textContent = 'Extracting and installing...';
+                if (statusEl && pct >= 90) statusEl.textContent = t('extracting_installing');
             });
 
             const result = await invoke('download_and_install_update');
@@ -839,7 +1134,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
             // 3. Restart if was running
             if (zapretWasRunning && zapretStrategy) {
-                statusEl.textContent = 'Update installed. Restarting zapret...';
+                statusEl.textContent = t('update_installed_restarting');
                 try {
                     await invoke('start_zapret', { strategy: zapretStrategy, mode: zapretMode });
                     await pollStatus();
@@ -889,7 +1184,87 @@ window.addEventListener('DOMContentLoaded', async () => {
     const runDiagnosticsBtn = $('run-diagnostics-btn');
     const diagnosticsResults = $('diagnostics-results');
     const discordCacheSection = $('discord-cache-section');
+    const showAllBtn = $('diagnostics-show-all-btn');
     
+    let lastDiagnosticsResults = null;
+    let showingAllDiagnostics = false;
+
+    function renderDiagnostics(result, showAll) {
+        diagnosticsResults.innerHTML = '';
+        if (!result || !result.checks) return;
+
+        let hiddenCount = 0;
+        
+        result.checks.forEach(check => {
+            const isSuccess = check.status === 'passed';
+            if (!showAll && isSuccess) {
+                hiddenCount++;
+                return;
+            }
+
+            const row = document.createElement('div');
+            row.className = 'bg-white/5 rounded-xl border p-4 flex items-start gap-3 transition-opacity duration-300';
+            
+            let icon, iconColor, borderColor;
+            if (isSuccess) {
+                icon = 'check_circle';
+                iconColor = 'text-secondary';
+                borderColor = 'border-secondary/30';
+            } else if (check.status === 'warning') {
+                icon = 'warning';
+                iconColor = 'text-primary';
+                borderColor = 'border-primary/30';
+            } else {
+                icon = 'error';
+                iconColor = 'text-error-dim';
+                borderColor = 'border-error-dim/30';
+            }
+            
+            row.classList.add(borderColor);
+            
+            let linkHtml = '';
+            if (check.link) {
+                linkHtml = `<a href="${check.link}" target="_blank" class="text-xs text-primary hover:underline mt-1 block">${check.link}</a>`;
+            }
+            
+            row.innerHTML = `
+                <span class="material-symbols-outlined ${iconColor} text-xl mt-0.5">${icon}</span>
+                <div class="flex-1">
+                    <h4 class="font-headline text-sm font-bold text-on-surface">${check.name}</h4>
+                    <p class="text-xs text-on-surface-variant mt-1">${check.message}</p>
+                    ${linkHtml}
+                </div>
+            `;
+            
+            diagnosticsResults.appendChild(row);
+        });
+
+        // Show/hide the "Show All" toggle button
+        if (hiddenCount > 0 || showAll) {
+            showAllBtn.classList.remove('hidden');
+            showAllBtn.textContent = showAll ? 'Hide Successful Checks' : `Show All Checks (${hiddenCount} hidden)`;
+        } else {
+            showAllBtn.classList.add('hidden');
+        }
+
+        // Show VPN services if found
+        if (result.vpn_services) {
+            const vpnRow = document.createElement('div');
+            vpnRow.className = 'bg-white/5 rounded-xl border border-primary/30 p-4 mt-3';
+            vpnRow.innerHTML = `
+                <div class="flex items-start gap-3">
+                    <span class="material-symbols-outlined text-primary text-xl mt-0.5">vpn_key</span>
+                    <div class="flex-1">
+                        <h4 class="font-headline text-sm font-bold text-on-surface">VPN Services Found</h4>
+                        <p class="text-xs text-on-surface-variant mt-1">${result.vpn_services}</p>
+                        <p class="text-xs text-primary mt-2">Make sure that all VPNs are disabled</p>
+                    </div>
+                </div>
+            `;
+            diagnosticsResults.appendChild(vpnRow);
+        }
+    }
+
     if (runDiagnosticsBtn) {
         runDiagnosticsBtn.addEventListener('click', async () => {
             runDiagnosticsBtn.disabled = true;
@@ -897,72 +1272,20 @@ window.addEventListener('DOMContentLoaded', async () => {
             diagnosticsResults.innerHTML = '';
             diagnosticsResults.classList.remove('hidden');
             discordCacheSection.classList.add('hidden');
+            showAllBtn.classList.add('hidden');
+            showingAllDiagnostics = false;
             
             try {
                 const result = await invoke('run_diagnostics');
-                
-                // Render check results
-                result.checks.forEach(check => {
-                    const row = document.createElement('div');
-                    row.className = 'glass-panel rounded-xl border p-4 flex items-start gap-3';
-                    
-                    let icon, iconColor, borderColor;
-                    if (check.status === 'passed') {
-                        icon = 'check_circle';
-                        iconColor = 'text-secondary';
-                        borderColor = 'border-secondary/30';
-                    } else if (check.status === 'warning') {
-                        icon = 'warning';
-                        iconColor = 'text-primary';
-                        borderColor = 'border-primary/30';
-                    } else {
-                        icon = 'error';
-                        iconColor = 'text-error-dim';
-                        borderColor = 'border-error-dim/30';
-                    }
-                    
-                    row.classList.add(borderColor);
-                    
-                    let linkHtml = '';
-                    if (check.link) {
-                        linkHtml = `<a href="${check.link}" target="_blank" class="text-xs text-primary hover:underline mt-1 block">${check.link}</a>`;
-                    }
-                    
-                    row.innerHTML = `
-                        <span class="material-symbols-outlined ${iconColor} text-xl mt-0.5">${icon}</span>
-                        <div class="flex-1">
-                            <h4 class="font-headline text-sm font-bold text-on-surface">${check.name}</h4>
-                            <p class="text-xs text-on-surface-variant mt-1">${check.message}</p>
-                            ${linkHtml}
-                        </div>
-                    `;
-                    
-                    diagnosticsResults.appendChild(row);
-                });
-                
-                // Show VPN services if found
-                if (result.vpn_services) {
-                    const vpnRow = document.createElement('div');
-                    vpnRow.className = 'glass-panel rounded-xl border border-primary/30 p-4 mt-3';
-                    vpnRow.innerHTML = `
-                        <div class="flex items-start gap-3">
-                            <span class="material-symbols-outlined text-primary text-xl mt-0.5">vpn_key</span>
-                            <div class="flex-1">
-                                <h4 class="font-headline text-sm font-bold text-on-surface">VPN Services Found</h4>
-                                <p class="text-xs text-on-surface-variant mt-1">${result.vpn_services}</p>
-                                <p class="text-xs text-primary mt-2">Make sure that all VPNs are disabled</p>
-                            </div>
-                        </div>
-                    `;
-                    diagnosticsResults.appendChild(vpnRow);
-                }
+                lastDiagnosticsResults = result;
+                renderDiagnostics(result, false);
                 
                 // Show Discord cache clear option
                 discordCacheSection.classList.remove('hidden');
                 
             } catch (err) {
                 diagnosticsResults.innerHTML = `
-                    <div class="glass-panel rounded-xl border border-error-dim/30 p-4 text-error-dim">
+                    <div class="bg-white/5 rounded-xl border border-error-dim/30 p-4 text-error-dim text-sm">
                         Failed to run diagnostics: ${err}
                     </div>
                 `;
@@ -970,6 +1293,13 @@ window.addEventListener('DOMContentLoaded', async () => {
                 runDiagnosticsBtn.disabled = false;
                 runDiagnosticsBtn.innerHTML = '<span class="material-symbols-outlined text-sm">play_arrow</span> Run Diagnostics';
             }
+        });
+    }
+
+    if (showAllBtn) {
+        showAllBtn.addEventListener('click', () => {
+            showingAllDiagnostics = !showingAllDiagnostics;
+            renderDiagnostics(lastDiagnosticsResults, showingAllDiagnostics);
         });
     }
     
@@ -1050,7 +1380,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             cancelTestsBtn.classList.remove('hidden');
 
             testsStatus.classList.remove('hidden');
-            testsStatus.textContent = `Running ${selectedTestType === 'dpi' ? 'DPI' : 'Standard'} tests. This may take several minutes...`;
+            testsStatus.textContent = t('test_running_info', { type: selectedTestType === 'dpi' ? 'DPI' : 'Standard' });
             testsStatus.className = 'text-sm mb-3 text-primary';
 
             // Clear previous
@@ -1060,10 +1390,9 @@ window.addEventListener('DOMContentLoaded', async () => {
             testsResults.classList.add('hidden');
 
             // Update main header status to Testing...
-            $('hero-status').textContent = 'Testing...';
+            $('hero-status').textContent = t('testing');
             $('hero-status').className = 'text-primary';
-            $('header-status').textContent = 'Status: Testing...';
-            $('header-status').className = 'text-[10px] font-bold uppercase tracking-[0.2em] opacity-80 text-primary';
+            $('header-status').innerHTML = `<span class="text-primary"><span data-i18n="status_label">${t('status_label')}</span>:</span> <span class="text-primary" data-i18n="testing">${t('testing')}</span>`;
 
             // Subscribe to streaming events
             let unlistenProgress, unlistenDone;

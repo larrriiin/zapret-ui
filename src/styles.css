@@ -33,6 +33,33 @@
   transition: 0.75s;
 }
 
+@keyframes pulse-opacity {
+  0% { opacity: 1; }
+  50% { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+.animate-status-change {
+  animation: pulse-opacity 0.5s ease-in-out 3;
+}
+
+.multi-column-list {
+  display: block !important;
+  columns: 2;
+  column-gap: 1.5rem;
+}
+
+.multi-column-list > div {
+  break-inside: avoid;
+  margin-bottom: 0.75rem;
+}
+
+@media (min-width: 1400px) {
+  .multi-column-list {
+    columns: 3;
+  }
+}
+
 .logo.tauri:hover {
   filter: drop-shadow(0 0 2em #24c8db);
 }
