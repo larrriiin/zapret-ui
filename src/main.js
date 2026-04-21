@@ -1052,9 +1052,12 @@ window.addEventListener('DOMContentLoaded', async () => {
 
             // Run both checks in parallel
             const [uiUpdate, coreRemoteVersion, coreLocalVersion] = await Promise.all([
-                check(),
-                invoke('get_remote_core_version').catch(() => 'Unknown'),
-                invoke('get_local_version_cmd').catch(() => 'Unknown')
+                check().catch(err => {
+                    console.warn('UI update check failed (normal in dev):', err);
+                    return null;
+                }),
+                invoke('get_remote_core_version').catch((err) => 'Remote Err: ' + err),
+                invoke('get_local_version_cmd').catch((err) => 'Local Err: ' + err)
             ]);
             
             const hasUIUpdate = !!uiUpdate;
@@ -1108,8 +1111,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
         if (!data && manual) {
             // Fallback object if we couldn't fetch anything but were triggered manually
+            const currentUI = ($('ui-version-display')?.textContent || '0.1.0').replace('v', '');
             data = {
-                ui: { available: false, current: uiLocalVersion || '0.1.0', latest: uiLocalVersion || '0.1.0' },
+                ui: { available: false, current: currentUI, latest: currentUI },
                 core: { available: false, current: 'Unknown', latest: 'Unknown' }
             };
         }
@@ -1185,10 +1189,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (checkUpdatesBtn) {
         checkUpdatesBtn.addEventListener('click', () => checkForUpdates(true));
     }
-    
-    // Update modal buttons
-    $('update-later').addEventListener('click', hideUpdateModal);
-    $('latest-version-ok').addEventListener('click', hideLatestVersionModal);
     
     $('update-now').addEventListener('click', async () => {
         const statusEl = $('update-status');

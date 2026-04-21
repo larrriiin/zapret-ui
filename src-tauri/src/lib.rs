@@ -164,19 +164,29 @@ fn elevate_if_needed() {
 fn get_local_version() -> String {
     let dir = find_binaries_dir();
     let service_bat = dir.join("service.bat");
-    if let Ok(content) = std::fs::read_to_string(service_bat) {
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.to_lowercase().starts_with("set \"local_version=") {
-                let parts: Vec<&str> = trimmed.split('=').collect();
-                if parts.len() > 1 {
-                    let version = parts[1].trim_matches('"');
-                    return version.to_string();
+    
+    if !service_bat.exists() {
+        return format!("Err: Not Found at {:?}", service_bat);
+    }
+
+    match std::fs::read_to_string(&service_bat) {
+        Ok(content) => {
+            for line in content.lines() {
+                let lowercase = line.to_lowercase();
+                if lowercase.contains("local_version=") {
+                    let parts: Vec<&str> = line.splitn(2, '=').collect();
+                    if parts.len() > 1 {
+                        let version = parts[1].trim().trim_matches('"');
+                        if !version.is_empty() {
+                            return version.to_string();
+                        }
+                    }
                 }
             }
+            "Err: No Version String Found".to_string()
         }
+        Err(e) => format!("Err: Read Failed ({})", e),
     }
-    "Unknown".to_string()
 }
 
 #[tauri::command]
