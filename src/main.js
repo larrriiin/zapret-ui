@@ -1149,7 +1149,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                             </div>
                             <div class="flex flex-col items-end gap-3">
                                 ${uiStatus}
-                                ${data.ui.available ? `<button class="px-4 py-2 bg-primary/20 hover:bg-primary/30 border border-primary/20 rounded-xl text-[10px] font-black text-primary uppercase transition-all active:scale-95 shadow-lg shadow-primary/5" onclick="window.downloadAndInstallUIUpdate(window.currentUpdateObject)">${t('update_now')}</button>` : ''}
+                                ${data.ui.available ? `<button class="px-4 py-2 bg-primary/20 hover:bg-primary/30 border border-primary/20 rounded-xl text-[10px] font-black text-primary uppercase transition-all active:scale-95 shadow-lg shadow-primary/5" onclick="window.downloadAndInstallUIUpdate(event, window.currentUpdateObject)">${t('update_now')}</button>` : ''}
                             </div>
                         </div>
 
@@ -1179,6 +1179,31 @@ window.addEventListener('DOMContentLoaded', async () => {
         document.body.appendChild(modal);
     }
     
+    async function downloadAndInstallUIUpdate(event, updateObj) {
+        if (!updateObj) return;
+        try {
+            const btn = event.target;
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = `<span class="material-symbols-outlined text-[10px] animate-spin">refresh</span> ${t('downloading_installing')}`;
+
+            // This triggers the Tauri v2 updater install process
+            await updateObj.downloadAndInstall();
+            
+            // If we are here, it means it's ready to restart (though tauri usually restarts automatically)
+            btn.innerHTML = t('update_installed_restarting');
+        } catch (err) {
+            console.error('UI update failed:', err);
+            alert('UI update failed: ' + err);
+            const btn = event.target;
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = t('update_now');
+            }
+        }
+    }
+
+    window.downloadAndInstallUIUpdate = downloadAndInstallUIUpdate;
     window.downloadAndInstallCoreUpdate = downloadAndInstallCoreUpdate;
     
     // Auto-check on startup (after a short delay)
