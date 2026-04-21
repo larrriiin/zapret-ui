@@ -32,4 +32,4 @@ jobs:
       # No signing or release steps are needed here.
       - name: Build to populate cache
         run: |
-          npx tauri build --bundles none
+          npx tauri build --no-bundle
