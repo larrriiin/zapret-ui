@@ -16,7 +16,7 @@ jobs:
     # runner just like the existing build CI.
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust stable with clippy
         uses: dtolnay/rust-toolchain@stable
@@ -40,7 +40,7 @@ jobs:
     # regardless of the target platform of the crate itself.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install cargo-audit
         run: cargo install --locked cargo-audit
