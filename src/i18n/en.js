@@ -42,6 +42,8 @@ window.i18n_en = {
     "diagnostics": "Diagnostics",
     "diagnostics_desc": "Check system configuration and potential issues",
     "show_all_checks": "Show All Checks",
+    "copy_report": "Copy Report",
+    "report_copied": "Copied!",
     "run_diagnostics": "Run Diagnostics",
     "discord_cache": "Discord Cache",
     "discord_cache_desc": "Clear Discord cache to fix potential connection issues",

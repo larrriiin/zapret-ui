@@ -42,6 +42,8 @@ window.i18n_ru = {
     "diagnostics": "Диагностика",
     "diagnostics_desc": "Проверка конфигурации системы и потенциальных проблем",
     "show_all_checks": "Показать всё",
+    "copy_report": "Скопировать отчёт",
+    "report_copied": "Скопировано!",
     "run_diagnostics": "Запустить диагностику",
     "discord_cache": "Кэш Discord",
     "discord_cache_desc": "Очистка кэша Discord для решения проблем с подключением",

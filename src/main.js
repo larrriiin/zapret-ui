@@ -1316,9 +1316,57 @@ window.addEventListener('DOMContentLoaded', async () => {
     const diagnosticsResults = $('diagnostics-results');
     const discordCacheSection = $('discord-cache-section');
     const showAllBtn = $('diagnostics-show-all-btn');
-    
+    const copyReportBtn = $('diagnostics-copy-btn');
+    const copyReportLabel = $('diagnostics-copy-label');
+
     let lastDiagnosticsResults = null;
     let showingAllDiagnostics = false;
+
+    function buildDiagnosticsReport(result) {
+        if (!result || !result.checks) return '';
+        const lines = [];
+        lines.push(`Zapret UI diagnostics — ${new Date().toISOString()}`);
+        lines.push('');
+        for (const check of result.checks) {
+            const status = (check.status || '').toUpperCase();
+            lines.push(`[${status}] ${check.name}`);
+            if (check.message) lines.push(`    ${check.message}`);
+            if (check.link) lines.push(`    ${check.link}`);
+        }
+        if (result.vpn_services) {
+            lines.push('');
+            lines.push('[INFO] VPN services found');
+            lines.push(`    ${result.vpn_services}`);
+        }
+        return lines.join('\n');
+    }
+
+    async function copyDiagnosticsReport() {
+        if (!lastDiagnosticsResults) return;
+        const report = buildDiagnosticsReport(lastDiagnosticsResults);
+        try {
+            await navigator.clipboard.writeText(report);
+        } catch (_) {
+            // Fallback: temporary textarea
+            const ta = document.createElement('textarea');
+            ta.value = report;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); } catch (_) {}
+            document.body.removeChild(ta);
+        }
+        if (copyReportLabel) {
+            const original = t('copy_report');
+            copyReportLabel.textContent = t('report_copied');
+            setTimeout(() => { copyReportLabel.textContent = original; }, 1500);
+        }
+    }
+
+    if (copyReportBtn) {
+        copyReportBtn.addEventListener('click', copyDiagnosticsReport);
+    }
 
     function renderDiagnostics(result, showAll) {
         diagnosticsResults.innerHTML = '';
@@ -1404,16 +1452,19 @@ window.addEventListener('DOMContentLoaded', async () => {
             diagnosticsResults.classList.remove('hidden');
             discordCacheSection.classList.add('hidden');
             showAllBtn.classList.add('hidden');
+            if (copyReportBtn) copyReportBtn.classList.add('hidden');
             showingAllDiagnostics = false;
-            
+
             try {
                 const result = await invoke('run_diagnostics');
                 lastDiagnosticsResults = result;
                 renderDiagnostics(result, false);
-                
+
                 // Show Discord cache clear option
                 discordCacheSection.classList.remove('hidden');
-                
+                if (copyReportBtn && result && result.checks && result.checks.length) {
+                    copyReportBtn.classList.remove('hidden');
+                }
             } catch (err) {
                 diagnosticsResults.innerHTML = `
                     <div class="bg-white/5 rounded-xl border border-error-dim/30 p-4 text-error-dim text-sm">
