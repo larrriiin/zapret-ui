@@ -78,18 +78,36 @@ const ALLOWED_LIST_FILENAMES: &[&str] = &[
 ];
 
 /// Strategy names come from the frontend and are concatenated into shell
-/// commands and filesystem paths. Restrict them to a conservative charset
-/// and reject separators / traversal sequences.
+/// commands and filesystem paths. Upstream presets use names like
+/// `general (FAKE TLS AUTO ALT2)`, so the allowed charset has to include
+/// spaces and parentheses. We still reject path separators, traversal
+/// sequences, and shell metacharacters that would be unsafe when the name is
+/// substituted into the registry-write / service-creation bat template.
 fn is_safe_strategy_name(name: &str) -> bool {
-    if name.is_empty() || name.len() > 64 {
+    if name.is_empty() || name.len() > 128 {
         return false;
     }
-    if name.contains("..") {
+    if name.contains("..")
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains(':')
+    {
         return false;
     }
-    name.chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
-        && !name.starts_with('.')
+    if name.starts_with('.')
+        || name.starts_with('-')
+        || name.starts_with(' ')
+        || name.ends_with(' ')
+    {
+        return false;
+    }
+    name.chars().all(|c| {
+        c.is_ascii_alphanumeric()
+            || matches!(
+                c,
+                ' ' | '(' | ')' | '[' | ']' | '.' | '_' | '-' | '+' | ','
+            )
+    })
 }
 
 fn ensure_safe_list_filename(filename: &str) -> Result<(), String> {
