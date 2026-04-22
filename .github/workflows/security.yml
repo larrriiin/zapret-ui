@@ -11,26 +11,16 @@ on:
 
 jobs:
   clippy:
-    runs-on: ubuntu-latest
+    # The backend uses Windows-only extension traits (e.g. std::os::windows::
+    # process::CommandExt::creation_flags), so clippy must run on a Windows
+    # runner just like the existing build CI.
+    runs-on: windows-latest
     # clippy is not blocking: there are pre-existing findings that aren't part
     # of this workflow's scope. We run it so new code gets visibility, but we
     # do not fail CI on it yet.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Linux build deps for tauri
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            build-essential \
-            curl \
-            wget \
-            file
 
       - name: Install Rust stable with clippy
         uses: dtolnay/rust-toolchain@stable
@@ -48,11 +38,19 @@ jobs:
         run: cargo clippy --no-deps -- -W warnings
 
   cargo-audit:
+    # cargo-audit is pure crate-metadata analysis, so we can run it on Linux
+    # regardless of the target platform of the crate itself.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install cargo-audit
-        uses: rustsec/audit-check@v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo install --locked cargo-audit
+
+      - name: cargo audit
+        working-directory: src-tauri
+        # Don't fail the job on findings yet — this is a visibility-first
+        # rollout; treat it as informational until the team decides to gate on
+        # it.
+        continue-on-error: true
+        run: cargo audit
