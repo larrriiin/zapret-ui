@@ -118,13 +118,18 @@ fn ensure_safe_list_filename(filename: &str) -> Result<(), String> {
     }
 }
 
-/// Returns the absolute path to a tool shipped in the Windows `System32`
-/// directory, falling back to the bare name outside Windows (so unit tests and
-/// non-Windows targets still compile / run meaningfully).
+/// Returns the absolute path to a tool shipped directly in the Windows
+/// `System32` directory, falling back to the bare name outside Windows (so
+/// unit tests and non-Windows targets still compile / run meaningfully).
 ///
 /// Using absolute paths here avoids `PATH`-based hijacking: a malicious
 /// executable placed earlier in `PATH` than System32 could otherwise be picked
-/// up when we invoke `sc`, `net`, `taskkill`, or `reg`.
+/// up when we invoke `sc`, `net`, `taskkill`, `reg`, or `curl`.
+///
+/// NOTE: this helper is only correct for tools that live directly inside
+/// `System32`. `powershell.exe`, for example, is shipped under
+/// `System32\WindowsPowerShell\v1.0\powershell.exe`; use `powershell_path()`
+/// instead.
 fn system32_tool(name: &str) -> PathBuf {
     #[cfg(windows)]
     {
@@ -135,6 +140,23 @@ fn system32_tool(name: &str) -> PathBuf {
     #[cfg(not(windows))]
     {
         PathBuf::from(name)
+    }
+}
+
+/// Returns the absolute path to the built-in Windows PowerShell 5.x host.
+/// On Windows this is always
+/// `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`.
+fn powershell_path() -> PathBuf {
+    #[cfg(windows)]
+    {
+        let system_root =
+            std::env::var("SystemRoot").unwrap_or_else(|_| String::from(r"C:\Windows"));
+        PathBuf::from(system_root)
+            .join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from("powershell")
     }
 }
 
@@ -390,7 +412,7 @@ fn elevate_if_needed() {
                 ps_args
             );
 
-            let _ = Command::new(system32_tool("powershell.exe"))
+            let _ = Command::new(powershell_path())
                 .args([
                     "-NoProfile",
                     "-WindowStyle",
@@ -1038,7 +1060,7 @@ try {{
         );
 
         let encoded = encode_powershell_command(&ps_script);
-        let mut cmd = Command::new(system32_tool("powershell.exe"));
+        let mut cmd = Command::new(powershell_path());
         cmd.args([
             "-NoProfile",
             "-WindowStyle",
@@ -1104,7 +1126,7 @@ fn stop_zapret(state: State<'_, AppState>) {
 
     if std::fs::write(&bat_path, bat_content).is_ok() {
         // Запускаем bat с правами администратора через PowerShell RunAs.
-        let _ = Command::new(system32_tool("powershell.exe"))
+        let _ = Command::new(powershell_path())
             .args([
                 "-NoProfile",
                 "-WindowStyle", "Hidden",
@@ -1245,7 +1267,7 @@ async fn update_ipset_list() -> Result<String, String> {
             url,
             list_file.to_str().unwrap_or("")
         );
-        Command::new(system32_tool("powershell.exe"))
+        Command::new(powershell_path())
             .args(["-NoProfile", "-Command", &ps_cmd])
             .creation_flags(CREATE_NO_WINDOW)
             .output()
@@ -1354,7 +1376,7 @@ async fn download_and_install_update(window: tauri::Window) -> Result<String, St
         "try {{ (Invoke-WebRequest -Uri '{}' -Headers @{{'Cache-Control'='no-cache'}} -UseBasicParsing -TimeoutSec 10).Content.Trim() }} catch {{ exit 1 }}",
         GITHUB_VERSION_URL
     );
-    let out = Command::new(system32_tool("powershell.exe"))
+    let out = Command::new(powershell_path())
         .args(["-NoProfile", "-Command", &version_cmd])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1401,7 +1423,7 @@ async fn download_and_install_update(window: tauri::Window) -> Result<String, St
         }
     });
 
-    let out = Command::new(system32_tool("powershell.exe"))
+    let out = Command::new(powershell_path())
         .args(["-NoProfile", "-Command", &ps_cmd])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1453,7 +1475,7 @@ async fn download_and_install_update(window: tauri::Window) -> Result<String, St
         extract_dir.to_str().unwrap_or("")
     );
 
-    let ex_status = Command::new(system32_tool("powershell.exe"))
+    let ex_status = Command::new(powershell_path())
         .args(["-NoProfile", "-Command", &extract_cmd])
         .creation_flags(CREATE_NO_WINDOW)
         .status();
@@ -1572,7 +1594,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 2. Proxy check
-    let proxy_check = Command::new(system32_tool("powershell.exe"))
+    let proxy_check = Command::new(powershell_path())
         .args([
             "-NoProfile",
             "-Command",
@@ -1611,7 +1633,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 3. TCP timestamps check
-    let tcp_check = Command::new(system32_tool("powershell.exe"))
+    let tcp_check = Command::new(powershell_path())
         .args([
             "-NoProfile",
             "-Command",
@@ -1877,7 +1899,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 10. DNS over HTTPS check
-    let doh_check = Command::new(system32_tool("powershell.exe"))
+    let doh_check = Command::new(powershell_path())
         .args([
             "-NoProfile",
             "-Command",
@@ -2166,7 +2188,7 @@ async fn run_tests(
     );
 
     // Spawn the process and stream output line by line
-    let mut child = std::process::Command::new(system32_tool("powershell.exe"))
+    let mut child = std::process::Command::new(powershell_path())
         .args([
             "-NoProfile",
             "-ExecutionPolicy",
