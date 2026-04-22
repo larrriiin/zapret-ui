@@ -975,7 +975,12 @@ fn start_zapret(
     if !is_safe_strategy_name(&strategy) {
         return Err(format!("Invalid strategy name: {}", strategy));
     }
-    if mode != "service" && mode != "temp" {
+    // Frontend's "one-shot" button sends `temporary`; a couple of code paths
+    // still reference `temp` historically. Accept both, and anything else is
+    // rejected. Only `service` takes the elevated branch below.
+    let mode_is_service = mode == "service";
+    let mode_is_temp = mode == "temporary" || mode == "temp";
+    if !mode_is_service && !mode_is_temp {
         return Err(format!("Invalid mode: {}", mode));
     }
 
