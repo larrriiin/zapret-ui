@@ -220,10 +220,12 @@ fn resolve_list_path(filename: &str) -> Result<PathBuf, String> {
             e
         )
     })?;
+    let canonical_parent = strip_verbatim_prefix(canonical_parent);
 
     if file_path.exists() {
         let canonical_file = std::fs::canonicalize(&file_path)
             .map_err(|e| format!("Failed to resolve {}: {}", file_path.display(), e))?;
+        let canonical_file = strip_verbatim_prefix(canonical_file);
         if !canonical_file.starts_with(&canonical_parent) {
             return Err(format!(
                 "List file {} escapes its directory",
@@ -268,6 +270,7 @@ fn extract_zip_safely(zip_path: &std::path::Path, dest: &std::path::Path) -> Res
         .map_err(|e| format!("Failed to read zip {}: {}", zip_path.display(), e))?;
 
     let canonical_dest = std::fs::canonicalize(dest)
+        .map(strip_verbatim_prefix)
         .map_err(|e| format!("Failed to canonicalize {}: {}", dest.display(), e))?;
 
     for i in 0..archive.len() {
@@ -413,12 +416,48 @@ async fn fetch_expected_sha256(version: &str, asset_name: &str) -> Result<String
     Ok(hex.to_ascii_lowercase())
 }
 
+/// On Windows, `std::fs::canonicalize` returns the verbatim/extended-length
+/// form (e.g. `\\?\C:\foo\bar`). That form is fine for Rust's file APIs but
+/// breaks `cmd.exe` and downstream `.bat` scripts, which refuse to use it as
+/// current directory. Strip the `\\?\` prefix for normal drive paths and
+/// leave UNC/network paths alone.
+fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = match path.to_str() {
+            Some(s) => s,
+            None => return path,
+        };
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            // Drive-letter form: "C:\..." — safe to strip.
+            let bytes = rest.as_bytes();
+            if bytes.len() >= 3
+                && bytes[0].is_ascii_alphabetic()
+                && bytes[1] == b':'
+                && bytes[2] == b'\\'
+            {
+                return PathBuf::from(rest);
+            }
+            // Verbatim UNC "\\?\UNC\server\share" — rewrite to "\\server\share".
+            if let Some(unc_rest) = rest.strip_prefix("UNC\\") {
+                let mut out = String::from(r"\\");
+                out.push_str(unc_rest);
+                return PathBuf::from(out);
+            }
+        }
+    }
+    path
+}
+
 /// Returns `path` with symlinks resolved if it exists; otherwise returns
 /// `path` unchanged. We canonicalize every resolved `binaries/` root so that
 /// callers composing paths via `dir.join(...)` can't be fooled by a symlink
 /// swap after the initial existence check.
 fn canonicalize_or_passthrough(path: PathBuf) -> PathBuf {
-    std::fs::canonicalize(&path).unwrap_or(path)
+    match std::fs::canonicalize(&path) {
+        Ok(p) => strip_verbatim_prefix(p),
+        Err(_) => path,
+    }
 }
 
 fn find_binaries_dir() -> PathBuf {
@@ -1110,13 +1149,15 @@ fn start_zapret(
         // under `binaries/bin/`, not at a symlink that could later be
         // redirected to an attacker-controlled binary.
         let bin_path_raw = dir.join("bin").join("winws.exe");
-        let bin_path = std::fs::canonicalize(&bin_path_raw).map_err(|e| {
-            format!(
-                "Failed to resolve {}: {}",
-                bin_path_raw.display(),
-                e
-            )
-        })?;
+        let bin_path = std::fs::canonicalize(&bin_path_raw)
+            .map(strip_verbatim_prefix)
+            .map_err(|e| {
+                format!(
+                    "Failed to resolve {}: {}",
+                    bin_path_raw.display(),
+                    e
+                )
+            })?;
         if !bin_path.starts_with(&dir) {
             return Err(format!(
                 "winws.exe resolves outside binaries dir: {}",
