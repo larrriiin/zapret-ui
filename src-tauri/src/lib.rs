@@ -2,7 +2,23 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
+
+/// Acquire `Mutex` access without panicking when the mutex is poisoned. If a
+/// previous holder panicked the data is still well-formed for our use-cases
+/// (mostly `Option<...>` state in `AppState`), so recovering is strictly
+/// better than bringing the whole tray/UI thread down with an unwrap.
+trait MutexExt<T> {
+    fn lock_unpoisoned(&self) -> MutexGuard<'_, T>;
+}
+impl<T> MutexExt<T> for Mutex<T> {
+    fn lock_unpoisoned(&self) -> MutexGuard<'_, T> {
+        match self.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+}
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::Emitter;
@@ -204,10 +220,12 @@ fn resolve_list_path(filename: &str) -> Result<PathBuf, String> {
             e
         )
     })?;
+    let canonical_parent = strip_verbatim_prefix(canonical_parent);
 
     if file_path.exists() {
         let canonical_file = std::fs::canonicalize(&file_path)
             .map_err(|e| format!("Failed to resolve {}: {}", file_path.display(), e))?;
+        let canonical_file = strip_verbatim_prefix(canonical_file);
         if !canonical_file.starts_with(&canonical_parent) {
             return Err(format!(
                 "List file {} escapes its directory",
@@ -239,6 +257,69 @@ fn encode_powershell_command(script: &str) -> String {
         .flat_map(|u| u.to_le_bytes())
         .collect();
     base64::engine::general_purpose::STANDARD.encode(utf16_le)
+}
+
+/// Extracts `zip_path` into `dest`, rejecting any entry whose resolved path
+/// would escape `dest` (zip-slip). `dest` must already exist.
+fn extract_zip_safely(zip_path: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(zip_path)
+        .map_err(|e| format!("Failed to open {}: {}", zip_path.display(), e))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| format!("Failed to read zip {}: {}", zip_path.display(), e))?;
+
+    let canonical_dest = std::fs::canonicalize(dest)
+        .map(strip_verbatim_prefix)
+        .map_err(|e| format!("Failed to canonicalize {}: {}", dest.display(), e))?;
+
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| format!("Failed to read zip entry {}: {}", i, e))?;
+
+        // `enclosed_name` strips `..` and absolute-path components; if the
+        // archive still contains something unsafe we bail out entirely.
+        let rel = entry
+            .enclosed_name()
+            .ok_or_else(|| format!("Unsafe path in archive: {:?}", entry.name()))?;
+        let out_path = canonical_dest.join(&rel);
+
+        if entry.is_dir() {
+            std::fs::create_dir_all(&out_path).map_err(|e| {
+                format!("Failed to create dir {}: {}", out_path.display(), e)
+            })?;
+            continue;
+        }
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create dir {}: {}", parent.display(), e))?;
+        }
+
+        // Defense in depth: even after `enclosed_name` validation, verify the
+        // final write target is strictly below `dest`.
+        if !out_path.starts_with(&canonical_dest) {
+            return Err(format!(
+                "Zip entry {} resolves outside destination",
+                rel.display()
+            ));
+        }
+
+        let mut out = std::fs::File::create(&out_path)
+            .map_err(|e| format!("Failed to create {}: {}", out_path.display(), e))?;
+        let mut buf = [0u8; 16 * 1024];
+        loop {
+            let n = entry
+                .read(&mut buf)
+                .map_err(|e| format!("Failed to read {}: {}", rel.display(), e))?;
+            if n == 0 {
+                break;
+            }
+            std::io::Write::write_all(&mut out, &buf[..n])
+                .map_err(|e| format!("Failed to write {}: {}", out_path.display(), e))?;
+        }
+    }
+    Ok(())
 }
 
 /// Computes the SHA-256 digest of a file as a lowercase hex string.
@@ -335,13 +416,57 @@ async fn fetch_expected_sha256(version: &str, asset_name: &str) -> Result<String
     Ok(hex.to_ascii_lowercase())
 }
 
+/// On Windows, `std::fs::canonicalize` returns the verbatim/extended-length
+/// form (e.g. `\\?\C:\foo\bar`). That form is fine for Rust's file APIs but
+/// breaks `cmd.exe` and downstream `.bat` scripts, which refuse to use it as
+/// current directory. Strip the `\\?\` prefix for normal drive paths and
+/// leave UNC/network paths alone.
+fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = match path.to_str() {
+            Some(s) => s,
+            None => return path,
+        };
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            // Drive-letter form: "C:\..." — safe to strip.
+            let bytes = rest.as_bytes();
+            if bytes.len() >= 3
+                && bytes[0].is_ascii_alphabetic()
+                && bytes[1] == b':'
+                && bytes[2] == b'\\'
+            {
+                return PathBuf::from(rest);
+            }
+            // Verbatim UNC "\\?\UNC\server\share" — rewrite to "\\server\share".
+            if let Some(unc_rest) = rest.strip_prefix("UNC\\") {
+                let mut out = String::from(r"\\");
+                out.push_str(unc_rest);
+                return PathBuf::from(out);
+            }
+        }
+    }
+    path
+}
+
+/// Returns `path` with symlinks resolved if it exists; otherwise returns
+/// `path` unchanged. We canonicalize every resolved `binaries/` root so that
+/// callers composing paths via `dir.join(...)` can't be fooled by a symlink
+/// swap after the initial existence check.
+fn canonicalize_or_passthrough(path: PathBuf) -> PathBuf {
+    match std::fs::canonicalize(&path) {
+        Ok(p) => strip_verbatim_prefix(p),
+        Err(_) => path,
+    }
+}
+
 fn find_binaries_dir() -> PathBuf {
     // 1. Direct sibling of the exe (production after first download)
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             let candidate = parent.join("binaries");
             if candidate.exists() {
-                return candidate;
+                return canonicalize_or_passthrough(candidate);
             }
         }
     }
@@ -353,7 +478,7 @@ fn find_binaries_dir() -> PathBuf {
             if let Some(d) = &dir {
                 let candidate = d.join("binaries");
                 if candidate.exists() {
-                    return candidate;
+                    return canonicalize_or_passthrough(candidate);
                 }
                 dir = d.parent().map(|p| p.to_path_buf());
             } else {
@@ -366,11 +491,13 @@ fn find_binaries_dir() -> PathBuf {
     if let Ok(cwd) = std::env::current_dir() {
         let candidate = cwd.join("binaries");
         if candidate.exists() {
-            return candidate;
+            return canonicalize_or_passthrough(candidate);
         }
     }
 
-    // 4. Default: next to exe (will be created on first download)
+    // 4. Default: next to exe (will be created on first download). Don't
+    // canonicalize — the directory doesn't exist yet and canonicalize() would
+    // fail on Windows in that case.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             return parent.join("binaries");
@@ -533,10 +660,10 @@ fn parse_bat_args(strategy: &str) -> Result<String, String> {
 
     // Собираем полную команду: первая строка + все строки-продолжения (^)
     let mut full_command = String::new();
-    for i in found_idx..lines.len() {
-        let line = lines[i].trim();
-        if line.ends_with('^') {
-            full_command.push_str(&line[..line.len() - 1]);
+    for raw in lines.iter().skip(found_idx) {
+        let line = raw.trim();
+        if let Some(rest) = line.strip_suffix('^') {
+            full_command.push_str(rest);
             full_command.push(' ');
         } else {
             full_command.push_str(line);
@@ -680,7 +807,7 @@ fn check_status_full() -> Result<String, String> {
             // 1060 means service does not exist
         } else {
             // Might be start_pending or other
-            output.push_str(&format!("\"zapret\" service state is UNKNOWN.\n"));
+            output.push_str("\"zapret\" service state is UNKNOWN.\n");
         }
     }
 
@@ -699,8 +826,8 @@ fn check_status_full() -> Result<String, String> {
     }
 
     // 4. Check bypass (winws.exe)
-    output.push_str("\n");
-    let task = Command::new("tasklist")
+    output.push('\n');
+    let task = Command::new(system32_tool("tasklist.exe"))
         .args(["/FI", "IMAGENAME eq winws.exe"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -816,7 +943,7 @@ fn get_zapret_status(state: State<'_, AppState>) -> ZapretStatus {
         running = true;
     }
 
-    let mut strategy_lock = state.active_strategy.lock().unwrap();
+    let mut strategy_lock = state.active_strategy.lock_unpoisoned();
 
     if !running {
         *strategy_lock = None;
@@ -1016,7 +1143,27 @@ fn start_zapret(
 
     if mode == "service" {
         let args = parse_bat_args(&strategy)?;
-        let bin_path = dir.join("bin").join("winws.exe");
+
+        // Canonicalize winws.exe before writing it into the service binPath in
+        // the registry. That way the service points at the *real* executable
+        // under `binaries/bin/`, not at a symlink that could later be
+        // redirected to an attacker-controlled binary.
+        let bin_path_raw = dir.join("bin").join("winws.exe");
+        let bin_path = std::fs::canonicalize(&bin_path_raw)
+            .map(strip_verbatim_prefix)
+            .map_err(|e| {
+                format!(
+                    "Failed to resolve {}: {}",
+                    bin_path_raw.display(),
+                    e
+                )
+            })?;
+        if !bin_path.starts_with(&dir) {
+            return Err(format!(
+                "winws.exe resolves outside binaries dir: {}",
+                bin_path.display()
+            ));
+        }
         let bin_str = bin_path.to_str().unwrap_or_default();
 
         // Проверяем что аргументы не пустые
@@ -1103,8 +1250,8 @@ try {{
             .map_err(|e| format!("Не удалось запустить стратегию: {}", e))?;
     }
 
-    *state.active_strategy.lock().unwrap() = Some(strategy.clone());
-    *state.last_strategy.lock().unwrap() = Some(strategy);
+    *state.active_strategy.lock_unpoisoned() = Some(strategy.clone());
+    *state.last_strategy.lock_unpoisoned() = Some(strategy);
     Ok("Connected".into())
 }
 
@@ -1112,37 +1259,38 @@ try {{
 /// Требует прав администратора — запрашивает их через PowerShell -Verb RunAs.
 #[tauri::command]
 fn stop_zapret(state: State<'_, AppState>) {
-    // Пишем bat-файл со всеми командами остановки во временную папку
-    let bat_path = std::env::temp_dir().join("zapret_stop.bat");
-
-    let bat_content = concat!(
-        "@echo off\r\n",
-        // Останавливаем и удаляем сервис zapret
-        "net stop zapret 2>nul\r\n",
-        "sc delete zapret 2>nul\r\n",
-        // Убиваем процесс winws.exe
-        "taskkill /F /IM winws.exe 2>nul\r\n",
-        // Останавливаем и удаляем WinDivert
-        "net stop WinDivert 2>nul\r\n",
-        "sc delete WinDivert 2>nul\r\n",
-        "net stop WinDivert14 2>nul\r\n",
-        "sc delete WinDivert14 2>nul\r\n"
-    );
-
-    if std::fs::write(&bat_path, bat_content).is_ok() {
-        // Запускаем bat с правами администратора через PowerShell RunAs.
-        let _ = Command::new(powershell_path())
-            .args([
-                "-NoProfile",
-                "-WindowStyle", "Hidden",
-                "-Command",
-                "Start-Process cmd.exe -ArgumentList '/c %TEMP%\\zapret_stop.bat' -Verb RunAs -Wait -WindowStyle Hidden",
-            ])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
+    // Скрипт остановки передаётся elevated-повершеллу через -EncodedCommand
+    // (см. start_zapret — та же TOCTOU-защита). Никакого промежуточного
+    // `.bat` в `%TEMP%` больше не пишем: подменить payload между write и
+    // elevated-exec под нашим UID больше нельзя.
+    let ps_script = r#"$ErrorActionPreference = 'Continue'
+$sys = "$env:SystemRoot\System32"
+try { Stop-Service -Name zapret -Force -ErrorAction SilentlyContinue } catch {}
+if (Get-Service -Name zapret -ErrorAction SilentlyContinue) {
+    & "$sys\sc.exe" delete zapret | Out-Null
+}
+& "$sys\taskkill.exe" /F /IM winws.exe 2>$null | Out-Null
+foreach ($svc in @('WinDivert','WinDivert14')) {
+    try { Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue } catch {}
+    if (Get-Service -Name $svc -ErrorAction SilentlyContinue) {
+        & "$sys\sc.exe" delete $svc | Out-Null
     }
+}
+"#;
+    let encoded = encode_powershell_command(ps_script);
+    let _ = Command::new(powershell_path())
+        .args([
+            "-NoProfile",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            "Start-Process -FilePath powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList @('-NoProfile','-WindowStyle','Hidden','-EncodedCommand',$env:ZAPRET_PS_PAYLOAD)",
+        ])
+        .env("ZAPRET_PS_PAYLOAD", &encoded)
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
 
-    *state.active_strategy.lock().unwrap() = None;
+    *state.active_strategy.lock_unpoisoned() = None;
 }
 
 // ─── User Lists Management ────────────────────────────────────────────────────
@@ -1474,20 +1622,11 @@ async fn download_and_install_update(window: tauri::Window) -> Result<String, St
     let extract_dir = temp_dir.join("extracted");
     let _ = std::fs::create_dir_all(&extract_dir);
 
-    let extract_cmd = format!(
-        "Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
-        zip_path.to_str().unwrap_or(""),
-        extract_dir.to_str().unwrap_or("")
-    );
-
-    let ex_status = Command::new(powershell_path())
-        .args(["-NoProfile", "-Command", &extract_cmd])
-        .creation_flags(CREATE_NO_WINDOW)
-        .status();
-
-    if ex_status.is_err() || !ex_status.unwrap().success() {
-        return Err("Extraction failed".to_string());
-    }
+    // Extract natively via the `zip` crate instead of calling
+    // `Expand-Archive`. Every entry name is validated against `..`, absolute
+    // paths, and drive-letter prefixes before it is written, preventing
+    // zip-slip from placing files outside `extract_dir`.
+    extract_zip_safely(&zip_path, &extract_dir)?;
 
     window.emit("download-progress", 95).ok();
 
@@ -1517,7 +1656,7 @@ async fn download_and_install_update(window: tauri::Window) -> Result<String, St
 }
 
 /// Recursively copies directory contents
-fn copy_dir_contents(src: &PathBuf, dst: &PathBuf) -> Result<(), String> {
+fn copy_dir_contents(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
     for entry in std::fs::read_dir(src).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
@@ -2083,9 +2222,7 @@ fn clear_discord_cache() -> Result<String, String> {
         }
     }
 
-    if cleared > 0 {
-        Ok(messages.join("\n"))
-    } else if discord_was_running {
+    if cleared > 0 || discord_was_running {
         Ok(messages.join("\n"))
     } else {
         Ok("No Discord cache found to clear".to_string())
@@ -2119,7 +2256,7 @@ struct TestProgress {
 /// Cancels a running test process
 #[tauri::command]
 fn cancel_tests(state: State<'_, AppState>) {
-    let mut pid_lock = state.test_process_pid.lock().unwrap();
+    let mut pid_lock = state.test_process_pid.lock_unpoisoned();
     if let Some(pid) = pid_lock.take() {
         // Kill process tree (/T = tree, /F = force)
         let _ = Command::new(system32_tool("taskkill.exe"))
@@ -2211,7 +2348,7 @@ async fn run_tests(
     // Store PID so cancel_tests / window-close can kill the process
     {
         let state = app.state::<AppState>();
-        let mut pid_lock = state.test_process_pid.lock().unwrap();
+        let mut pid_lock = state.test_process_pid.lock_unpoisoned();
         *pid_lock = Some(child.id());
     }
 
@@ -2220,44 +2357,41 @@ async fn run_tests(
 
     let mut all_lines: Vec<String> = Vec::new();
 
-    for line_result in reader.lines() {
-        if let Ok(raw) = line_result {
-            // Strip ANSI color codes and trim
-            let clean: String = raw.chars().filter(|c| c.is_ascii() || *c == '\n').collect();
-            let line = clean.trim().to_string();
-            if line.is_empty() {
-                continue;
-            }
-
-            all_lines.push(line.clone());
-
-            // Classify the line for coloring in the UI
-            let kind = if line.contains("[ERROR]") || line.contains("[X]") {
-                "error"
-            } else if line.contains("[WARNING]") || line.contains("[WARN]") || line.contains("[?]")
-            {
-                "warning"
-            } else if line.contains("[OK]")
-                || line.contains("Best config:")
-                || line.contains("Best strategy:")
-            {
-                "success"
-            } else if line.contains("---") || line.contains("===") {
-                "separator"
-            } else if line.starts_with("  [") {
-                "config"
-            } else {
-                "info"
-            };
-
-            let _ = app.emit(
-                "test-progress",
-                serde_json::json!({
-                    "line": line,
-                    "kind": kind
-                }),
-            );
+    for raw in reader.lines().map_while(Result::ok) {
+        // Strip ANSI color codes and trim
+        let clean: String = raw.chars().filter(|c| c.is_ascii() || *c == '\n').collect();
+        let line = clean.trim().to_string();
+        if line.is_empty() {
+            continue;
         }
+
+        all_lines.push(line.clone());
+
+        // Classify the line for coloring in the UI
+        let kind = if line.contains("[ERROR]") || line.contains("[X]") {
+            "error"
+        } else if line.contains("[WARNING]") || line.contains("[WARN]") || line.contains("[?]") {
+            "warning"
+        } else if line.contains("[OK]")
+            || line.contains("Best config:")
+            || line.contains("Best strategy:")
+        {
+            "success"
+        } else if line.contains("---") || line.contains("===") {
+            "separator"
+        } else if line.starts_with("  [") {
+            "config"
+        } else {
+            "info"
+        };
+
+        let _ = app.emit(
+            "test-progress",
+            serde_json::json!({
+                "line": line,
+                "kind": kind
+            }),
+        );
     }
 
     let _ = child.wait();
@@ -2265,7 +2399,7 @@ async fn run_tests(
     // Clear PID — process finished (or was killed)
     {
         let state = app.state::<AppState>();
-        let mut pid_lock = state.test_process_pid.lock().unwrap();
+        let mut pid_lock = state.test_process_pid.lock_unpoisoned();
         *pid_lock = None;
     }
 
@@ -2334,18 +2468,18 @@ fn update_tray_translations(
     app: tauri::AppHandle,
 ) {
     {
-        let mut lock = state.translations.lock().unwrap();
+        let mut lock = state.translations.lock_unpoisoned();
         *lock = Some(translations.clone());
     }
 
     // Update labels that don't depend on status
-    if let Some(mi) = state.quit_item.lock().unwrap().as_ref() {
+    if let Some(mi) = state.quit_item.lock_unpoisoned().as_ref() {
         let _ = mi.set_text(&translations.exit);
     }
-    if let Some(mi) = state.show_item.lock().unwrap().as_ref() {
+    if let Some(mi) = state.show_item.lock_unpoisoned().as_ref() {
         let _ = mi.set_text(&translations.show);
     }
-    if let Some(mi) = state.strategies_submenu.lock().unwrap().as_ref() {
+    if let Some(mi) = state.strategies_submenu.lock_unpoisoned().as_ref() {
         let _ = mi.set_text(&translations.change_strategy);
     }
 
@@ -2355,13 +2489,13 @@ fn update_tray_translations(
 fn refresh_tray_menu(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
     let status = get_zapret_status(state.clone());
-    let trans_lock = state.translations.lock().unwrap();
+    let trans_lock = state.translations.lock_unpoisoned();
     let trans = match trans_lock.as_ref() {
         Some(t) => t,
         None => return, // Wait until translations are loaded
     };
 
-    let status_mi = state.status_item.lock().unwrap().clone();
+    let status_mi = state.status_item.lock_unpoisoned().clone();
     if let Some(mi) = status_mi {
         let status_text = if status.running {
             &trans.status_on
@@ -2372,7 +2506,7 @@ fn refresh_tray_menu(app: &tauri::AppHandle) {
         let _ = mi.set_text(text);
     }
 
-    let strategy_mi = state.strategy_item.lock().unwrap().clone();
+    let strategy_mi = state.strategy_item.lock_unpoisoned().clone();
     if let Some(mi) = strategy_mi {
         let text = format!(
             "{}{}",
@@ -2382,7 +2516,7 @@ fn refresh_tray_menu(app: &tauri::AppHandle) {
         let _ = mi.set_text(text);
     }
 
-    let toggle_mi = state.toggle_item.lock().unwrap().clone();
+    let toggle_mi = state.toggle_item.lock_unpoisoned().clone();
     if let Some(mi) = toggle_mi {
         let text = if status.running {
             &trans.toggle_off
@@ -2441,11 +2575,11 @@ pub fn run() {
             // Сохраняем ссылки для динамического обновления
             {
                 let state = app.state::<AppState>();
-                *state.status_item.lock().unwrap() = Some(status_info.clone());
-                *state.strategy_item.lock().unwrap() = Some(strategy_info.clone());
-                *state.toggle_item.lock().unwrap() = Some(toggle_i.clone());
-                *state.quit_item.lock().unwrap() = Some(quit_i.clone());
-                *state.show_item.lock().unwrap() = Some(show_i.clone());
+                *state.status_item.lock_unpoisoned() = Some(status_info.clone());
+                *state.strategy_item.lock_unpoisoned() = Some(strategy_info.clone());
+                *state.toggle_item.lock_unpoisoned() = Some(toggle_i.clone());
+                *state.quit_item.lock_unpoisoned() = Some(quit_i.clone());
+                *state.show_item.lock_unpoisoned() = Some(show_i.clone());
             }
 
             // Загружаем стратегии
@@ -2458,7 +2592,7 @@ pub fn run() {
             let strategies_submenu = strategies_menu_builder.build()?;
             {
                 let state = app.state::<AppState>();
-                *state.strategies_submenu.lock().unwrap() = Some(strategies_submenu.clone());
+                *state.strategies_submenu.lock_unpoisoned() = Some(strategies_submenu.clone());
             }
 
             let menu = MenuBuilder::new(app)
@@ -2486,7 +2620,7 @@ pub fn run() {
                                 let _ = window.set_focus();
                                 // Скрываем иконку при разворачивании
                                 let state = app.state::<AppState>();
-                                let tray_opt = state.tray_handle.lock().unwrap().clone();
+                                let tray_opt = state.tray_handle.lock_unpoisoned().clone();
                                 if let Some(tray) = tray_opt {
                                     let _ = tray.set_visible(false);
                                 }
@@ -2498,11 +2632,11 @@ pub fn run() {
                             if status.running {
                                 stop_zapret(state);
                             } else {
-                                let last = state.last_strategy.lock().unwrap().clone();
+                                let last = state.last_strategy.lock_unpoisoned().clone();
                                 let available = get_strategies().unwrap_or_default();
                                 let strategy = last
                                     .or(status.strategy)
-                                    .or_else(|| available.get(0).cloned());
+                                    .or_else(|| available.first().cloned());
                                 if let Some(s) = strategy {
                                     let _ = start_zapret(s, "service".to_string(), state);
                                 }
@@ -2548,7 +2682,7 @@ pub fn run() {
             {
                 let state = app.state::<AppState>();
                 let _ = tray.set_visible(false);
-                *state.tray_handle.lock().unwrap() = Some(tray);
+                *state.tray_handle.lock_unpoisoned() = Some(tray);
             }
 
             // Первоначальное обновление меню и детекция запущенной стратегии
@@ -2557,7 +2691,7 @@ pub fn run() {
                 let status = get_zapret_status(state.clone());
                 if status.running {
                     if let Some(s) = status.strategy {
-                        *state.last_strategy.lock().unwrap() = Some(s);
+                        *state.last_strategy.lock_unpoisoned() = Some(s);
                     }
                 }
                 refresh_tray_menu(app.handle());
@@ -2572,14 +2706,14 @@ pub fn run() {
 
                 // Показываем иконку при сворачивании в трей
                 let state = window.app_handle().state::<AppState>();
-                let tray_opt = state.tray_handle.lock().unwrap().clone();
+                let tray_opt = state.tray_handle.lock_unpoisoned().clone();
                 if let Some(tray) = tray_opt {
                     let _ = tray.set_visible(true);
                 }
 
                 // Показываем уведомление (один раз за сессию)
                 if !state.notification_shown.swap(true, Ordering::SeqCst) {
-                    let trans_lock = state.translations.lock().unwrap();
+                    let trans_lock = state.translations.lock_unpoisoned();
                     let (title, body) = match trans_lock.as_ref() {
                         Some(t) => (&t.minimized_title, &t.minimized_body),
                         None => (
@@ -2599,7 +2733,7 @@ pub fn run() {
 
                 // Kill any running test process when the window is closed
                 let state = window.app_handle().state::<AppState>();
-                let mut pid_lock = state.test_process_pid.lock().unwrap();
+                let mut pid_lock = state.test_process_pid.lock_unpoisoned();
                 if let Some(pid) = pid_lock.take() {
                     let _ = Command::new(system32_tool("taskkill.exe"))
                         .arg("/F")
