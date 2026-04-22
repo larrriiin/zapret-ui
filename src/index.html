@@ -493,9 +493,15 @@
                     <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-primary" data-i18n="diagnostics">Diagnostics</h3>
                     <p class="text-xs text-on-surface-variant mt-1" data-i18n="diagnostics_desc">Check system configuration and potential issues</p>
                 </div>
-                <button id="diagnostics-show-all-btn" class="hidden px-4 py-2 border border-outline-variant/30 rounded-xl text-[10px] font-bold uppercase tracking-widest text-on-surface-variant hover:text-secondary hover:border-secondary/50 transition-colors" data-i18n="show_all_checks">
-                    Show All Checks
-                </button>
+                <div class="flex items-center gap-2">
+                    <button id="diagnostics-copy-btn" class="hidden px-4 py-2 border border-outline-variant/30 rounded-xl text-[10px] font-bold uppercase tracking-widest text-on-surface-variant hover:text-secondary hover:border-secondary/50 transition-colors flex items-center gap-1.5">
+                        <span class="material-symbols-outlined text-sm">content_copy</span>
+                        <span id="diagnostics-copy-label" data-i18n="copy_report">Copy Report</span>
+                    </button>
+                    <button id="diagnostics-show-all-btn" class="hidden px-4 py-2 border border-outline-variant/30 rounded-xl text-[10px] font-bold uppercase tracking-widest text-on-surface-variant hover:text-secondary hover:border-secondary/50 transition-colors" data-i18n="show_all_checks">
+                        Show All Checks
+                    </button>
+                </div>
             </div>
 
             <!-- Diagnostics Results -->

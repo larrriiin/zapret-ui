@@ -1,10 +1,11 @@
 {
   "name": "zapret-ui",
   "private": true,
-  "version": "1.26.4",
+  "version": "2026.5.12",
   "type": "module",
   "scripts": {
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "check-versions": "node scripts/check-versions.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

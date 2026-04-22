@@ -1,0 +1,19 @@
+name: "checks"
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  versions:
+    # Runs on every PR and push to main to catch silent version drift between
+    # package.json, Cargo.toml and tauri.conf.json before it reaches a tag.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Verify version strings are in sync
+        run: node scripts/check-versions.mjs
