@@ -118,6 +118,107 @@ fn ensure_safe_list_filename(filename: &str) -> Result<(), String> {
     }
 }
 
+/// Returns the absolute path to a tool shipped in the Windows `System32`
+/// directory, falling back to the bare name outside Windows (so unit tests and
+/// non-Windows targets still compile / run meaningfully).
+///
+/// Using absolute paths here avoids `PATH`-based hijacking: a malicious
+/// executable placed earlier in `PATH` than System32 could otherwise be picked
+/// up when we invoke `sc`, `net`, `taskkill`, or `reg`.
+fn system32_tool(name: &str) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let system_root =
+            std::env::var("SystemRoot").unwrap_or_else(|_| String::from(r"C:\Windows"));
+        PathBuf::from(system_root).join("System32").join(name)
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from(name)
+    }
+}
+
+/// Lightweight shape check for a single entry in a user list. The frontend
+/// already validates the same invariants, but the backend must not trust that
+/// — we're about to write this string into a file that is read back by the
+/// native `winws.exe` driver. Reject anything that would smuggle newlines,
+/// comment markers, or shell metacharacters.
+fn is_safe_list_entry(entry: &str) -> bool {
+    if entry.is_empty() || entry.len() > 253 {
+        return false;
+    }
+    // No control characters, CR/LF, tabs, or NUL.
+    if entry.chars().any(|c| c.is_control()) {
+        return false;
+    }
+    // No leading '#': the file format uses '#' to denote comments and zapret
+    // must not interpret user entries as comments or be tricked into skipping
+    // adjacent lines.
+    if entry.starts_with('#') {
+        return false;
+    }
+    // Conservative charset: hostnames, IPv4, IPv4/CIDR, IPv6 literal/CIDR.
+    entry
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':' | '/'))
+}
+
+/// Ensures that the requested list file resolves to a path strictly below
+/// `<binaries>/lists/`. Protects against symlink-based traversal that would
+/// otherwise allow the filename allowlist to be sidestepped at runtime.
+fn resolve_list_path(filename: &str) -> Result<PathBuf, String> {
+    ensure_safe_list_filename(filename)?;
+    let lists_dir = find_binaries_dir().join("lists");
+    let file_path = lists_dir.join(filename);
+
+    // If the parent resolves, require the file to resolve inside it. When the
+    // file does not yet exist on disk (first write), canonicalize the parent
+    // and re-join the bare filename — this still blocks `..` from being smuggled
+    // via a symlink at `lists/`.
+    let canonical_parent = std::fs::canonicalize(&lists_dir).map_err(|e| {
+        format!(
+            "Failed to resolve lists directory {}: {}",
+            lists_dir.display(),
+            e
+        )
+    })?;
+
+    if file_path.exists() {
+        let canonical_file = std::fs::canonicalize(&file_path)
+            .map_err(|e| format!("Failed to resolve {}: {}", file_path.display(), e))?;
+        if !canonical_file.starts_with(&canonical_parent) {
+            return Err(format!(
+                "List file {} escapes its directory",
+                filename
+            ));
+        }
+        Ok(canonical_file)
+    } else {
+        Ok(canonical_parent.join(filename))
+    }
+}
+
+/// Escapes a value for embedding inside a PowerShell single-quoted string.
+fn ps_single_quote_escape(s: &str) -> String {
+    s.replace('\'', "''")
+}
+
+/// Encodes a PowerShell script for `powershell.exe -EncodedCommand`. The
+/// expected format is base64 over the UTF-16LE bytes of the script.
+///
+/// Passing the script via the command-line this way (as opposed to writing a
+/// `.bat` into `%TEMP%` and then executing it with `-Verb RunAs`) eliminates a
+/// TOCTOU window: other processes under the same user cannot swap in a
+/// malicious payload between our write and the elevated execute.
+fn encode_powershell_command(script: &str) -> String {
+    use base64::Engine;
+    let utf16_le: Vec<u8> = script
+        .encode_utf16()
+        .flat_map(|u| u.to_le_bytes())
+        .collect();
+    base64::engine::general_purpose::STANDARD.encode(utf16_le)
+}
+
 /// Computes the SHA-256 digest of a file as a lowercase hex string.
 fn sha256_file(path: &std::path::Path) -> Result<String, String> {
     use sha2::{Digest, Sha256};
@@ -259,7 +360,7 @@ fn find_binaries_dir() -> PathBuf {
 
 fn is_admin() -> bool {
     // net session — самый быстрый и надежный способ проверки прав администратора на Windows
-    Command::new("net")
+    Command::new(system32_tool("net.exe"))
         .arg("session")
         .creation_flags(CREATE_NO_WINDOW)
         .status()
@@ -289,7 +390,7 @@ fn elevate_if_needed() {
                 ps_args
             );
 
-            let _ = Command::new("powershell")
+            let _ = Command::new(system32_tool("powershell.exe"))
                 .args([
                     "-NoProfile",
                     "-WindowStyle",
@@ -421,8 +522,6 @@ fn parse_bat_args(strategy: &str) -> Result<String, String> {
         }
     }
 
-    eprintln!("[DEBUG] Full command for '{}': {}", strategy, full_command);
-
     // Извлекаем аргументы после winws.exe
     let cmd_lower = full_command.to_lowercase();
     let mut args = String::new();
@@ -439,30 +538,25 @@ fn parse_bat_args(strategy: &str) -> Result<String, String> {
     args = args.replace("%BIN%", &bin_path);
     args = args.replace("%LISTS%", &lists_path);
 
-    // Замена @ на абсолютный путь к корню binaries
+    // Замена @ на абсолютный путь к корню binaries. Аргументы возвращаются
+    // без бэт-экранирования кавычек; экранирование для конкретного способа
+    // запуска (bat / sc / PowerShell) делается на вызывающей стороне.
     let mut final_args = String::new();
     for word in args.split_whitespace() {
         let mut w = word.to_string();
         if w.starts_with("\"@") {
             w = format!("\"{}{}", root_path, &w[2..]);
         }
-        // Экранируем кавычки для SC CREATE
-        w = w.replace("\"", "\\\"");
         final_args.push_str(&w);
         final_args.push(' ');
     }
 
-    let result = final_args.trim().to_string();
-    eprintln!(
-        "[DEBUG] Parsed args for strategy '{}': {}",
-        strategy, result
-    );
-    Ok(result)
+    Ok(final_args.trim().to_string())
 }
 
 /// Проверяет, запущен ли winws.exe через tasklist.
 fn is_zapret_service_running() -> bool {
-    let output = Command::new("sc")
+    let output = Command::new(system32_tool("sc.exe"))
         .args(["query", "zapret"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -491,7 +585,7 @@ fn is_winws_running() -> bool {
 /// Читает активную стратегию из реестра Windows
 /// (записывается при установке zapret как Windows-сервис).
 fn get_strategy_from_registry() -> Option<String> {
-    let out = Command::new("reg")
+    let out = Command::new(system32_tool("reg.exe"))
         .args([
             "query",
             "HKLM\\System\\CurrentControlSet\\Services\\zapret",
@@ -524,7 +618,7 @@ fn check_status_full() -> Result<String, String> {
     let mut output = String::new();
 
     // 1. Check Strategy
-    let reg_out = Command::new("reg")
+    let reg_out = Command::new(system32_tool("reg.exe"))
         .args([
             "query",
             "HKLM\\System\\CurrentControlSet\\Services\\zapret",
@@ -550,7 +644,7 @@ fn check_status_full() -> Result<String, String> {
     }
 
     // 2. Check zapret service
-    let zapret_svc = Command::new("sc")
+    let zapret_svc = Command::new(system32_tool("sc.exe"))
         .args(["query", "zapret"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -569,7 +663,7 @@ fn check_status_full() -> Result<String, String> {
     }
 
     // 3. Check WinDivert service
-    let windivert_svc = Command::new("sc")
+    let windivert_svc = Command::new(system32_tool("sc.exe"))
         .args(["query", "WinDivert"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -864,7 +958,7 @@ fn start_zapret(
     }
 
     // Убиваем текущий процесс
-    let _ = Command::new("taskkill")
+    let _ = Command::new(system32_tool("taskkill.exe"))
         .args(["/f", "/im", "winws.exe"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -903,64 +997,69 @@ fn start_zapret(
             return Err("Не удалось распарсить аргументы из bat файла".to_string());
         }
 
-        let bin_dir_path = std::path::Path::new(&bin_str)
-            .parent()
-            .unwrap_or(std::path::Path::new(""));
-        let bin_name = std::path::Path::new(&bin_str)
-            .file_name()
-            .unwrap_or_default()
-            .to_str()
-            .unwrap_or("winws.exe");
-
-        let bat_content = format!(
-            "@echo off\r\n\
-             echo Initializing WinDivert driver (elevated probe)...\r\n\
-             cd /d \"{}\"\r\n\
-             \"{}\" --version >nul 2>&1\r\n\
-             echo Stopping existing service...\r\n\
-             net stop zapret 2>nul\r\n\
-             sc delete zapret 2>nul\r\n\
-             echo Creating service...\r\n\
-             sc create zapret binPath= \"\\\"{}\\\" {}\" DisplayName= \"zapret\" start= auto\r\n\
-             sc description zapret \"Zapret DPI bypass software\"\r\n\
-             echo Starting service...\r\n\
-             sc start zapret\r\n\
-             if %errorlevel% neq 0 (\r\n\
-                 echo Failed to start service. Checking error...\r\n\
-                 sc query zapret\r\n\
-                 exit /b 1\r\n\
-             )\r\n\
-             echo Service started successfully\r\n\
-             reg add \"HKLM\\System\\CurrentControlSet\\Services\\zapret\" /v zapret-discord-youtube /t REG_SZ /d \"{}\" /f\r\n",
-             bin_dir_path.display(), bin_name, bin_str, args, strategy
+        // Собираем PowerShell-скрипт, который:
+        //   1) останавливает и удаляет старый сервис zapret (если есть),
+        //   2) регистрирует новый через New-Service — тот принимает binPath
+        //      как обычную .NET-строку и сам корректно передаёт её в SCM,
+        //      поэтому нам не нужно вручную экранировать кавычки для
+        //      sc.exe / cmd.exe,
+        //   3) стартует сервис и сохраняет имя стратегии в реестре.
+        //
+        // Скрипт запускается через `powershell.exe -EncodedCommand <base64>`
+        // под Start-Process -Verb RunAs. Это убирает промежуточный temp .bat,
+        // в который раньше можно было подменить содержимое между записью и
+        // elevated-исполнением (TOCTOU).
+        let ps_script = format!(
+            r#"$ErrorActionPreference = 'Continue'
+$exe = '{exe}'
+$svcArgs = '{args}'
+$strategy = '{strategy}'
+$binPath = '"' + $exe + '" ' + $svcArgs
+try {{ Stop-Service -Name zapret -Force -ErrorAction SilentlyContinue }} catch {{}}
+if (Get-Service -Name zapret -ErrorAction SilentlyContinue) {{
+    & "$env:SystemRoot\System32\sc.exe" delete zapret | Out-Null
+}}
+New-Service -Name zapret `
+    -BinaryPathName $binPath `
+    -StartupType Automatic `
+    -DisplayName 'zapret' `
+    -Description 'Zapret DPI bypass software' | Out-Null
+try {{
+    Start-Service -Name zapret -ErrorAction Stop
+}} catch {{
+    & "$env:SystemRoot\System32\sc.exe" query zapret
+    exit 1
+}}
+& "$env:SystemRoot\System32\reg.exe" add 'HKLM\System\CurrentControlSet\Services\zapret' /v zapret-discord-youtube /t REG_SZ /d $strategy /f | Out-Null
+"#,
+            exe = ps_single_quote_escape(bin_str),
+            args = ps_single_quote_escape(&args),
+            strategy = ps_single_quote_escape(&strategy),
         );
 
-        let bat_path = std::env::temp_dir().join("zapret_start.bat");
-        if std::fs::write(&bat_path, bat_content).is_ok() {
-            let mut cmd = Command::new("powershell");
-            cmd.args([
-                "-NoProfile",
-                "-WindowStyle", "Hidden",
-                "-Command",
-                "Start-Process cmd.exe -ArgumentList '/c %TEMP%\\zapret_start.bat' -Verb RunAs -Wait -WindowStyle Hidden",
-            ]);
-            #[cfg(windows)]
-            cmd.creation_flags(CREATE_NO_WINDOW);
+        let encoded = encode_powershell_command(&ps_script);
+        let mut cmd = Command::new(system32_tool("powershell.exe"));
+        cmd.args([
+            "-NoProfile",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            "Start-Process -FilePath powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList @('-NoProfile','-WindowStyle','Hidden','-EncodedCommand',$env:ZAPRET_PS_PAYLOAD)",
+        ]);
+        cmd.env("ZAPRET_PS_PAYLOAD", &encoded);
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
 
-            let output = cmd.output();
-            match output {
-                Ok(out) => {
-                    if !out.status.success() {
-                        let stderr = String::from_utf8_lossy(&out.stderr);
-                        return Err(format!("Ошибка запуска сервиса: {}", stderr));
-                    }
-                }
-                Err(e) => {
-                    return Err(format!("Не удалось запустить PowerShell: {}", e));
+        match cmd.output() {
+            Ok(out) => {
+                if !out.status.success() {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    return Err(format!("Ошибка запуска сервиса: {}", stderr));
                 }
             }
-        } else {
-            return Err("Не удалось создать bat-файл для запуска сервиса".to_string());
+            Err(e) => {
+                return Err(format!("Не удалось запустить PowerShell: {}", e));
+            }
         }
     } else {
         let bat_str = bat_path
@@ -1005,7 +1104,7 @@ fn stop_zapret(state: State<'_, AppState>) {
 
     if std::fs::write(&bat_path, bat_content).is_ok() {
         // Запускаем bat с правами администратора через PowerShell RunAs.
-        let _ = Command::new("powershell")
+        let _ = Command::new(system32_tool("powershell.exe"))
             .args([
                 "-NoProfile",
                 "-WindowStyle", "Hidden",
@@ -1024,9 +1123,7 @@ fn stop_zapret(state: State<'_, AppState>) {
 /// Reads lines from a file in the lists directory, filtering out comments and empty lines
 #[tauri::command]
 fn read_user_list(filename: String) -> Result<Vec<String>, String> {
-    ensure_safe_list_filename(&filename)?;
-    let dir = find_binaries_dir();
-    let file_path = dir.join("lists").join(&filename);
+    let file_path = resolve_list_path(&filename)?;
 
     if !file_path.exists() {
         return Ok(Vec::new());
@@ -1048,9 +1145,17 @@ fn read_user_list(filename: String) -> Result<Vec<String>, String> {
 /// Writes lines to a file in the lists directory
 #[tauri::command]
 fn write_user_list(filename: String, lines: Vec<String>) -> Result<(), String> {
-    ensure_safe_list_filename(&filename)?;
-    let dir = find_binaries_dir();
-    let file_path = dir.join("lists").join(&filename);
+    let file_path = resolve_list_path(&filename)?;
+
+    for line in &lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !is_safe_list_entry(trimmed) {
+            return Err(format!("Invalid list entry: {}", trimmed));
+        }
+    }
 
     let content = lines.join("\r\n");
     std::fs::write(&file_path, content)
@@ -1062,9 +1167,11 @@ fn write_user_list(filename: String, lines: Vec<String>) -> Result<(), String> {
 /// Adds a line to a user list file
 #[tauri::command]
 fn add_to_user_list(filename: String, entry: String) -> Result<(), String> {
-    ensure_safe_list_filename(&filename)?;
-    let dir = find_binaries_dir();
-    let file_path = dir.join("lists").join(&filename);
+    let file_path = resolve_list_path(&filename)?;
+    let entry_trimmed = entry.trim();
+    if !is_safe_list_entry(entry_trimmed) {
+        return Err(format!("Invalid list entry: {}", entry_trimmed));
+    }
 
     let mut lines = if file_path.exists() {
         let content = std::fs::read_to_string(&file_path)
@@ -1080,7 +1187,6 @@ fn add_to_user_list(filename: String, entry: String) -> Result<(), String> {
     };
 
     // Check for duplicates
-    let entry_trimmed = entry.trim();
     if !lines.iter().any(|l| l.trim() == entry_trimmed) {
         lines.push(entry_trimmed.to_string());
         let content = lines.join("\r\n");
@@ -1094,9 +1200,7 @@ fn add_to_user_list(filename: String, entry: String) -> Result<(), String> {
 /// Removes a line from a user list file
 #[tauri::command]
 fn remove_from_user_list(filename: String, entry: String) -> Result<(), String> {
-    ensure_safe_list_filename(&filename)?;
-    let dir = find_binaries_dir();
-    let file_path = dir.join("lists").join(&filename);
+    let file_path = resolve_list_path(&filename)?;
 
     if !file_path.exists() {
         return Ok(());
@@ -1141,7 +1245,7 @@ async fn update_ipset_list() -> Result<String, String> {
             url,
             list_file.to_str().unwrap_or("")
         );
-        Command::new("powershell")
+        Command::new(system32_tool("powershell.exe"))
             .args(["-NoProfile", "-Command", &ps_cmd])
             .creation_flags(CREATE_NO_WINDOW)
             .output()
@@ -1149,10 +1253,35 @@ async fn update_ipset_list() -> Result<String, String> {
 
     match output {
         Ok(out) if out.status.success() => {
-            // Count lines in the downloaded file
+            // Validate the downloaded content looks like an IP/CIDR list before
+            // handing it off to winws.exe. The remote file is plain text and
+            // line-based, so we reject anything that isn't a plausible IPv4/
+            // IPv6 literal (with optional /prefix). If the remote is
+            // compromised and starts serving something else, we delete the
+            // file and fail rather than silently loading garbage.
             let content = std::fs::read_to_string(&list_file)
                 .map_err(|e| format!("Failed to read downloaded file: {}", e))?;
-            let count = content.lines().filter(|l| !l.trim().is_empty()).count();
+
+            let mut count = 0usize;
+            for (idx, raw) in content.lines().enumerate() {
+                let line = raw.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                if !is_ip_or_cidr(line) {
+                    let _ = std::fs::remove_file(&list_file);
+                    return Err(format!(
+                        "Downloaded ipset list is not valid (line {}): {:?}",
+                        idx + 1,
+                        line
+                    ));
+                }
+                count += 1;
+            }
+            if count == 0 {
+                let _ = std::fs::remove_file(&list_file);
+                return Err("Downloaded ipset list is empty".to_string());
+            }
             Ok(format!("Updated successfully. {} IPs loaded.", count))
         }
         Ok(out) => {
@@ -1160,6 +1289,33 @@ async fn update_ipset_list() -> Result<String, String> {
             Err(format!("Failed to update IPSet list: {}", stderr))
         }
         Err(e) => Err(format!("Failed to execute update command: {}", e)),
+    }
+}
+
+/// Validates that `s` is a syntactically plausible IPv4, IPv4/CIDR, IPv6 or
+/// IPv6/CIDR literal. Intentionally loose on range checks (we care about
+/// shape, not correctness): the existing file format is consumed by zapret,
+/// not parsed as a network spec here.
+fn is_ip_or_cidr(s: &str) -> bool {
+    let (addr, prefix) = match s.split_once('/') {
+        Some((a, p)) => (a, Some(p)),
+        None => (s, None),
+    };
+    if addr.is_empty() {
+        return false;
+    }
+    let is_ipv4 = addr.parse::<std::net::Ipv4Addr>().is_ok();
+    let is_ipv6 = addr.parse::<std::net::Ipv6Addr>().is_ok();
+    if !is_ipv4 && !is_ipv6 {
+        return false;
+    }
+    match prefix {
+        None => true,
+        Some(p) => match p.parse::<u8>() {
+            Ok(n) if is_ipv4 && n <= 32 => true,
+            Ok(n) if is_ipv6 && n <= 128 => true,
+            _ => false,
+        },
     }
 }
 
@@ -1198,7 +1354,7 @@ async fn download_and_install_update(window: tauri::Window) -> Result<String, St
         "try {{ (Invoke-WebRequest -Uri '{}' -Headers @{{'Cache-Control'='no-cache'}} -UseBasicParsing -TimeoutSec 10).Content.Trim() }} catch {{ exit 1 }}",
         GITHUB_VERSION_URL
     );
-    let out = Command::new("powershell")
+    let out = Command::new(system32_tool("powershell.exe"))
         .args(["-NoProfile", "-Command", &version_cmd])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1245,7 +1401,7 @@ async fn download_and_install_update(window: tauri::Window) -> Result<String, St
         }
     });
 
-    let out = Command::new("powershell")
+    let out = Command::new(system32_tool("powershell.exe"))
         .args(["-NoProfile", "-Command", &ps_cmd])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1297,7 +1453,7 @@ async fn download_and_install_update(window: tauri::Window) -> Result<String, St
         extract_dir.to_str().unwrap_or("")
     );
 
-    let ex_status = Command::new("powershell")
+    let ex_status = Command::new(system32_tool("powershell.exe"))
         .args(["-NoProfile", "-Command", &extract_cmd])
         .creation_flags(CREATE_NO_WINDOW)
         .status();
@@ -1381,7 +1537,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     let mut vpn_services: Option<String> = None;
 
     // 1. Base Filtering Engine check
-    let bfe_check = Command::new("sc")
+    let bfe_check = Command::new(system32_tool("sc.exe"))
         .args(["query", "BFE"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1416,7 +1572,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 2. Proxy check
-    let proxy_check = Command::new("powershell")
+    let proxy_check = Command::new(system32_tool("powershell.exe"))
         .args([
             "-NoProfile",
             "-Command",
@@ -1455,7 +1611,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 3. TCP timestamps check
-    let tcp_check = Command::new("powershell")
+    let tcp_check = Command::new(system32_tool("powershell.exe"))
         .args([
             "-NoProfile",
             "-Command",
@@ -1535,7 +1691,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 5. Killer services check
-    let killer_check = Command::new("sc")
+    let killer_check = Command::new(system32_tool("sc.exe"))
         .args(["query"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1569,7 +1725,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 6. Intel Connectivity check
-    let intel_check = Command::new("sc")
+    let intel_check = Command::new(system32_tool("sc.exe"))
         .args(["query"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1607,7 +1763,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 7. Check Point check
-    let checkpoint_check = Command::new("sc")
+    let checkpoint_check = Command::new(system32_tool("sc.exe"))
         .args(["query"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1642,7 +1798,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 8. SmartByte check
-    let smartbyte_check = Command::new("sc")
+    let smartbyte_check = Command::new(system32_tool("sc.exe"))
         .args(["query"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1677,7 +1833,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 9. VPN services check
-    let vpn_check = Command::new("sc")
+    let vpn_check = Command::new(system32_tool("sc.exe"))
         .args(["query"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1721,7 +1877,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 10. DNS over HTTPS check
-    let doh_check = Command::new("powershell")
+    let doh_check = Command::new(system32_tool("powershell.exe"))
         .args([
             "-NoProfile",
             "-Command",
@@ -1782,7 +1938,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 12. WinDivert check
-    let windivert_check = Command::new("sc")
+    let windivert_check = Command::new(system32_tool("sc.exe"))
         .args(["query", "WinDivert"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1850,7 +2006,7 @@ fn clear_discord_cache() -> Result<String, String> {
                 messages.push(format!("Discord is running, closing {}...", process));
 
                 // Kill the process
-                let _ = Command::new("taskkill")
+                let _ = Command::new(system32_tool("taskkill.exe"))
                     .args(["/F", "/IM", process])
                     .creation_flags(CREATE_NO_WINDOW)
                     .output();
@@ -1939,7 +2095,7 @@ fn cancel_tests(state: State<'_, AppState>) {
     let mut pid_lock = state.test_process_pid.lock().unwrap();
     if let Some(pid) = pid_lock.take() {
         // Kill process tree (/T = tree, /F = force)
-        let _ = Command::new("taskkill")
+        let _ = Command::new(system32_tool("taskkill.exe"))
             .arg("/F")
             .arg("/T")
             .arg("/PID")
@@ -2010,7 +2166,7 @@ async fn run_tests(
     );
 
     // Spawn the process and stream output line by line
-    let mut child = std::process::Command::new("powershell")
+    let mut child = std::process::Command::new(system32_tool("powershell.exe"))
         .args([
             "-NoProfile",
             "-ExecutionPolicy",
@@ -2418,7 +2574,7 @@ pub fn run() {
                 let state = window.app_handle().state::<AppState>();
                 let mut pid_lock = state.test_process_pid.lock().unwrap();
                 if let Some(pid) = pid_lock.take() {
-                    let _ = Command::new("taskkill")
+                    let _ = Command::new(system32_tool("taskkill.exe"))
                         .arg("/F")
                         .arg("/T")
                         .arg("/PID")

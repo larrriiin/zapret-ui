@@ -1,0 +1,58 @@
+name: "Security"
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  schedule:
+    # Weekly audit so newly-disclosed CVEs in pinned crates don't sit unnoticed.
+    - cron: "0 6 * * 1"
+
+jobs:
+  clippy:
+    runs-on: ubuntu-latest
+    # clippy is not blocking: there are pre-existing findings that aren't part
+    # of this workflow's scope. We run it so new code gets visibility, but we
+    # do not fail CI on it yet.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build deps for tauri
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            curl \
+            wget \
+            file
+
+      - name: Install Rust stable with clippy
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri"
+          shared-key: "zapret-ui-rust-cache-clippy"
+
+      - name: cargo clippy
+        working-directory: src-tauri
+        run: cargo clippy --no-deps -- -W warnings
+
+  cargo-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cargo-audit
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
