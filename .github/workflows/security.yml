@@ -15,10 +15,6 @@ jobs:
     # process::CommandExt::creation_flags), so clippy must run on a Windows
     # runner just like the existing build CI.
     runs-on: windows-latest
-    # clippy is not blocking: there are pre-existing findings that aren't part
-    # of this workflow's scope. We run it so new code gets visibility, but we
-    # do not fail CI on it yet.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -35,7 +31,9 @@ jobs:
 
       - name: cargo clippy
         working-directory: src-tauri
-        run: cargo clippy --no-deps -- -W warnings
+        # Blocking: all pre-existing warnings have been cleaned up, so any new
+        # finding must be addressed in the PR that introduces it.
+        run: cargo clippy --no-deps -- -D warnings
 
   cargo-audit:
     # cargo-audit is pure crate-metadata analysis, so we can run it on Linux
