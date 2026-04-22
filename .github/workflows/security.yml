@@ -1,0 +1,54 @@
+name: "Security"
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  schedule:
+    # Weekly audit so newly-disclosed CVEs in pinned crates don't sit unnoticed.
+    - cron: "0 6 * * 1"
+
+jobs:
+  clippy:
+    # The backend uses Windows-only extension traits (e.g. std::os::windows::
+    # process::CommandExt::creation_flags), so clippy must run on a Windows
+    # runner just like the existing build CI.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable with clippy
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri"
+          shared-key: "zapret-ui-rust-cache-clippy"
+
+      - name: cargo clippy
+        working-directory: src-tauri
+        # Blocking: all pre-existing warnings have been cleaned up, so any new
+        # finding must be addressed in the PR that introduces it.
+        run: cargo clippy --no-deps -- -D warnings
+
+  cargo-audit:
+    # cargo-audit is pure crate-metadata analysis, so we can run it on Linux
+    # regardless of the target platform of the crate itself.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit
+
+      - name: cargo audit
+        working-directory: src-tauri
+        # Don't fail the job on findings yet — this is a visibility-first
+        # rollout; treat it as informational until the team decides to gate on
+        # it.
+        continue-on-error: true
+        run: cargo audit

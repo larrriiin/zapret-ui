@@ -2,7 +2,23 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
+
+/// Acquire `Mutex` access without panicking when the mutex is poisoned. If a
+/// previous holder panicked the data is still well-formed for our use-cases
+/// (mostly `Option<...>` state in `AppState`), so recovering is strictly
+/// better than bringing the whole tray/UI thread down with an unwrap.
+trait MutexExt<T> {
+    fn lock_unpoisoned(&self) -> MutexGuard<'_, T>;
+}
+impl<T> MutexExt<T> for Mutex<T> {
+    fn lock_unpoisoned(&self) -> MutexGuard<'_, T> {
+        match self.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+}
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::Emitter;
@@ -18,6 +34,9 @@ use tauri_plugin_notification::NotificationExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const GITHUB_VERSION_URL: &str =
     "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt";
+const GITHUB_RELEASE_API: &str =
+    "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/tags";
+const GITHUB_USER_AGENT: &str = "zapret-ui-updater";
 
 struct AppState {
     active_strategy: Mutex<Option<String>>,
@@ -66,13 +85,388 @@ struct FiltersStatus {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/// Allowed filenames that commands may read/write in the `lists/` directory.
+/// Kept in sync with the three files the frontend actually uses.
+const ALLOWED_LIST_FILENAMES: &[&str] = &[
+    "list-general-user.txt",
+    "list-exclude-user.txt",
+    "ipset-exclude-user.txt",
+];
+
+/// Strategy names come from the frontend and are concatenated into shell
+/// commands and filesystem paths. Upstream presets use names like
+/// `general (FAKE TLS AUTO ALT2)`, so the allowed charset has to include
+/// spaces and parentheses. We still reject path separators, traversal
+/// sequences, and shell metacharacters that would be unsafe when the name is
+/// substituted into the registry-write / service-creation bat template.
+fn is_safe_strategy_name(name: &str) -> bool {
+    if name.is_empty() || name.len() > 128 {
+        return false;
+    }
+    if name.contains("..")
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains(':')
+    {
+        return false;
+    }
+    if name.starts_with('.')
+        || name.starts_with('-')
+        || name.starts_with(' ')
+        || name.ends_with(' ')
+    {
+        return false;
+    }
+    name.chars().all(|c| {
+        c.is_ascii_alphanumeric()
+            || matches!(
+                c,
+                ' ' | '(' | ')' | '[' | ']' | '.' | '_' | '-' | '+' | ','
+            )
+    })
+}
+
+fn ensure_safe_list_filename(filename: &str) -> Result<(), String> {
+    if ALLOWED_LIST_FILENAMES.contains(&filename) {
+        Ok(())
+    } else {
+        Err(format!("Invalid list filename: {}", filename))
+    }
+}
+
+/// Returns the absolute path to a tool shipped directly in the Windows
+/// `System32` directory, falling back to the bare name outside Windows (so
+/// unit tests and non-Windows targets still compile / run meaningfully).
+///
+/// Using absolute paths here avoids `PATH`-based hijacking: a malicious
+/// executable placed earlier in `PATH` than System32 could otherwise be picked
+/// up when we invoke `sc`, `net`, `taskkill`, `reg`, or `curl`.
+///
+/// NOTE: this helper is only correct for tools that live directly inside
+/// `System32`. `powershell.exe`, for example, is shipped under
+/// `System32\WindowsPowerShell\v1.0\powershell.exe`; use `powershell_path()`
+/// instead.
+fn system32_tool(name: &str) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let system_root =
+            std::env::var("SystemRoot").unwrap_or_else(|_| String::from(r"C:\Windows"));
+        PathBuf::from(system_root).join("System32").join(name)
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from(name)
+    }
+}
+
+/// Returns the absolute path to the built-in Windows PowerShell 5.x host.
+/// On Windows this is always
+/// `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`.
+fn powershell_path() -> PathBuf {
+    #[cfg(windows)]
+    {
+        let system_root =
+            std::env::var("SystemRoot").unwrap_or_else(|_| String::from(r"C:\Windows"));
+        PathBuf::from(system_root)
+            .join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from("powershell")
+    }
+}
+
+/// Lightweight shape check for a single entry in a user list. The frontend
+/// already validates the same invariants, but the backend must not trust that
+/// — we're about to write this string into a file that is read back by the
+/// native `winws.exe` driver. Reject anything that would smuggle newlines,
+/// comment markers, or shell metacharacters.
+fn is_safe_list_entry(entry: &str) -> bool {
+    if entry.is_empty() || entry.len() > 253 {
+        return false;
+    }
+    // No control characters, CR/LF, tabs, or NUL.
+    if entry.chars().any(|c| c.is_control()) {
+        return false;
+    }
+    // No leading '#': the file format uses '#' to denote comments and zapret
+    // must not interpret user entries as comments or be tricked into skipping
+    // adjacent lines.
+    if entry.starts_with('#') {
+        return false;
+    }
+    // Conservative charset: hostnames, IPv4, IPv4/CIDR, IPv6 literal/CIDR.
+    entry
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':' | '/'))
+}
+
+/// Ensures that the requested list file resolves to a path strictly below
+/// `<binaries>/lists/`. Protects against symlink-based traversal that would
+/// otherwise allow the filename allowlist to be sidestepped at runtime.
+fn resolve_list_path(filename: &str) -> Result<PathBuf, String> {
+    ensure_safe_list_filename(filename)?;
+    let lists_dir = find_binaries_dir().join("lists");
+    let file_path = lists_dir.join(filename);
+
+    // If the parent resolves, require the file to resolve inside it. When the
+    // file does not yet exist on disk (first write), canonicalize the parent
+    // and re-join the bare filename — this still blocks `..` from being smuggled
+    // via a symlink at `lists/`.
+    let canonical_parent = std::fs::canonicalize(&lists_dir).map_err(|e| {
+        format!(
+            "Failed to resolve lists directory {}: {}",
+            lists_dir.display(),
+            e
+        )
+    })?;
+    let canonical_parent = strip_verbatim_prefix(canonical_parent);
+
+    if file_path.exists() {
+        let canonical_file = std::fs::canonicalize(&file_path)
+            .map_err(|e| format!("Failed to resolve {}: {}", file_path.display(), e))?;
+        let canonical_file = strip_verbatim_prefix(canonical_file);
+        if !canonical_file.starts_with(&canonical_parent) {
+            return Err(format!(
+                "List file {} escapes its directory",
+                filename
+            ));
+        }
+        Ok(canonical_file)
+    } else {
+        Ok(canonical_parent.join(filename))
+    }
+}
+
+/// Escapes a value for embedding inside a PowerShell single-quoted string.
+fn ps_single_quote_escape(s: &str) -> String {
+    s.replace('\'', "''")
+}
+
+/// Encodes a PowerShell script for `powershell.exe -EncodedCommand`. The
+/// expected format is base64 over the UTF-16LE bytes of the script.
+///
+/// Passing the script via the command-line this way (as opposed to writing a
+/// `.bat` into `%TEMP%` and then executing it with `-Verb RunAs`) eliminates a
+/// TOCTOU window: other processes under the same user cannot swap in a
+/// malicious payload between our write and the elevated execute.
+fn encode_powershell_command(script: &str) -> String {
+    use base64::Engine;
+    let utf16_le: Vec<u8> = script
+        .encode_utf16()
+        .flat_map(|u| u.to_le_bytes())
+        .collect();
+    base64::engine::general_purpose::STANDARD.encode(utf16_le)
+}
+
+/// Extracts `zip_path` into `dest`, rejecting any entry whose resolved path
+/// would escape `dest` (zip-slip). `dest` must already exist.
+fn extract_zip_safely(zip_path: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(zip_path)
+        .map_err(|e| format!("Failed to open {}: {}", zip_path.display(), e))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| format!("Failed to read zip {}: {}", zip_path.display(), e))?;
+
+    let canonical_dest = std::fs::canonicalize(dest)
+        .map(strip_verbatim_prefix)
+        .map_err(|e| format!("Failed to canonicalize {}: {}", dest.display(), e))?;
+
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| format!("Failed to read zip entry {}: {}", i, e))?;
+
+        // `enclosed_name` strips `..` and absolute-path components; if the
+        // archive still contains something unsafe we bail out entirely.
+        let rel = entry
+            .enclosed_name()
+            .ok_or_else(|| format!("Unsafe path in archive: {:?}", entry.name()))?;
+        let out_path = canonical_dest.join(&rel);
+
+        if entry.is_dir() {
+            std::fs::create_dir_all(&out_path).map_err(|e| {
+                format!("Failed to create dir {}: {}", out_path.display(), e)
+            })?;
+            continue;
+        }
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create dir {}: {}", parent.display(), e))?;
+        }
+
+        // Defense in depth: even after `enclosed_name` validation, verify the
+        // final write target is strictly below `dest`.
+        if !out_path.starts_with(&canonical_dest) {
+            return Err(format!(
+                "Zip entry {} resolves outside destination",
+                rel.display()
+            ));
+        }
+
+        let mut out = std::fs::File::create(&out_path)
+            .map_err(|e| format!("Failed to create {}: {}", out_path.display(), e))?;
+        let mut buf = [0u8; 16 * 1024];
+        loop {
+            let n = entry
+                .read(&mut buf)
+                .map_err(|e| format!("Failed to read {}: {}", rel.display(), e))?;
+            if n == 0 {
+                break;
+            }
+            std::io::Write::write_all(&mut out, &buf[..n])
+                .map_err(|e| format!("Failed to write {}: {}", out_path.display(), e))?;
+        }
+    }
+    Ok(())
+}
+
+/// Computes the SHA-256 digest of a file as a lowercase hex string.
+fn sha256_file(path: &std::path::Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex_encode(&hasher.finalize()))
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
+/// Fetches the expected SHA-256 digest of the given release asset from the
+/// GitHub Releases API. Returns a lowercase hex string on success.
+async fn fetch_expected_sha256(version: &str, asset_name: &str) -> Result<String, String> {
+    if version.is_empty()
+        || !version
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'))
+    {
+        return Err(format!("Invalid upstream version tag: {}", version));
+    }
+
+    let url = format!("{}/{}", GITHUB_RELEASE_API, version);
+    let client = reqwest::Client::builder()
+        .user_agent(GITHUB_USER_AGENT)
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let resp = client
+        .get(&url)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch release metadata: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!(
+            "GitHub API returned status {} for {}",
+            resp.status(),
+            url
+        ));
+    }
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse release metadata: {}", e))?;
+
+    let assets = body
+        .get("assets")
+        .and_then(|a| a.as_array())
+        .ok_or_else(|| "Release metadata is missing assets".to_string())?;
+
+    let asset = assets
+        .iter()
+        .find(|a| a.get("name").and_then(|n| n.as_str()) == Some(asset_name))
+        .ok_or_else(|| format!("Asset {} not found in release {}", asset_name, version))?;
+
+    let digest = asset
+        .get("digest")
+        .and_then(|d| d.as_str())
+        .ok_or_else(|| format!("Asset {} has no digest field", asset_name))?;
+
+    let hex = digest
+        .strip_prefix("sha256:")
+        .ok_or_else(|| format!("Unsupported digest format: {}", digest))?;
+
+    if hex.len() != 64 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!("Malformed sha256 digest: {}", digest));
+    }
+
+    Ok(hex.to_ascii_lowercase())
+}
+
+/// On Windows, `std::fs::canonicalize` returns the verbatim/extended-length
+/// form (e.g. `\\?\C:\foo\bar`). That form is fine for Rust's file APIs but
+/// breaks `cmd.exe` and downstream `.bat` scripts, which refuse to use it as
+/// current directory. Strip the `\\?\` prefix for normal drive paths and
+/// leave UNC/network paths alone.
+fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = match path.to_str() {
+            Some(s) => s,
+            None => return path,
+        };
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            // Drive-letter form: "C:\..." — safe to strip.
+            let bytes = rest.as_bytes();
+            if bytes.len() >= 3
+                && bytes[0].is_ascii_alphabetic()
+                && bytes[1] == b':'
+                && bytes[2] == b'\\'
+            {
+                return PathBuf::from(rest);
+            }
+            // Verbatim UNC "\\?\UNC\server\share" — rewrite to "\\server\share".
+            if let Some(unc_rest) = rest.strip_prefix("UNC\\") {
+                let mut out = String::from(r"\\");
+                out.push_str(unc_rest);
+                return PathBuf::from(out);
+            }
+        }
+    }
+    path
+}
+
+/// Returns `path` with symlinks resolved if it exists; otherwise returns
+/// `path` unchanged. We canonicalize every resolved `binaries/` root so that
+/// callers composing paths via `dir.join(...)` can't be fooled by a symlink
+/// swap after the initial existence check.
+fn canonicalize_or_passthrough(path: PathBuf) -> PathBuf {
+    match std::fs::canonicalize(&path) {
+        Ok(p) => strip_verbatim_prefix(p),
+        Err(_) => path,
+    }
+}
+
 fn find_binaries_dir() -> PathBuf {
     // 1. Direct sibling of the exe (production after first download)
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             let candidate = parent.join("binaries");
             if candidate.exists() {
-                return candidate;
+                return canonicalize_or_passthrough(candidate);
             }
         }
     }
@@ -84,7 +478,7 @@ fn find_binaries_dir() -> PathBuf {
             if let Some(d) = &dir {
                 let candidate = d.join("binaries");
                 if candidate.exists() {
-                    return candidate;
+                    return canonicalize_or_passthrough(candidate);
                 }
                 dir = d.parent().map(|p| p.to_path_buf());
             } else {
@@ -97,11 +491,13 @@ fn find_binaries_dir() -> PathBuf {
     if let Ok(cwd) = std::env::current_dir() {
         let candidate = cwd.join("binaries");
         if candidate.exists() {
-            return candidate;
+            return canonicalize_or_passthrough(candidate);
         }
     }
 
-    // 4. Default: next to exe (will be created on first download)
+    // 4. Default: next to exe (will be created on first download). Don't
+    // canonicalize — the directory doesn't exist yet and canonicalize() would
+    // fail on Windows in that case.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             return parent.join("binaries");
@@ -113,7 +509,7 @@ fn find_binaries_dir() -> PathBuf {
 
 fn is_admin() -> bool {
     // net session — самый быстрый и надежный способ проверки прав администратора на Windows
-    Command::new("net")
+    Command::new(system32_tool("net.exe"))
         .arg("session")
         .creation_flags(CREATE_NO_WINDOW)
         .status()
@@ -143,7 +539,7 @@ fn elevate_if_needed() {
                 ps_args
             );
 
-            let _ = Command::new("powershell")
+            let _ = Command::new(powershell_path())
                 .args([
                     "-NoProfile",
                     "-WindowStyle",
@@ -225,6 +621,9 @@ fn ensure_binaries_present() -> bool {
 }
 
 fn parse_bat_args(strategy: &str) -> Result<String, String> {
+    if !is_safe_strategy_name(strategy) {
+        return Err(format!("Invalid strategy name: {}", strategy));
+    }
     let dir = find_binaries_dir();
     let bat_path = dir.join(format!("{}.bat", strategy));
     let content = std::fs::read_to_string(&bat_path)
@@ -261,18 +660,16 @@ fn parse_bat_args(strategy: &str) -> Result<String, String> {
 
     // Собираем полную команду: первая строка + все строки-продолжения (^)
     let mut full_command = String::new();
-    for i in found_idx..lines.len() {
-        let line = lines[i].trim();
-        if line.ends_with('^') {
-            full_command.push_str(&line[..line.len() - 1]);
+    for raw in lines.iter().skip(found_idx) {
+        let line = raw.trim();
+        if let Some(rest) = line.strip_suffix('^') {
+            full_command.push_str(rest);
             full_command.push(' ');
         } else {
             full_command.push_str(line);
             break;
         }
     }
-
-    eprintln!("[DEBUG] Full command for '{}': {}", strategy, full_command);
 
     // Извлекаем аргументы после winws.exe
     let cmd_lower = full_command.to_lowercase();
@@ -290,30 +687,25 @@ fn parse_bat_args(strategy: &str) -> Result<String, String> {
     args = args.replace("%BIN%", &bin_path);
     args = args.replace("%LISTS%", &lists_path);
 
-    // Замена @ на абсолютный путь к корню binaries
+    // Замена @ на абсолютный путь к корню binaries. Аргументы возвращаются
+    // без бэт-экранирования кавычек; экранирование для конкретного способа
+    // запуска (bat / sc / PowerShell) делается на вызывающей стороне.
     let mut final_args = String::new();
     for word in args.split_whitespace() {
         let mut w = word.to_string();
         if w.starts_with("\"@") {
             w = format!("\"{}{}", root_path, &w[2..]);
         }
-        // Экранируем кавычки для SC CREATE
-        w = w.replace("\"", "\\\"");
         final_args.push_str(&w);
         final_args.push(' ');
     }
 
-    let result = final_args.trim().to_string();
-    eprintln!(
-        "[DEBUG] Parsed args for strategy '{}': {}",
-        strategy, result
-    );
-    Ok(result)
+    Ok(final_args.trim().to_string())
 }
 
 /// Проверяет, запущен ли winws.exe через tasklist.
 fn is_zapret_service_running() -> bool {
-    let output = Command::new("sc")
+    let output = Command::new(system32_tool("sc.exe"))
         .args(["query", "zapret"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -342,7 +734,7 @@ fn is_winws_running() -> bool {
 /// Читает активную стратегию из реестра Windows
 /// (записывается при установке zapret как Windows-сервис).
 fn get_strategy_from_registry() -> Option<String> {
-    let out = Command::new("reg")
+    let out = Command::new(system32_tool("reg.exe"))
         .args([
             "query",
             "HKLM\\System\\CurrentControlSet\\Services\\zapret",
@@ -375,7 +767,7 @@ fn check_status_full() -> Result<String, String> {
     let mut output = String::new();
 
     // 1. Check Strategy
-    let reg_out = Command::new("reg")
+    let reg_out = Command::new(system32_tool("reg.exe"))
         .args([
             "query",
             "HKLM\\System\\CurrentControlSet\\Services\\zapret",
@@ -401,7 +793,7 @@ fn check_status_full() -> Result<String, String> {
     }
 
     // 2. Check zapret service
-    let zapret_svc = Command::new("sc")
+    let zapret_svc = Command::new(system32_tool("sc.exe"))
         .args(["query", "zapret"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -415,12 +807,12 @@ fn check_status_full() -> Result<String, String> {
             // 1060 means service does not exist
         } else {
             // Might be start_pending or other
-            output.push_str(&format!("\"zapret\" service state is UNKNOWN.\n"));
+            output.push_str("\"zapret\" service state is UNKNOWN.\n");
         }
     }
 
     // 3. Check WinDivert service
-    let windivert_svc = Command::new("sc")
+    let windivert_svc = Command::new(system32_tool("sc.exe"))
         .args(["query", "WinDivert"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -434,8 +826,8 @@ fn check_status_full() -> Result<String, String> {
     }
 
     // 4. Check bypass (winws.exe)
-    output.push_str("\n");
-    let task = Command::new("tasklist")
+    output.push('\n');
+    let task = Command::new(system32_tool("tasklist.exe"))
         .args(["/FI", "IMAGENAME eq winws.exe"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -551,7 +943,7 @@ fn get_zapret_status(state: State<'_, AppState>) -> ZapretStatus {
         running = true;
     }
 
-    let mut strategy_lock = state.active_strategy.lock().unwrap();
+    let mut strategy_lock = state.active_strategy.lock_unpoisoned();
 
     if !running {
         *strategy_lock = None;
@@ -707,8 +1099,20 @@ fn start_zapret(
     mode: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
+    if !is_safe_strategy_name(&strategy) {
+        return Err(format!("Invalid strategy name: {}", strategy));
+    }
+    // Frontend's "one-shot" button sends `temporary`; a couple of code paths
+    // still reference `temp` historically. Accept both, and anything else is
+    // rejected. Only `service` takes the elevated branch below.
+    let mode_is_service = mode == "service";
+    let mode_is_temp = mode == "temporary" || mode == "temp";
+    if !mode_is_service && !mode_is_temp {
+        return Err(format!("Invalid mode: {}", mode));
+    }
+
     // Убиваем текущий процесс
-    let _ = Command::new("taskkill")
+    let _ = Command::new(system32_tool("taskkill.exe"))
         .args(["/f", "/im", "winws.exe"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -739,7 +1143,27 @@ fn start_zapret(
 
     if mode == "service" {
         let args = parse_bat_args(&strategy)?;
-        let bin_path = dir.join("bin").join("winws.exe");
+
+        // Canonicalize winws.exe before writing it into the service binPath in
+        // the registry. That way the service points at the *real* executable
+        // under `binaries/bin/`, not at a symlink that could later be
+        // redirected to an attacker-controlled binary.
+        let bin_path_raw = dir.join("bin").join("winws.exe");
+        let bin_path = std::fs::canonicalize(&bin_path_raw)
+            .map(strip_verbatim_prefix)
+            .map_err(|e| {
+                format!(
+                    "Failed to resolve {}: {}",
+                    bin_path_raw.display(),
+                    e
+                )
+            })?;
+        if !bin_path.starts_with(&dir) {
+            return Err(format!(
+                "winws.exe resolves outside binaries dir: {}",
+                bin_path.display()
+            ));
+        }
         let bin_str = bin_path.to_str().unwrap_or_default();
 
         // Проверяем что аргументы не пустые
@@ -747,64 +1171,69 @@ fn start_zapret(
             return Err("Не удалось распарсить аргументы из bat файла".to_string());
         }
 
-        let bin_dir_path = std::path::Path::new(&bin_str)
-            .parent()
-            .unwrap_or(std::path::Path::new(""));
-        let bin_name = std::path::Path::new(&bin_str)
-            .file_name()
-            .unwrap_or_default()
-            .to_str()
-            .unwrap_or("winws.exe");
-
-        let bat_content = format!(
-            "@echo off\r\n\
-             echo Initializing WinDivert driver (elevated probe)...\r\n\
-             cd /d \"{}\"\r\n\
-             \"{}\" --version >nul 2>&1\r\n\
-             echo Stopping existing service...\r\n\
-             net stop zapret 2>nul\r\n\
-             sc delete zapret 2>nul\r\n\
-             echo Creating service...\r\n\
-             sc create zapret binPath= \"\\\"{}\\\" {}\" DisplayName= \"zapret\" start= auto\r\n\
-             sc description zapret \"Zapret DPI bypass software\"\r\n\
-             echo Starting service...\r\n\
-             sc start zapret\r\n\
-             if %errorlevel% neq 0 (\r\n\
-                 echo Failed to start service. Checking error...\r\n\
-                 sc query zapret\r\n\
-                 exit /b 1\r\n\
-             )\r\n\
-             echo Service started successfully\r\n\
-             reg add \"HKLM\\System\\CurrentControlSet\\Services\\zapret\" /v zapret-discord-youtube /t REG_SZ /d \"{}\" /f\r\n",
-             bin_dir_path.display(), bin_name, bin_str, args, strategy
+        // Собираем PowerShell-скрипт, который:
+        //   1) останавливает и удаляет старый сервис zapret (если есть),
+        //   2) регистрирует новый через New-Service — тот принимает binPath
+        //      как обычную .NET-строку и сам корректно передаёт её в SCM,
+        //      поэтому нам не нужно вручную экранировать кавычки для
+        //      sc.exe / cmd.exe,
+        //   3) стартует сервис и сохраняет имя стратегии в реестре.
+        //
+        // Скрипт запускается через `powershell.exe -EncodedCommand <base64>`
+        // под Start-Process -Verb RunAs. Это убирает промежуточный temp .bat,
+        // в который раньше можно было подменить содержимое между записью и
+        // elevated-исполнением (TOCTOU).
+        let ps_script = format!(
+            r#"$ErrorActionPreference = 'Continue'
+$exe = '{exe}'
+$svcArgs = '{args}'
+$strategy = '{strategy}'
+$binPath = '"' + $exe + '" ' + $svcArgs
+try {{ Stop-Service -Name zapret -Force -ErrorAction SilentlyContinue }} catch {{}}
+if (Get-Service -Name zapret -ErrorAction SilentlyContinue) {{
+    & "$env:SystemRoot\System32\sc.exe" delete zapret | Out-Null
+}}
+New-Service -Name zapret `
+    -BinaryPathName $binPath `
+    -StartupType Automatic `
+    -DisplayName 'zapret' `
+    -Description 'Zapret DPI bypass software' | Out-Null
+try {{
+    Start-Service -Name zapret -ErrorAction Stop
+}} catch {{
+    & "$env:SystemRoot\System32\sc.exe" query zapret
+    exit 1
+}}
+& "$env:SystemRoot\System32\reg.exe" add 'HKLM\System\CurrentControlSet\Services\zapret' /v zapret-discord-youtube /t REG_SZ /d $strategy /f | Out-Null
+"#,
+            exe = ps_single_quote_escape(bin_str),
+            args = ps_single_quote_escape(&args),
+            strategy = ps_single_quote_escape(&strategy),
         );
 
-        let bat_path = std::env::temp_dir().join("zapret_start.bat");
-        if std::fs::write(&bat_path, bat_content).is_ok() {
-            let mut cmd = Command::new("powershell");
-            cmd.args([
-                "-NoProfile",
-                "-WindowStyle", "Hidden",
-                "-Command",
-                "Start-Process cmd.exe -ArgumentList '/c %TEMP%\\zapret_start.bat' -Verb RunAs -Wait -WindowStyle Hidden",
-            ]);
-            #[cfg(windows)]
-            cmd.creation_flags(CREATE_NO_WINDOW);
+        let encoded = encode_powershell_command(&ps_script);
+        let mut cmd = Command::new(powershell_path());
+        cmd.args([
+            "-NoProfile",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            "Start-Process -FilePath powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList @('-NoProfile','-WindowStyle','Hidden','-EncodedCommand',$env:ZAPRET_PS_PAYLOAD)",
+        ]);
+        cmd.env("ZAPRET_PS_PAYLOAD", &encoded);
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
 
-            let output = cmd.output();
-            match output {
-                Ok(out) => {
-                    if !out.status.success() {
-                        let stderr = String::from_utf8_lossy(&out.stderr);
-                        return Err(format!("Ошибка запуска сервиса: {}", stderr));
-                    }
-                }
-                Err(e) => {
-                    return Err(format!("Не удалось запустить PowerShell: {}", e));
+        match cmd.output() {
+            Ok(out) => {
+                if !out.status.success() {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    return Err(format!("Ошибка запуска сервиса: {}", stderr));
                 }
             }
-        } else {
-            return Err("Не удалось создать bat-файл для запуска сервиса".to_string());
+            Err(e) => {
+                return Err(format!("Не удалось запустить PowerShell: {}", e));
+            }
         }
     } else {
         let bat_str = bat_path
@@ -821,8 +1250,8 @@ fn start_zapret(
             .map_err(|e| format!("Не удалось запустить стратегию: {}", e))?;
     }
 
-    *state.active_strategy.lock().unwrap() = Some(strategy.clone());
-    *state.last_strategy.lock().unwrap() = Some(strategy);
+    *state.active_strategy.lock_unpoisoned() = Some(strategy.clone());
+    *state.last_strategy.lock_unpoisoned() = Some(strategy);
     Ok("Connected".into())
 }
 
@@ -830,37 +1259,38 @@ fn start_zapret(
 /// Требует прав администратора — запрашивает их через PowerShell -Verb RunAs.
 #[tauri::command]
 fn stop_zapret(state: State<'_, AppState>) {
-    // Пишем bat-файл со всеми командами остановки во временную папку
-    let bat_path = std::env::temp_dir().join("zapret_stop.bat");
-
-    let bat_content = concat!(
-        "@echo off\r\n",
-        // Останавливаем и удаляем сервис zapret
-        "net stop zapret 2>nul\r\n",
-        "sc delete zapret 2>nul\r\n",
-        // Убиваем процесс winws.exe
-        "taskkill /F /IM winws.exe 2>nul\r\n",
-        // Останавливаем и удаляем WinDivert
-        "net stop WinDivert 2>nul\r\n",
-        "sc delete WinDivert 2>nul\r\n",
-        "net stop WinDivert14 2>nul\r\n",
-        "sc delete WinDivert14 2>nul\r\n"
-    );
-
-    if std::fs::write(&bat_path, bat_content).is_ok() {
-        // Запускаем bat с правами администратора через PowerShell RunAs.
-        let _ = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-WindowStyle", "Hidden",
-                "-Command",
-                "Start-Process cmd.exe -ArgumentList '/c %TEMP%\\zapret_stop.bat' -Verb RunAs -Wait -WindowStyle Hidden",
-            ])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
+    // Скрипт остановки передаётся elevated-повершеллу через -EncodedCommand
+    // (см. start_zapret — та же TOCTOU-защита). Никакого промежуточного
+    // `.bat` в `%TEMP%` больше не пишем: подменить payload между write и
+    // elevated-exec под нашим UID больше нельзя.
+    let ps_script = r#"$ErrorActionPreference = 'Continue'
+$sys = "$env:SystemRoot\System32"
+try { Stop-Service -Name zapret -Force -ErrorAction SilentlyContinue } catch {}
+if (Get-Service -Name zapret -ErrorAction SilentlyContinue) {
+    & "$sys\sc.exe" delete zapret | Out-Null
+}
+& "$sys\taskkill.exe" /F /IM winws.exe 2>$null | Out-Null
+foreach ($svc in @('WinDivert','WinDivert14')) {
+    try { Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue } catch {}
+    if (Get-Service -Name $svc -ErrorAction SilentlyContinue) {
+        & "$sys\sc.exe" delete $svc | Out-Null
     }
+}
+"#;
+    let encoded = encode_powershell_command(ps_script);
+    let _ = Command::new(powershell_path())
+        .args([
+            "-NoProfile",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            "Start-Process -FilePath powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList @('-NoProfile','-WindowStyle','Hidden','-EncodedCommand',$env:ZAPRET_PS_PAYLOAD)",
+        ])
+        .env("ZAPRET_PS_PAYLOAD", &encoded)
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
 
-    *state.active_strategy.lock().unwrap() = None;
+    *state.active_strategy.lock_unpoisoned() = None;
 }
 
 // ─── User Lists Management ────────────────────────────────────────────────────
@@ -868,8 +1298,7 @@ fn stop_zapret(state: State<'_, AppState>) {
 /// Reads lines from a file in the lists directory, filtering out comments and empty lines
 #[tauri::command]
 fn read_user_list(filename: String) -> Result<Vec<String>, String> {
-    let dir = find_binaries_dir();
-    let file_path = dir.join("lists").join(&filename);
+    let file_path = resolve_list_path(&filename)?;
 
     if !file_path.exists() {
         return Ok(Vec::new());
@@ -891,8 +1320,17 @@ fn read_user_list(filename: String) -> Result<Vec<String>, String> {
 /// Writes lines to a file in the lists directory
 #[tauri::command]
 fn write_user_list(filename: String, lines: Vec<String>) -> Result<(), String> {
-    let dir = find_binaries_dir();
-    let file_path = dir.join("lists").join(&filename);
+    let file_path = resolve_list_path(&filename)?;
+
+    for line in &lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !is_safe_list_entry(trimmed) {
+            return Err(format!("Invalid list entry: {}", trimmed));
+        }
+    }
 
     let content = lines.join("\r\n");
     std::fs::write(&file_path, content)
@@ -904,8 +1342,11 @@ fn write_user_list(filename: String, lines: Vec<String>) -> Result<(), String> {
 /// Adds a line to a user list file
 #[tauri::command]
 fn add_to_user_list(filename: String, entry: String) -> Result<(), String> {
-    let dir = find_binaries_dir();
-    let file_path = dir.join("lists").join(&filename);
+    let file_path = resolve_list_path(&filename)?;
+    let entry_trimmed = entry.trim();
+    if !is_safe_list_entry(entry_trimmed) {
+        return Err(format!("Invalid list entry: {}", entry_trimmed));
+    }
 
     let mut lines = if file_path.exists() {
         let content = std::fs::read_to_string(&file_path)
@@ -921,7 +1362,6 @@ fn add_to_user_list(filename: String, entry: String) -> Result<(), String> {
     };
 
     // Check for duplicates
-    let entry_trimmed = entry.trim();
     if !lines.iter().any(|l| l.trim() == entry_trimmed) {
         lines.push(entry_trimmed.to_string());
         let content = lines.join("\r\n");
@@ -935,8 +1375,7 @@ fn add_to_user_list(filename: String, entry: String) -> Result<(), String> {
 /// Removes a line from a user list file
 #[tauri::command]
 fn remove_from_user_list(filename: String, entry: String) -> Result<(), String> {
-    let dir = find_binaries_dir();
-    let file_path = dir.join("lists").join(&filename);
+    let file_path = resolve_list_path(&filename)?;
 
     if !file_path.exists() {
         return Ok(());
@@ -981,7 +1420,7 @@ async fn update_ipset_list() -> Result<String, String> {
             url,
             list_file.to_str().unwrap_or("")
         );
-        Command::new("powershell")
+        Command::new(powershell_path())
             .args(["-NoProfile", "-Command", &ps_cmd])
             .creation_flags(CREATE_NO_WINDOW)
             .output()
@@ -989,10 +1428,35 @@ async fn update_ipset_list() -> Result<String, String> {
 
     match output {
         Ok(out) if out.status.success() => {
-            // Count lines in the downloaded file
+            // Validate the downloaded content looks like an IP/CIDR list before
+            // handing it off to winws.exe. The remote file is plain text and
+            // line-based, so we reject anything that isn't a plausible IPv4/
+            // IPv6 literal (with optional /prefix). If the remote is
+            // compromised and starts serving something else, we delete the
+            // file and fail rather than silently loading garbage.
             let content = std::fs::read_to_string(&list_file)
                 .map_err(|e| format!("Failed to read downloaded file: {}", e))?;
-            let count = content.lines().filter(|l| !l.trim().is_empty()).count();
+
+            let mut count = 0usize;
+            for (idx, raw) in content.lines().enumerate() {
+                let line = raw.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                if !is_ip_or_cidr(line) {
+                    let _ = std::fs::remove_file(&list_file);
+                    return Err(format!(
+                        "Downloaded ipset list is not valid (line {}): {:?}",
+                        idx + 1,
+                        line
+                    ));
+                }
+                count += 1;
+            }
+            if count == 0 {
+                let _ = std::fs::remove_file(&list_file);
+                return Err("Downloaded ipset list is empty".to_string());
+            }
             Ok(format!("Updated successfully. {} IPs loaded.", count))
         }
         Ok(out) => {
@@ -1000,6 +1464,33 @@ async fn update_ipset_list() -> Result<String, String> {
             Err(format!("Failed to update IPSet list: {}", stderr))
         }
         Err(e) => Err(format!("Failed to execute update command: {}", e)),
+    }
+}
+
+/// Validates that `s` is a syntactically plausible IPv4, IPv4/CIDR, IPv6 or
+/// IPv6/CIDR literal. Intentionally loose on range checks (we care about
+/// shape, not correctness): the existing file format is consumed by zapret,
+/// not parsed as a network spec here.
+fn is_ip_or_cidr(s: &str) -> bool {
+    let (addr, prefix) = match s.split_once('/') {
+        Some((a, p)) => (a, Some(p)),
+        None => (s, None),
+    };
+    if addr.is_empty() {
+        return false;
+    }
+    let is_ipv4 = addr.parse::<std::net::Ipv4Addr>().is_ok();
+    let is_ipv6 = addr.parse::<std::net::Ipv6Addr>().is_ok();
+    if !is_ipv4 && !is_ipv6 {
+        return false;
+    }
+    match prefix {
+        None => true,
+        Some(p) => match p.parse::<u8>() {
+            Ok(n) if is_ipv4 && n <= 32 => true,
+            Ok(n) if is_ipv6 && n <= 128 => true,
+            _ => false,
+        },
     }
 }
 
@@ -1038,7 +1529,7 @@ async fn download_and_install_update(window: tauri::Window) -> Result<String, St
         "try {{ (Invoke-WebRequest -Uri '{}' -Headers @{{'Cache-Control'='no-cache'}} -UseBasicParsing -TimeoutSec 10).Content.Trim() }} catch {{ exit 1 }}",
         GITHUB_VERSION_URL
     );
-    let out = Command::new("powershell")
+    let out = Command::new(powershell_path())
         .args(["-NoProfile", "-Command", &version_cmd])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1085,7 +1576,7 @@ async fn download_and_install_update(window: tauri::Window) -> Result<String, St
         }
     });
 
-    let out = Command::new("powershell")
+    let out = Command::new(powershell_path())
         .args(["-NoProfile", "-Command", &ps_cmd])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1110,25 +1601,32 @@ async fn download_and_install_update(window: tauri::Window) -> Result<String, St
         return Err("Download failed: output file not found".to_string());
     }
 
+    // Verify the downloaded archive against the SHA-256 digest published by
+    // GitHub for this release asset. If verification fails we delete the file
+    // and abort — we must never extract an archive whose integrity is in
+    // question, because its contents are executed as part of the bypass
+    // toolchain with elevated privileges.
+    let asset_name = format!("zapret-discord-youtube-{}.zip", latest_version);
+    let expected_sha256 = fetch_expected_sha256(&latest_version, &asset_name).await?;
+    let actual_sha256 = sha256_file(&zip_path)?;
+    if actual_sha256 != expected_sha256 {
+        let _ = std::fs::remove_file(&zip_path);
+        return Err(format!(
+            "Checksum mismatch for {}: expected {}, got {}",
+            asset_name, expected_sha256, actual_sha256
+        ));
+    }
+
     // Extraction
     window.emit("download-progress", 92).ok();
     let extract_dir = temp_dir.join("extracted");
     let _ = std::fs::create_dir_all(&extract_dir);
 
-    let extract_cmd = format!(
-        "Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
-        zip_path.to_str().unwrap_or(""),
-        extract_dir.to_str().unwrap_or("")
-    );
-
-    let ex_status = Command::new("powershell")
-        .args(["-NoProfile", "-Command", &extract_cmd])
-        .creation_flags(CREATE_NO_WINDOW)
-        .status();
-
-    if ex_status.is_err() || !ex_status.unwrap().success() {
-        return Err("Extraction failed".to_string());
-    }
+    // Extract natively via the `zip` crate instead of calling
+    // `Expand-Archive`. Every entry name is validated against `..`, absolute
+    // paths, and drive-letter prefixes before it is written, preventing
+    // zip-slip from placing files outside `extract_dir`.
+    extract_zip_safely(&zip_path, &extract_dir)?;
 
     window.emit("download-progress", 95).ok();
 
@@ -1158,7 +1656,7 @@ async fn download_and_install_update(window: tauri::Window) -> Result<String, St
 }
 
 /// Recursively copies directory contents
-fn copy_dir_contents(src: &PathBuf, dst: &PathBuf) -> Result<(), String> {
+fn copy_dir_contents(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
     for entry in std::fs::read_dir(src).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
@@ -1205,7 +1703,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     let mut vpn_services: Option<String> = None;
 
     // 1. Base Filtering Engine check
-    let bfe_check = Command::new("sc")
+    let bfe_check = Command::new(system32_tool("sc.exe"))
         .args(["query", "BFE"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1240,7 +1738,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 2. Proxy check
-    let proxy_check = Command::new("powershell")
+    let proxy_check = Command::new(powershell_path())
         .args([
             "-NoProfile",
             "-Command",
@@ -1279,7 +1777,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 3. TCP timestamps check
-    let tcp_check = Command::new("powershell")
+    let tcp_check = Command::new(powershell_path())
         .args([
             "-NoProfile",
             "-Command",
@@ -1359,7 +1857,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 5. Killer services check
-    let killer_check = Command::new("sc")
+    let killer_check = Command::new(system32_tool("sc.exe"))
         .args(["query"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1393,7 +1891,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 6. Intel Connectivity check
-    let intel_check = Command::new("sc")
+    let intel_check = Command::new(system32_tool("sc.exe"))
         .args(["query"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1431,7 +1929,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 7. Check Point check
-    let checkpoint_check = Command::new("sc")
+    let checkpoint_check = Command::new(system32_tool("sc.exe"))
         .args(["query"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1466,7 +1964,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 8. SmartByte check
-    let smartbyte_check = Command::new("sc")
+    let smartbyte_check = Command::new(system32_tool("sc.exe"))
         .args(["query"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1501,7 +1999,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 9. VPN services check
-    let vpn_check = Command::new("sc")
+    let vpn_check = Command::new(system32_tool("sc.exe"))
         .args(["query"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1545,7 +2043,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 10. DNS over HTTPS check
-    let doh_check = Command::new("powershell")
+    let doh_check = Command::new(powershell_path())
         .args([
             "-NoProfile",
             "-Command",
@@ -1606,7 +2104,7 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 12. WinDivert check
-    let windivert_check = Command::new("sc")
+    let windivert_check = Command::new(system32_tool("sc.exe"))
         .args(["query", "WinDivert"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
@@ -1674,7 +2172,7 @@ fn clear_discord_cache() -> Result<String, String> {
                 messages.push(format!("Discord is running, closing {}...", process));
 
                 // Kill the process
-                let _ = Command::new("taskkill")
+                let _ = Command::new(system32_tool("taskkill.exe"))
                     .args(["/F", "/IM", process])
                     .creation_flags(CREATE_NO_WINDOW)
                     .output();
@@ -1724,9 +2222,7 @@ fn clear_discord_cache() -> Result<String, String> {
         }
     }
 
-    if cleared > 0 {
-        Ok(messages.join("\n"))
-    } else if discord_was_running {
+    if cleared > 0 || discord_was_running {
         Ok(messages.join("\n"))
     } else {
         Ok("No Discord cache found to clear".to_string())
@@ -1760,10 +2256,10 @@ struct TestProgress {
 /// Cancels a running test process
 #[tauri::command]
 fn cancel_tests(state: State<'_, AppState>) {
-    let mut pid_lock = state.test_process_pid.lock().unwrap();
+    let mut pid_lock = state.test_process_pid.lock_unpoisoned();
     if let Some(pid) = pid_lock.take() {
         // Kill process tree (/T = tree, /F = force)
-        let _ = Command::new("taskkill")
+        let _ = Command::new(system32_tool("taskkill.exe"))
             .arg("/F")
             .arg("/T")
             .arg("/PID")
@@ -1834,7 +2330,7 @@ async fn run_tests(
     );
 
     // Spawn the process and stream output line by line
-    let mut child = std::process::Command::new("powershell")
+    let mut child = std::process::Command::new(powershell_path())
         .args([
             "-NoProfile",
             "-ExecutionPolicy",
@@ -1852,7 +2348,7 @@ async fn run_tests(
     // Store PID so cancel_tests / window-close can kill the process
     {
         let state = app.state::<AppState>();
-        let mut pid_lock = state.test_process_pid.lock().unwrap();
+        let mut pid_lock = state.test_process_pid.lock_unpoisoned();
         *pid_lock = Some(child.id());
     }
 
@@ -1861,44 +2357,41 @@ async fn run_tests(
 
     let mut all_lines: Vec<String> = Vec::new();
 
-    for line_result in reader.lines() {
-        if let Ok(raw) = line_result {
-            // Strip ANSI color codes and trim
-            let clean: String = raw.chars().filter(|c| c.is_ascii() || *c == '\n').collect();
-            let line = clean.trim().to_string();
-            if line.is_empty() {
-                continue;
-            }
-
-            all_lines.push(line.clone());
-
-            // Classify the line for coloring in the UI
-            let kind = if line.contains("[ERROR]") || line.contains("[X]") {
-                "error"
-            } else if line.contains("[WARNING]") || line.contains("[WARN]") || line.contains("[?]")
-            {
-                "warning"
-            } else if line.contains("[OK]")
-                || line.contains("Best config:")
-                || line.contains("Best strategy:")
-            {
-                "success"
-            } else if line.contains("---") || line.contains("===") {
-                "separator"
-            } else if line.starts_with("  [") {
-                "config"
-            } else {
-                "info"
-            };
-
-            let _ = app.emit(
-                "test-progress",
-                serde_json::json!({
-                    "line": line,
-                    "kind": kind
-                }),
-            );
+    for raw in reader.lines().map_while(Result::ok) {
+        // Strip ANSI color codes and trim
+        let clean: String = raw.chars().filter(|c| c.is_ascii() || *c == '\n').collect();
+        let line = clean.trim().to_string();
+        if line.is_empty() {
+            continue;
         }
+
+        all_lines.push(line.clone());
+
+        // Classify the line for coloring in the UI
+        let kind = if line.contains("[ERROR]") || line.contains("[X]") {
+            "error"
+        } else if line.contains("[WARNING]") || line.contains("[WARN]") || line.contains("[?]") {
+            "warning"
+        } else if line.contains("[OK]")
+            || line.contains("Best config:")
+            || line.contains("Best strategy:")
+        {
+            "success"
+        } else if line.contains("---") || line.contains("===") {
+            "separator"
+        } else if line.starts_with("  [") {
+            "config"
+        } else {
+            "info"
+        };
+
+        let _ = app.emit(
+            "test-progress",
+            serde_json::json!({
+                "line": line,
+                "kind": kind
+            }),
+        );
     }
 
     let _ = child.wait();
@@ -1906,7 +2399,7 @@ async fn run_tests(
     // Clear PID — process finished (or was killed)
     {
         let state = app.state::<AppState>();
-        let mut pid_lock = state.test_process_pid.lock().unwrap();
+        let mut pid_lock = state.test_process_pid.lock_unpoisoned();
         *pid_lock = None;
     }
 
@@ -1975,18 +2468,18 @@ fn update_tray_translations(
     app: tauri::AppHandle,
 ) {
     {
-        let mut lock = state.translations.lock().unwrap();
+        let mut lock = state.translations.lock_unpoisoned();
         *lock = Some(translations.clone());
     }
 
     // Update labels that don't depend on status
-    if let Some(mi) = state.quit_item.lock().unwrap().as_ref() {
+    if let Some(mi) = state.quit_item.lock_unpoisoned().as_ref() {
         let _ = mi.set_text(&translations.exit);
     }
-    if let Some(mi) = state.show_item.lock().unwrap().as_ref() {
+    if let Some(mi) = state.show_item.lock_unpoisoned().as_ref() {
         let _ = mi.set_text(&translations.show);
     }
-    if let Some(mi) = state.strategies_submenu.lock().unwrap().as_ref() {
+    if let Some(mi) = state.strategies_submenu.lock_unpoisoned().as_ref() {
         let _ = mi.set_text(&translations.change_strategy);
     }
 
@@ -1996,13 +2489,13 @@ fn update_tray_translations(
 fn refresh_tray_menu(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
     let status = get_zapret_status(state.clone());
-    let trans_lock = state.translations.lock().unwrap();
+    let trans_lock = state.translations.lock_unpoisoned();
     let trans = match trans_lock.as_ref() {
         Some(t) => t,
         None => return, // Wait until translations are loaded
     };
 
-    let status_mi = state.status_item.lock().unwrap().clone();
+    let status_mi = state.status_item.lock_unpoisoned().clone();
     if let Some(mi) = status_mi {
         let status_text = if status.running {
             &trans.status_on
@@ -2013,7 +2506,7 @@ fn refresh_tray_menu(app: &tauri::AppHandle) {
         let _ = mi.set_text(text);
     }
 
-    let strategy_mi = state.strategy_item.lock().unwrap().clone();
+    let strategy_mi = state.strategy_item.lock_unpoisoned().clone();
     if let Some(mi) = strategy_mi {
         let text = format!(
             "{}{}",
@@ -2023,7 +2516,7 @@ fn refresh_tray_menu(app: &tauri::AppHandle) {
         let _ = mi.set_text(text);
     }
 
-    let toggle_mi = state.toggle_item.lock().unwrap().clone();
+    let toggle_mi = state.toggle_item.lock_unpoisoned().clone();
     if let Some(mi) = toggle_mi {
         let text = if status.running {
             &trans.toggle_off
@@ -2082,11 +2575,11 @@ pub fn run() {
             // Сохраняем ссылки для динамического обновления
             {
                 let state = app.state::<AppState>();
-                *state.status_item.lock().unwrap() = Some(status_info.clone());
-                *state.strategy_item.lock().unwrap() = Some(strategy_info.clone());
-                *state.toggle_item.lock().unwrap() = Some(toggle_i.clone());
-                *state.quit_item.lock().unwrap() = Some(quit_i.clone());
-                *state.show_item.lock().unwrap() = Some(show_i.clone());
+                *state.status_item.lock_unpoisoned() = Some(status_info.clone());
+                *state.strategy_item.lock_unpoisoned() = Some(strategy_info.clone());
+                *state.toggle_item.lock_unpoisoned() = Some(toggle_i.clone());
+                *state.quit_item.lock_unpoisoned() = Some(quit_i.clone());
+                *state.show_item.lock_unpoisoned() = Some(show_i.clone());
             }
 
             // Загружаем стратегии
@@ -2099,7 +2592,7 @@ pub fn run() {
             let strategies_submenu = strategies_menu_builder.build()?;
             {
                 let state = app.state::<AppState>();
-                *state.strategies_submenu.lock().unwrap() = Some(strategies_submenu.clone());
+                *state.strategies_submenu.lock_unpoisoned() = Some(strategies_submenu.clone());
             }
 
             let menu = MenuBuilder::new(app)
@@ -2127,7 +2620,7 @@ pub fn run() {
                                 let _ = window.set_focus();
                                 // Скрываем иконку при разворачивании
                                 let state = app.state::<AppState>();
-                                let tray_opt = state.tray_handle.lock().unwrap().clone();
+                                let tray_opt = state.tray_handle.lock_unpoisoned().clone();
                                 if let Some(tray) = tray_opt {
                                     let _ = tray.set_visible(false);
                                 }
@@ -2139,11 +2632,11 @@ pub fn run() {
                             if status.running {
                                 stop_zapret(state);
                             } else {
-                                let last = state.last_strategy.lock().unwrap().clone();
+                                let last = state.last_strategy.lock_unpoisoned().clone();
                                 let available = get_strategies().unwrap_or_default();
                                 let strategy = last
                                     .or(status.strategy)
-                                    .or_else(|| available.get(0).cloned());
+                                    .or_else(|| available.first().cloned());
                                 if let Some(s) = strategy {
                                     let _ = start_zapret(s, "service".to_string(), state);
                                 }
@@ -2189,7 +2682,7 @@ pub fn run() {
             {
                 let state = app.state::<AppState>();
                 let _ = tray.set_visible(false);
-                *state.tray_handle.lock().unwrap() = Some(tray);
+                *state.tray_handle.lock_unpoisoned() = Some(tray);
             }
 
             // Первоначальное обновление меню и детекция запущенной стратегии
@@ -2198,7 +2691,7 @@ pub fn run() {
                 let status = get_zapret_status(state.clone());
                 if status.running {
                     if let Some(s) = status.strategy {
-                        *state.last_strategy.lock().unwrap() = Some(s);
+                        *state.last_strategy.lock_unpoisoned() = Some(s);
                     }
                 }
                 refresh_tray_menu(app.handle());
@@ -2213,14 +2706,14 @@ pub fn run() {
 
                 // Показываем иконку при сворачивании в трей
                 let state = window.app_handle().state::<AppState>();
-                let tray_opt = state.tray_handle.lock().unwrap().clone();
+                let tray_opt = state.tray_handle.lock_unpoisoned().clone();
                 if let Some(tray) = tray_opt {
                     let _ = tray.set_visible(true);
                 }
 
                 // Показываем уведомление (один раз за сессию)
                 if !state.notification_shown.swap(true, Ordering::SeqCst) {
-                    let trans_lock = state.translations.lock().unwrap();
+                    let trans_lock = state.translations.lock_unpoisoned();
                     let (title, body) = match trans_lock.as_ref() {
                         Some(t) => (&t.minimized_title, &t.minimized_body),
                         None => (
@@ -2240,9 +2733,9 @@ pub fn run() {
 
                 // Kill any running test process when the window is closed
                 let state = window.app_handle().state::<AppState>();
-                let mut pid_lock = state.test_process_pid.lock().unwrap();
+                let mut pid_lock = state.test_process_pid.lock_unpoisoned();
                 if let Some(pid) = pid_lock.take() {
-                    let _ = Command::new("taskkill")
+                    let _ = Command::new(system32_tool("taskkill.exe"))
                         .arg("/F")
                         .arg("/T")
                         .arg("/PID")
