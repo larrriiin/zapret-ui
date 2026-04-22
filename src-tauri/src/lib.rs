@@ -18,6 +18,9 @@ use tauri_plugin_notification::NotificationExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const GITHUB_VERSION_URL: &str =
     "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt";
+const GITHUB_RELEASE_API: &str =
+    "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/tags";
+const GITHUB_USER_AGENT: &str = "zapret-ui-updater";
 
 struct AppState {
     active_strategy: Mutex<Option<String>>,
@@ -65,6 +68,131 @@ struct FiltersStatus {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Allowed filenames that commands may read/write in the `lists/` directory.
+/// Kept in sync with the three files the frontend actually uses.
+const ALLOWED_LIST_FILENAMES: &[&str] = &[
+    "list-general-user.txt",
+    "list-exclude-user.txt",
+    "ipset-exclude-user.txt",
+];
+
+/// Strategy names come from the frontend and are concatenated into shell
+/// commands and filesystem paths. Restrict them to a conservative charset
+/// and reject separators / traversal sequences.
+fn is_safe_strategy_name(name: &str) -> bool {
+    if name.is_empty() || name.len() > 64 {
+        return false;
+    }
+    if name.contains("..") {
+        return false;
+    }
+    name.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+        && !name.starts_with('.')
+}
+
+fn ensure_safe_list_filename(filename: &str) -> Result<(), String> {
+    if ALLOWED_LIST_FILENAMES.contains(&filename) {
+        Ok(())
+    } else {
+        Err(format!("Invalid list filename: {}", filename))
+    }
+}
+
+/// Computes the SHA-256 digest of a file as a lowercase hex string.
+fn sha256_file(path: &std::path::Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex_encode(&hasher.finalize()))
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
+/// Fetches the expected SHA-256 digest of the given release asset from the
+/// GitHub Releases API. Returns a lowercase hex string on success.
+async fn fetch_expected_sha256(version: &str, asset_name: &str) -> Result<String, String> {
+    if version.is_empty()
+        || !version
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'))
+    {
+        return Err(format!("Invalid upstream version tag: {}", version));
+    }
+
+    let url = format!("{}/{}", GITHUB_RELEASE_API, version);
+    let client = reqwest::Client::builder()
+        .user_agent(GITHUB_USER_AGENT)
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let resp = client
+        .get(&url)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch release metadata: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!(
+            "GitHub API returned status {} for {}",
+            resp.status(),
+            url
+        ));
+    }
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse release metadata: {}", e))?;
+
+    let assets = body
+        .get("assets")
+        .and_then(|a| a.as_array())
+        .ok_or_else(|| "Release metadata is missing assets".to_string())?;
+
+    let asset = assets
+        .iter()
+        .find(|a| a.get("name").and_then(|n| n.as_str()) == Some(asset_name))
+        .ok_or_else(|| format!("Asset {} not found in release {}", asset_name, version))?;
+
+    let digest = asset
+        .get("digest")
+        .and_then(|d| d.as_str())
+        .ok_or_else(|| format!("Asset {} has no digest field", asset_name))?;
+
+    let hex = digest
+        .strip_prefix("sha256:")
+        .ok_or_else(|| format!("Unsupported digest format: {}", digest))?;
+
+    if hex.len() != 64 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!("Malformed sha256 digest: {}", digest));
+    }
+
+    Ok(hex.to_ascii_lowercase())
+}
 
 fn find_binaries_dir() -> PathBuf {
     // 1. Direct sibling of the exe (production after first download)
@@ -225,6 +353,9 @@ fn ensure_binaries_present() -> bool {
 }
 
 fn parse_bat_args(strategy: &str) -> Result<String, String> {
+    if !is_safe_strategy_name(strategy) {
+        return Err(format!("Invalid strategy name: {}", strategy));
+    }
     let dir = find_binaries_dir();
     let bat_path = dir.join(format!("{}.bat", strategy));
     let content = std::fs::read_to_string(&bat_path)
@@ -707,6 +838,13 @@ fn start_zapret(
     mode: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
+    if !is_safe_strategy_name(&strategy) {
+        return Err(format!("Invalid strategy name: {}", strategy));
+    }
+    if mode != "service" && mode != "temp" {
+        return Err(format!("Invalid mode: {}", mode));
+    }
+
     // Убиваем текущий процесс
     let _ = Command::new("taskkill")
         .args(["/f", "/im", "winws.exe"])
@@ -868,6 +1006,7 @@ fn stop_zapret(state: State<'_, AppState>) {
 /// Reads lines from a file in the lists directory, filtering out comments and empty lines
 #[tauri::command]
 fn read_user_list(filename: String) -> Result<Vec<String>, String> {
+    ensure_safe_list_filename(&filename)?;
     let dir = find_binaries_dir();
     let file_path = dir.join("lists").join(&filename);
 
@@ -891,6 +1030,7 @@ fn read_user_list(filename: String) -> Result<Vec<String>, String> {
 /// Writes lines to a file in the lists directory
 #[tauri::command]
 fn write_user_list(filename: String, lines: Vec<String>) -> Result<(), String> {
+    ensure_safe_list_filename(&filename)?;
     let dir = find_binaries_dir();
     let file_path = dir.join("lists").join(&filename);
 
@@ -904,6 +1044,7 @@ fn write_user_list(filename: String, lines: Vec<String>) -> Result<(), String> {
 /// Adds a line to a user list file
 #[tauri::command]
 fn add_to_user_list(filename: String, entry: String) -> Result<(), String> {
+    ensure_safe_list_filename(&filename)?;
     let dir = find_binaries_dir();
     let file_path = dir.join("lists").join(&filename);
 
@@ -935,6 +1076,7 @@ fn add_to_user_list(filename: String, entry: String) -> Result<(), String> {
 /// Removes a line from a user list file
 #[tauri::command]
 fn remove_from_user_list(filename: String, entry: String) -> Result<(), String> {
+    ensure_safe_list_filename(&filename)?;
     let dir = find_binaries_dir();
     let file_path = dir.join("lists").join(&filename);
 
@@ -1108,6 +1250,22 @@ async fn download_and_install_update(window: tauri::Window) -> Result<String, St
 
     if !zip_path.exists() {
         return Err("Download failed: output file not found".to_string());
+    }
+
+    // Verify the downloaded archive against the SHA-256 digest published by
+    // GitHub for this release asset. If verification fails we delete the file
+    // and abort — we must never extract an archive whose integrity is in
+    // question, because its contents are executed as part of the bypass
+    // toolchain with elevated privileges.
+    let asset_name = format!("zapret-discord-youtube-{}.zip", latest_version);
+    let expected_sha256 = fetch_expected_sha256(&latest_version, &asset_name).await?;
+    let actual_sha256 = sha256_file(&zip_path)?;
+    if actual_sha256 != expected_sha256 {
+        let _ = std::fs::remove_file(&zip_path);
+        return Err(format!(
+            "Checksum mismatch for {}: expected {}, got {}",
+            asset_name, expected_sha256, actual_sha256
+        ));
     }
 
     // Extraction
