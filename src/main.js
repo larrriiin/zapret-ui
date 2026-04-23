@@ -1685,10 +1685,11 @@ window.addEventListener('DOMContentLoaded', async () => {
             $('wizard-best-final-meta').textContent = `HTTP: ${best.http_ok}/${total} · ${t('ping_label')}: ${pingTxt}`;
             $('wizard-apply-best-btn').onclick = async () => {
                 try {
-                    setStrategyValue(best.config, best.config);
+                    const strategyName = best.config.replace(/\.bat$/i, '');
+                    setStrategyValue(strategyName, strategyName);
                     const status = await invoke('get_zapret_status');
                     const mode = status.mode || 'temporary';
-                    await invoke('start_zapret', { strategy: best.config, mode });
+                    await invoke('start_zapret', { strategy: strategyName, mode });
                 } catch (err) {
                     console.error('Apply best failed:', err);
                 }
