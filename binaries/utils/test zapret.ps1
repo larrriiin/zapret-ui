@@ -811,7 +811,7 @@ try {
         if ($res.Type -eq 'standard') {
             foreach ($targetRes in $res.Results) {
                 $config = $res.Config
-                if (-not $analytics.ContainsKey($config)) { $analytics[$config] = @{ OK = 0; ERROR = 0; UNSUP = 0; PingOK = 0; PingFail = 0 } }
+                if (-not $analytics.ContainsKey($config)) { $analytics[$config] = @{ OK = 0; ERROR = 0; UNSUP = 0; PingOK = 0; PingFail = 0; PingSumMs = 0 } }
                 if ($targetRes.IsUrl) {
                     foreach ($tok in $targetRes.HttpTokens) {
                         if ($tok -match "OK") { $analytics[$config].OK++ }
@@ -820,7 +820,15 @@ try {
                         elseif ($tok -match "UNSUP") { $analytics[$config].UNSUP++ }
                     }
                 }
-                if ($targetRes.PingResult -ne "Timeout" -and $targetRes.PingResult -ne "n/a") { $analytics[$config].PingOK++ } else { $analytics[$config].PingFail++ }
+                if ($targetRes.PingResult -ne "Timeout" -and $targetRes.PingResult -ne "n/a") {
+                    $analytics[$config].PingOK++
+                    # Extract leading integer (both "45 ms" and localized "45 мс" work)
+                    if ($targetRes.PingResult -match '^\s*(\d+)') {
+                        $analytics[$config].PingSumMs += [int]$matches[1]
+                    }
+                } else {
+                    $analytics[$config].PingFail++
+                }
             }
         } elseif ($res.Type -eq 'dpi') {
             foreach ($targetRes in $res.Results) {
@@ -841,7 +849,9 @@ try {
     foreach ($config in $analytics.Keys) {
         $a = $analytics[$config]
         if ($a.ContainsKey('PingOK')) {
-            Write-Host "$config : HTTP OK: $($a.OK), ERR: $($a.ERROR), UNSUP: $($a.UNSUP), Ping OK: $($a.PingOK), Fail: $($a.PingFail)" -ForegroundColor Yellow
+            $avgPing = 0
+            if ($a.PingOK -gt 0) { $avgPing = [math]::Round($a.PingSumMs / $a.PingOK) }
+            Write-Host "$config : HTTP OK: $($a.OK), ERR: $($a.ERROR), UNSUP: $($a.UNSUP), Ping OK: $($a.PingOK), Fail: $($a.PingFail), AvgPing: $avgPing ms" -ForegroundColor Yellow
         } else {
             Write-Host "$config : OK: $($a.OK), FAIL: $($a.FAIL), UNSUP: $($a.UNSUPPORTED), BLOCKED: $($a.LIKELY_BLOCKED)" -ForegroundColor Yellow
         }

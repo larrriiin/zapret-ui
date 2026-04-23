@@ -718,6 +718,31 @@ fn is_zapret_service_running() -> bool {
     }
 }
 
+/// Проверяет, установлена ли служба `zapret` (даже если сейчас остановлена).
+/// `sc query` пишет "the specified service does not exist as an installed service"
+/// в stderr при отсутствии службы.
+fn is_zapret_service_installed() -> bool {
+    let output = Command::new(system32_tool("sc.exe"))
+        .args(["query", "zapret"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    match output {
+        Ok(out) => {
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            )
+            .to_lowercase();
+            // Наличие строки "service_name" и отсутствие "does not exist"
+            out.status.success()
+                && combined.contains("service_name")
+                && !combined.contains("does not exist")
+        }
+        Err(_) => false,
+    }
+}
+
 fn is_winws_running() -> bool {
     let output = Command::new("tasklist")
         .args(["/fi", "IMAGENAME eq winws.exe", "/fo", "csv", "/nh"])
@@ -2235,7 +2260,7 @@ fn check_admin_privileges() -> Result<bool, String> {
     Ok(is_admin())
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct TestResult {
     config: String,
     status: String, // "success", "partial", "failed"
@@ -2243,6 +2268,10 @@ struct TestResult {
     http_error: i32,
     ping_ok: i32,
     ping_fail: i32,
+    #[serde(default)]
+    avg_ping_ms: i32,
+    #[serde(default)]
+    score: i32,
 }
 
 #[derive(serde::Serialize)]
@@ -2251,6 +2280,76 @@ struct TestProgress {
     current: usize,
     total: usize,
     config_name: String,
+}
+
+#[derive(serde::Serialize)]
+struct PrecheckTestsResult {
+    service_installed: bool,
+    service_running: bool,
+    winws_running: bool,
+    is_admin: bool,
+    strategies_count: usize,
+}
+
+/// Pre-flight проверка перед запуском тестов: какие есть блокеры.
+/// Фронт решает, что предложить пользователю (остановить, удалить службу,
+/// first-run скачивание стратегий).
+#[tauri::command]
+fn precheck_tests() -> PrecheckTestsResult {
+    let dir = find_binaries_dir();
+    let strategies_count = std::fs::read_dir(&dir)
+        .map(|rd| {
+            rd.filter_map(Result::ok)
+                .filter(|e| {
+                    let name = e.file_name().to_string_lossy().to_ascii_lowercase();
+                    name.ends_with(".bat") && !name.starts_with("service")
+                })
+                .count()
+        })
+        .unwrap_or(0);
+
+    PrecheckTestsResult {
+        service_installed: is_zapret_service_installed(),
+        service_running: is_zapret_service_running(),
+        winws_running: is_winws_running(),
+        is_admin: is_admin(),
+        strategies_count,
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SavedTestResults {
+    timestamp: String, // ISO 8601
+    test_type: String,
+    best: Option<String>,
+    results: Vec<TestResult>,
+}
+
+fn test_results_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {}", e))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Failed to create app data dir: {}", e))?;
+    Ok(dir.join("test_results.json"))
+}
+
+#[tauri::command]
+fn save_test_results(app: tauri::AppHandle, payload: SavedTestResults) -> Result<(), String> {
+    let path = test_results_path(&app)?;
+    let json = serde_json::to_string_pretty(&payload)
+        .map_err(|e| format!("Failed to serialize test results: {}", e))?;
+    std::fs::write(&path, json)
+        .map_err(|e| format!("Failed to write test results: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn load_test_results(app: tauri::AppHandle) -> Option<SavedTestResults> {
+    let path = test_results_path(&app).ok()?;
+    let raw = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&raw).ok()
 }
 
 /// Cancels a running test process
@@ -2357,6 +2456,19 @@ async fn run_tests(
 
     let mut all_lines: Vec<String> = Vec::new();
 
+    // Regex-like match done manually: "  [N/M] name.bat"
+    fn parse_config_header(line: &str) -> Option<(usize, usize, String)> {
+        let trimmed = line.trim_start();
+        let bracket = trimmed.strip_prefix('[')?;
+        let close = bracket.find(']')?;
+        let (nums, rest) = bracket.split_at(close);
+        let rest = rest.strip_prefix("] ")?;
+        let (cur_s, tot_s) = nums.split_once('/')?;
+        let cur: usize = cur_s.parse().ok()?;
+        let tot: usize = tot_s.parse().ok()?;
+        Some((cur, tot, rest.trim().to_string()))
+    }
+
     for raw in reader.lines().map_while(Result::ok) {
         // Strip ANSI color codes and trim
         let clean: String = raw.chars().filter(|c| c.is_ascii() || *c == '\n').collect();
@@ -2384,6 +2496,28 @@ async fn run_tests(
         } else {
             "info"
         };
+
+        // Structured event: "[N/M] foo.bat" → test-config-start
+        if line.contains(".bat") {
+            if let Some((cur, tot, name)) = parse_config_header(&line) {
+                let _ = app.emit(
+                    "test-config-start",
+                    serde_json::json!({
+                        "index": cur,
+                        "total": tot,
+                        "name": name,
+                    }),
+                );
+            }
+        }
+
+        // Structured event: "Best config: X"
+        if let Some(rest) = line.strip_prefix("Best config:") {
+            let _ = app.emit(
+                "test-best",
+                serde_json::json!({ "config": rest.trim() }),
+            );
+        }
 
         let _ = app.emit(
             "test-progress",
@@ -2422,6 +2556,7 @@ async fn run_tests(
                 let http_error = extract_number(line, "ERR:");
                 let ping_ok = extract_number(line, "Ping OK:");
                 let ping_fail = extract_number(line, "Fail:");
+                let avg_ping_ms = extract_number(line, "AvgPing:");
 
                 let status = if http_error == 0 && ping_fail == 0 {
                     "success"
@@ -2431,6 +2566,8 @@ async fn run_tests(
                     "failed"
                 };
 
+                let score = http_ok * 10 + ping_ok - http_error * 20 - ping_fail * 2;
+
                 results.push(TestResult {
                     config,
                     status: status.to_string(),
@@ -2438,6 +2575,8 @@ async fn run_tests(
                     http_error,
                     ping_ok,
                     ping_fail,
+                    avg_ping_ms,
+                    score,
                 });
             }
         }
@@ -2448,17 +2587,27 @@ async fn run_tests(
     Ok(results)
 }
 
+/// Вытаскивает первое целое число после указанного префикса. Игнорирует
+/// единицы измерения (например `AvgPing: 45 ms` → 45) и запятые в конце
+/// (`Ping OK: 5,` → 5).
 fn extract_number(text: &str, prefix: &str) -> i32 {
-    if let Some(pos) = text.find(prefix) {
-        let after = &text[pos + prefix.len()..];
-        if let Some(end) = after.find(',') {
-            after[..end].trim().parse().unwrap_or(0)
-        } else {
-            after.trim().parse().unwrap_or(0)
+    let Some(pos) = text.find(prefix) else { return 0 };
+    let after = &text[pos + prefix.len()..];
+    let mut started = false;
+    let mut digits = String::new();
+    for ch in after.chars() {
+        if ch.is_ascii_digit() {
+            digits.push(ch);
+            started = true;
+        } else if started {
+            break;
+        } else if ch == '-' && !started {
+            // not expecting negatives, but tolerate
+            digits.push(ch);
+            started = true;
         }
-    } else {
-        0
     }
+    digits.parse().unwrap_or(0)
 }
 
 #[tauri::command]
@@ -2769,6 +2918,9 @@ pub fn run() {
             check_status_full,
             ensure_binaries_present,
             cancel_tests,
+            precheck_tests,
+            save_test_results,
+            load_test_results,
             update_tray_translations,
         ])
         .run(tauri::generate_context!())
