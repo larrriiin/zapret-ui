@@ -812,7 +812,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         const getClosePref = () => localStorage.getItem(CLOSE_PREF_KEY) || 'ask';
         const setClosePref = (v) => localStorage.setItem(CLOSE_PREF_KEY, v);
 
-        const doMinimizeToTray = () => { try { win.hide(); } catch {} };
+        // Use win.close() (not win.hide()) so Rust-side CloseRequested handler
+        // runs and makes the tray icon visible + shows the "minimized" notification.
+        const doMinimizeToTray = () => { try { win.close(); } catch {} };
         const doExit = () => { invoke('exit_app').catch(err => console.error('exit_app failed:', err)); };
 
         const updateMaximizeIcon = async () => {
