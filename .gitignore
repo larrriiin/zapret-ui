@@ -10,7 +10,6 @@ lerna-debug.log*
 # Dependencies
 node_modules
 pnpm-lock.yaml
-package-lock.json
 yarn.lock
 
 # Build artifacts
