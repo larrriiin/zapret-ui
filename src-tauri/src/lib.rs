@@ -2586,9 +2586,18 @@ async fn run_tests(
             in_analytics = true;
             continue;
         }
-        if in_analytics && line.contains(".bat") {
-            if let Some(config_name) = line.split(':').next() {
+        // Only parse actual analytics data lines: "<config>.bat : HTTP OK: ..."
+        // or "<config>.bat : OK: ..." (DPI). Skip "Best config: ...", separators, etc.
+        if in_analytics
+            && line.contains(".bat")
+            && (line.contains(" : HTTP OK:") || line.contains(" : OK:"))
+        {
+            if let Some(config_name) = line.split(" : ").next() {
                 let config = config_name.trim().to_string();
+                // service.bat is the installer script, not a DPI strategy
+                if config.eq_ignore_ascii_case("service.bat") {
+                    continue;
+                }
                 let http_ok = extract_number(line, "HTTP OK:");
                 let http_error = extract_number(line, "ERR:");
                 let ping_ok = extract_number(line, "Ping OK:");

@@ -1683,12 +1683,10 @@ window.addEventListener('DOMContentLoaded', async () => {
             const pingTxt = best.avg_ping_ms > 0 ? `${best.avg_ping_ms} ${t('ms')}` : '—';
             const total = best.http_ok + best.http_error;
             $('wizard-best-final-meta').textContent = `HTTP: ${best.http_ok}/${total} · ${t('ping_label')}: ${pingTxt}`;
-            $('wizard-apply-best-btn').onclick = async () => {
+            const applyBest = async (mode) => {
                 try {
                     const strategyName = best.config.replace(/\.bat$/i, '');
                     setStrategyValue(strategyName, strategyName);
-                    const status = await invoke('get_zapret_status');
-                    const mode = status.mode || 'temporary';
                     await invoke('start_zapret', { strategy: strategyName, mode });
                 } catch (err) {
                     console.error('Apply best failed:', err);
@@ -1696,6 +1694,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                 showWizardStep(WizardState.Hidden);
                 await pollStatus();
             };
+            $('wizard-apply-service-btn').onclick = () => applyBest('service');
+            $('wizard-apply-temp-btn').onclick = () => applyBest('temporary');
         } else {
             box.classList.add('hidden');
         }
