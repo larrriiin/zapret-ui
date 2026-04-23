@@ -2455,6 +2455,10 @@ async fn run_tests(
     let reader = BufReader::new(stdout);
 
     let mut all_lines: Vec<String> = Vec::new();
+    let mut current_config: Option<String> = None;
+    // config -> (sum_ms, count)
+    let mut ping_stats: std::collections::HashMap<String, (i64, i64)> =
+        std::collections::HashMap::new();
 
     // Regex-like match done manually: "  [N/M] name.bat"
     fn parse_config_header(line: &str) -> Option<(usize, usize, String)> {
@@ -2467,6 +2471,27 @@ async fn run_tests(
         let cur: usize = cur_s.parse().ok()?;
         let tot: usize = tot_s.parse().ok()?;
         Some((cur, tot, rest.trim().to_string()))
+    }
+
+    // Extract ping in milliseconds from lines like "... | Ping: 45 ms".
+    // Returns None for "Timeout", "n/a", or non-matching lines.
+    fn parse_ping_ms(line: &str) -> Option<i64> {
+        let idx = line.find("Ping:")?;
+        let after = line[idx + "Ping:".len()..].trim_start();
+        if after.starts_with("Timeout") || after.starts_with("n/a") {
+            return None;
+        }
+        let mut digits = String::new();
+        for ch in after.chars() {
+            if ch.is_ascii_digit() {
+                digits.push(ch);
+            } else if !digits.is_empty() {
+                break;
+            } else if !ch.is_whitespace() {
+                return None;
+            }
+        }
+        digits.parse().ok()
     }
 
     for raw in reader.lines().map_while(Result::ok) {
@@ -2500,6 +2525,7 @@ async fn run_tests(
         // Structured event: "[N/M] foo.bat" → test-config-start
         if line.contains(".bat") {
             if let Some((cur, tot, name)) = parse_config_header(&line) {
+                current_config = Some(name.clone());
                 let _ = app.emit(
                     "test-config-start",
                     serde_json::json!({
@@ -2508,6 +2534,17 @@ async fn run_tests(
                         "name": name,
                     }),
                 );
+            }
+        }
+
+        // Accumulate per-target ping for the current config. PS1 prints lines
+        // like "  Discord Main  HTTP:OK ... | Ping: 45 ms". Ignore the "=== "
+        // separator and analytics lines.
+        if !line.starts_with('=') && !line.contains(" : HTTP OK:") {
+            if let (Some(cfg), Some(ms)) = (current_config.as_ref(), parse_ping_ms(&line)) {
+                let entry = ping_stats.entry(cfg.clone()).or_insert((0, 0));
+                entry.0 += ms;
+                entry.1 += 1;
             }
         }
 
@@ -2556,7 +2593,11 @@ async fn run_tests(
                 let http_error = extract_number(line, "ERR:");
                 let ping_ok = extract_number(line, "Ping OK:");
                 let ping_fail = extract_number(line, "Fail:");
-                let avg_ping_ms = extract_number(line, "AvgPing:");
+                let avg_ping_ms = ping_stats
+                    .get(&config)
+                    .filter(|(_, count)| *count > 0)
+                    .map(|(sum, count)| ((sum + count / 2) / count) as i32)
+                    .unwrap_or(0);
 
                 let status = if http_error == 0 && ping_fail == 0 {
                     "success"
