@@ -6066,7 +6066,7 @@ dependencies = [
 
 [[package]]
 name = "zapret-ui"
-version = "26.4.14"
+version = "26.4.15"
 dependencies = [
  "base64 0.22.1",
  "reqwest 0.12.28",
