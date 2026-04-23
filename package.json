@@ -1,7 +1,7 @@
 {
   "name": "zapret-ui",
   "private": true,
-  "version": "26.4.16",
+  "version": "26.4.17",
   "type": "module",
   "scripts": {
     "tauri": "tauri",
