@@ -4,11 +4,15 @@
   "version": "26.4.17",
   "type": "module",
   "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
     "tauri": "tauri",
     "check-versions": "node scripts/check-versions.mjs",
     "set-version": "node scripts/set-version.mjs"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2"
+    "@tauri-apps/cli": "^2",
+    "vite": "^5.4.10"
   }
 }

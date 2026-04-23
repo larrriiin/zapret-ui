@@ -1,0 +1,102 @@
+<!-- Strategy Test Wizard Modal -->
+<div id="test-wizard-modal"
+    class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="glass-panel rounded-2xl border border-primary/30 p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-6">
+            <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-primary text-2xl">rocket_launch</span>
+                <h3 class="font-headline text-lg font-bold text-primary uppercase tracking-widest" data-i18n="wizard_title">Strategy Auto-Detect</h3>
+            </div>
+            <button id="wizard-close-btn"
+                class="w-9 h-9 rounded-xl flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high transition-colors">
+                <span class="material-symbols-outlined text-base">close</span>
+            </button>
+        </div>
+
+        <!-- Step 1: Pre-flight blockers -->
+        <div id="wizard-preflight" class="hidden space-y-4">
+            <p class="text-sm text-on-surface-variant" data-i18n="wizard_preflight_desc">Before running tests, the following need to be resolved:</p>
+            <div id="wizard-preflight-blockers" class="space-y-2"></div>
+            <div class="flex gap-3 justify-end pt-2">
+                <button id="wizard-preflight-cancel-btn"
+                    class="px-5 py-2.5 rounded-xl border border-outline-variant/30 text-on-surface-variant font-bold text-xs uppercase tracking-widest hover:bg-surface-container-high transition-colors" data-i18n="cancel">Cancel</button>
+                <button id="wizard-preflight-fix-btn"
+                    class="px-5 py-2.5 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-widest hover:bg-primary-dim transition-colors" data-i18n="wizard_preflight_fix">Fix &amp; Continue</button>
+            </div>
+        </div>
+
+        <!-- Step 2: Progress -->
+        <div id="wizard-progress" class="hidden space-y-5">
+            <div>
+                <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-xs uppercase tracking-widest text-on-surface-variant font-bold" data-i18n="wizard_overall">Overall Progress</span>
+                    <span id="wizard-overall-counter" class="text-xs text-secondary font-mono">0 / 0</span>
+                </div>
+                <div class="h-2 bg-surface-container-high rounded-full overflow-hidden border border-white/5">
+                    <div id="wizard-overall-bar" class="h-full bg-secondary transition-all duration-300" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div>
+                <p class="text-xs uppercase tracking-widest text-on-surface-variant font-bold mb-1" data-i18n="wizard_current">Current Strategy</p>
+                <p id="wizard-current-name" class="font-mono text-sm text-on-surface">—</p>
+            </div>
+
+            <div id="wizard-best-so-far" class="hidden rounded-xl border border-secondary/40 p-3 bg-secondary/5 flex items-center gap-3">
+                <span class="material-symbols-outlined text-secondary">trophy</span>
+                <div class="text-xs flex-1">
+                    <span class="text-on-surface-variant" data-i18n="wizard_best_so_far">Best so far:</span>
+                    <span id="wizard-best-name" class="text-secondary font-bold ml-2">—</span>
+                </div>
+            </div>
+
+            <details class="group">
+                <summary class="cursor-pointer text-xs uppercase tracking-widest text-on-surface-variant font-bold select-none hover:text-secondary transition-colors flex items-center gap-2">
+                    <span class="material-symbols-outlined text-sm group-open:rotate-90 transition-transform">chevron_right</span>
+                    <span data-i18n="wizard_raw_log">Detailed Log</span>
+                </summary>
+                <div id="wizard-log" class="mt-3 bg-[#0a1022] rounded-xl p-3 max-h-64 overflow-y-auto font-mono text-[11px] space-y-0.5"></div>
+            </details>
+
+            <div class="flex justify-end pt-2">
+                <button id="wizard-cancel-tests-btn"
+                    class="px-5 py-2.5 rounded-xl border border-error-dim/40 text-error-dim font-bold text-xs uppercase tracking-widest hover:bg-error-dim/10 transition-colors" data-i18n="cancel">Cancel</button>
+            </div>
+        </div>
+
+        <!-- Step 3: Results -->
+        <div id="wizard-results" class="hidden space-y-4">
+            <div id="wizard-best-box" class="hidden rounded-xl border border-secondary/50 p-4 bg-secondary/10">
+                <div class="flex items-center justify-between gap-3 flex-wrap">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <span class="material-symbols-outlined text-secondary text-2xl">trophy</span>
+                        <div class="min-w-0">
+                            <h4 class="font-headline text-sm font-bold text-secondary uppercase tracking-widest" data-i18n="wizard_best_strategy">Best Strategy</h4>
+                            <p id="wizard-best-final-name" class="text-base text-on-surface font-mono truncate">—</p>
+                            <p id="wizard-best-final-meta" class="text-[10px] text-on-surface-variant mt-0.5">—</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button id="wizard-apply-service-btn"
+                            class="px-4 py-2.5 bg-secondary rounded-xl text-on-primary font-bold text-xs uppercase tracking-widest hover:opacity-80 transition-colors" data-i18n="wizard_apply_service">As Service</button>
+                        <button id="wizard-apply-temp-btn"
+                            class="px-4 py-2.5 bg-primary/20 rounded-xl text-primary font-bold text-xs uppercase tracking-widest hover:bg-primary/30 transition-colors" data-i18n="wizard_apply_temp">Temporarily</button>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <p class="text-xs uppercase tracking-widest text-on-surface-variant font-bold mb-2" data-i18n="wizard_results_title">Results</p>
+                <div id="wizard-results-list" class="space-y-1.5"></div>
+            </div>
+
+            <div class="flex gap-3 justify-end pt-2">
+                <button id="wizard-rerun-btn"
+                    class="px-5 py-2.5 rounded-xl border border-outline-variant/30 text-on-surface-variant font-bold text-xs uppercase tracking-widest hover:bg-surface-container-high transition-colors" data-i18n="wizard_rerun">Re-run</button>
+                <button id="wizard-done-btn"
+                    class="px-6 py-2.5 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-widest hover:bg-primary-dim transition-colors" data-i18n="done">Done</button>
+            </div>
+        </div>
+    </div>
+</div>

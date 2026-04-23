@@ -1,0 +1,17 @@
+<!-- First Launch Setup Modal -->
+<div id="first-launch-modal"
+    class="hidden fixed inset-0 bg-[#060d1a]/95 backdrop-blur-md z-[100] flex items-center justify-center">
+    <div class="glass-panel rounded-2xl border border-primary/30 p-10 max-w-md w-full mx-4 text-center">
+        <div class="flex justify-center mb-6">
+            <span class="material-symbols-outlined text-primary text-5xl animate-pulse">download</span>
+        </div>
+        <h2 class="font-headline text-xl font-bold text-on-surface uppercase tracking-widest mb-2" data-i18n="first_launch_title">First Time Setup</h2>
+        <p class="text-on-surface-variant text-sm mb-6" data-i18n="first_launch_desc">Downloading Zapret core components from GitHub. This will take about a minute.</p>
+        <div class="bg-[#0a1022] rounded-xl p-5 font-mono text-sm text-primary/90 border border-outline-variant/10 whitespace-pre-wrap text-left min-h-[60px]"
+            id="first-launch-status" data-i18n="preparing_download">Preparing download...</div>
+        <div class="mt-4 h-2 bg-surface-container-high rounded-full overflow-hidden border border-white/5">
+            <div id="first-launch-progress-bar" class="h-full bg-primary rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
+        </div>
+        <div class="mt-2 text-[10px] text-primary/50 text-right uppercase tracking-tighter" id="first-launch-progress-text">0%</div>
+    </div>
+</div>

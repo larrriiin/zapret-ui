@@ -1,4 +1,4 @@
-window.i18n_en = {
+export default {
     "title": "Zapret_ VPN",
     "nav_home": "Home",
     "nav_sites": "Site Lists",
