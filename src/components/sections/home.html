@@ -1,0 +1,146 @@
+<!-- Home Section -->
+<div id="section-home" class="p-8 space-y-8 max-w-[1400px] mx-auto">
+
+    <section
+        class="relative h-[360px] flex flex-col items-center justify-center rounded-3xl overflow-hidden bg-surface-container-low/30 border border-outline-variant/10">
+        <div class="absolute inset-0 bg-gradient-to-b from-[#ba9eff]/5 to-transparent z-0"></div>
+
+        <div class="relative z-10 flex flex-col items-center text-center w-full max-w-md px-6">
+            <h2 class="font-headline text-3xl font-black text-on-background tracking-tighter mb-6 uppercase whitespace-nowrap">
+                <span id="hero-status" class="text-error-dim" data-i18n="status_disconnected">Disconnected</span>
+            </h2>
+
+            <div class="w-full space-y-3 mb-8 text-left">
+                <h3 class="font-headline text-[10px] font-bold uppercase tracking-[0.2em] text-primary/70 ml-2" data-i18n="routing_strategy">
+                    Routing Strategy</h3>
+                <!-- Custom dropdown -->
+                <div id="strategy-dropdown" class="relative">
+                    <!-- Trigger button -->
+                    <button id="strategy-trigger" type="button"
+                        class="glass-panel w-full flex items-center justify-between rounded-2xl border border-primary/10 px-4 py-3 font-headline text-sm text-on-surface hover:border-primary/30 transition-colors cursor-pointer">
+                        <span id="strategy-label" class="truncate text-on-surface/60" data-i18n="loading_strategies">Loading
+                            strategies...</span>
+                        <span
+                            class="material-symbols-outlined text-primary/60 text-base ml-2 transition-transform"
+                            id="strategy-chevron">expand_more</span>
+                    </button>
+                    <!-- Hidden native select for form value compatibility -->
+                    <select id="strategy-select" class="sr-only"></select>
+                    <!-- Dropdown panel -->
+                    <div id="strategy-options"
+                        class="hidden fixed z-[999] rounded-2xl border border-primary/20 overflow-hidden shadow-2xl"
+                        style="background: #0d1225;">
+                        <div class="px-3 py-2 border-b border-outline-variant/10 flex items-center gap-2">
+                            <span class="material-symbols-outlined text-primary/60 text-base">search</span>
+                            <input id="strategy-search" type="text" autocomplete="off" spellcheck="false"
+                                class="flex-1 bg-transparent text-sm text-on-surface placeholder-on-surface-variant/50 focus:outline-none"
+                                data-i18n="search_strategies" data-i18n-attr="placeholder" placeholder="Search strategies..." />
+                        </div>
+                        <div id="strategy-options-list" class="max-h-64 overflow-y-auto py-1">
+                            <!-- options injected by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-2 w-full px-4">
+                <button id="connect-btn" data-action="start" data-mode="service"
+                    class="group relative w-full py-4 bg-primary rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:shadow-[0_0_40px_rgba(186,158,255,0.3)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">
+                    <span
+                        class="flex flex-nowrap items-center justify-center gap-2 text-on-primary font-headline font-bold text-sm tracking-widest uppercase px-2">
+                        <span id="connect-btn-text" class="whitespace-nowrap" data-i18n="run_service">Run as Service</span>
+                        <span id="connect-btn-icon"
+                            class="material-symbols-outlined group-hover:rotate-12 transition-transform">bolt</span>
+                    </span>
+                </button>
+                <button id="connect-temp-btn" data-action="start" data-mode="temporary"
+                    class="group relative w-full py-3 bg-surface-container-highest border border-outline-variant/30 rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:bg-surface-container-high hover:border-primary/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hidden">
+                    <span
+                        class="flex flex-nowrap items-center justify-center gap-2 text-primary font-headline font-bold text-[11px] tracking-widest uppercase px-2">
+                        <span id="connect-temp-btn-text" class="whitespace-nowrap" data-i18n="run_temp">Run Temporarily</span>
+                        <span id="connect-temp-btn-icon"
+                            class="material-symbols-outlined text-[16px]">play_arrow</span>
+                    </span>
+                </button>
+                <button id="check-status-btn"
+                    class="group relative w-full py-2 bg-transparent border border-outline-variant/20 rounded-xl transition-all duration-300 hover:bg-surface-container-highest hover:border-secondary/50">
+                    <span
+                        class="flex items-center justify-center gap-2 text-secondary font-headline font-bold text-[10px] tracking-[0.2em] uppercase">
+                        <span id="check-status-btn-text" data-i18n="check_status">Check Status</span>
+                        <span id="check-status-btn-icon"
+                            class="material-symbols-outlined text-[14px]">query_stats</span>
+                    </span>
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <div class="grid grid-cols-2 gap-8 items-start">
+
+        <section class="space-y-4">
+            <div class="flex items-center justify-between px-2 h-6">
+                <div class="flex items-center gap-1.5">
+                    <h3 class="font-headline text-xs font-bold uppercase tracking-[0.2em] text-primary/70" data-i18n="ipset_filter">IPSet Filter</h3>
+                    <button id="ipset-info-btn" class="text-primary/40 hover:text-primary transition-colors flex">
+                        <span class="material-symbols-outlined text-sm">info</span>
+                    </button>
+                </div>
+                <button id="ipset-toggle"
+                    class="toggle-btn is-on relative w-12 h-6 flex items-center rounded-full p-1">
+                    <div class="toggle-thumb w-4 h-4 bg-primary rounded-full shadow-[0_0_10px_#ba9eff]"></div>
+                </button>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div id="ipset-loaded"
+                    class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
+                    <span class="material-symbols-outlined text-primary text-xl">download_done</span>
+                    <span
+                        class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant" data-i18n="loaded">Loaded</span>
+                </div>
+                <div id="ipset-any"
+                    class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
+                    <span class="material-symbols-outlined text-secondary text-xl">all_inclusive</span>
+                    <span
+                        class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant" data-i18n="any">Any</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="space-y-4">
+            <div class="flex items-center justify-between px-2 h-6">
+                <div class="flex items-center gap-1.5">
+                    <h3 class="font-headline text-xs font-bold uppercase tracking-[0.2em] text-primary/70" data-i18n="game_filter">Game Filter</h3>
+                    <button id="game-info-btn" class="text-primary/40 hover:text-primary transition-colors flex">
+                        <span class="material-symbols-outlined text-sm">info</span>
+                    </button>
+                </div>
+                <button id="game-toggle"
+                    class="toggle-btn is-on relative w-12 h-6 flex items-center rounded-full p-1">
+                    <div class="toggle-thumb w-4 h-4 bg-primary rounded-full shadow-[0_0_10px_#ba9eff]"></div>
+                </button>
+            </div>
+            <div class="grid grid-cols-3 gap-3">
+                <div id="game-all"
+                    class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
+                    <span class="material-symbols-outlined text-primary text-xl">Layers</span>
+                    <span
+                        class="text-[10px] font-bold uppercase tracking-tighter text-on-surface-variant text-center leading-none">TCP
+                        + UDP</span>
+                </div>
+                <div id="game-tcp"
+                    class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
+                    <span class="material-symbols-outlined text-secondary text-xl">terminal</span>
+                    <span
+                        class="text-[10px] font-bold uppercase tracking-tighter text-on-surface-variant">TCP</span>
+                </div>
+                <div id="game-udp"
+                    class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
+                    <span class="material-symbols-outlined text-tertiary text-xl">router</span>
+                    <span
+                        class="text-[10px] font-bold uppercase tracking-tighter text-on-surface-variant" data-i18n="udp">UDP</span>
+                </div>
+            </div>
+        </section>
+
+    </div>
+</div><!-- /section-home -->

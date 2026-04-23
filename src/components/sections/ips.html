@@ -1,0 +1,51 @@
+<!-- IPs Section -->
+<div id="section-ips"
+    class="hidden fixed top-[30px] right-0 bottom-0 left-0 ml-20 pt-20 overflow-y-auto bg-surface z-10">
+    <div class="p-8 space-y-6 pb-24 max-w-[1400px] mx-auto">
+    <h2 class="font-headline text-2xl font-bold text-primary mb-4" data-i18n="ip_settings">IP Settings</h2>
+
+    <div class="flex flex-col gap-6 w-full">
+        <!-- Update IPSet List Block -->
+        <div class="glass-panel rounded-2xl border border-primary/10 p-6 w-full">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-secondary" data-i18n="update_ipset">Update IPSet List</h3>
+                    <p class="text-xs text-on-surface-variant mt-1" data-i18n="update_ipset_desc">Download latest IP ranges for filtering</p>
+                </div>
+                <button id="ipset-update-btn"
+                    class="px-8 py-3 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors flex items-center gap-2">
+                    <span class="material-symbols-outlined text-sm">download</span>
+                    <span data-i18n="update_btn">Update</span>
+                </button>
+            </div>
+            <div id="ipset-update-status" class="hidden mt-4 text-sm"></div>
+        </div>
+
+        <!-- IP Exclude Block -->
+        <div class="glass-panel rounded-2xl border border-primary/10 p-6 w-full">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-6">
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-1.5">
+                        <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-tertiary" data-i18n="ip_exclude">IP Exclude</h3>
+                        <button id="ip-exclude-info-btn" class="text-tertiary/40 hover:text-tertiary transition-colors flex">
+                            <span class="material-symbols-outlined text-sm">info</span>
+                        </button>
+                    </div>
+                    <p class="text-xs text-on-surface-variant mt-1" data-i18n="ip_exclude_desc">IP addresses and ranges that will bypass Zapret filtering</p>
+                </div>
+                <div class="flex gap-2 w-full md:w-1/2">
+                    <input type="text" id="ip-exclude-input" placeholder="192.168.1.1 or 10.0.0.0/24" data-i18n="placeholder_ip" data-i18n-attr="placeholder" autocomplete="off" spellcheck="false"
+                        class="flex-1 bg-surface-container-highest border border-outline-variant/30 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary/50">
+                    <button id="ip-exclude-add"
+                        class="px-6 py-2 bg-tertiary rounded-xl text-white font-bold text-xs uppercase tracking-wider hover:opacity-80 transition-colors" data-i18n="add">
+                        Add
+                    </button>
+                </div>
+            </div>
+            <div id="ip-exclude-list" class="multi-column-list">
+                <!-- Dynamic list -->
+            </div>
+        </div>
+    </div>
+    </div>
+</div>

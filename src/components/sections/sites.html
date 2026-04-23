@@ -1,0 +1,57 @@
+<!-- Sites Section -->
+<div id="section-sites"
+    class="hidden fixed top-[30px] right-0 bottom-0 left-0 ml-20 pt-20 overflow-y-auto bg-surface z-10">
+    <div class="p-8 space-y-6 max-w-[1400px] mx-auto">
+    <h2 class="font-headline text-2xl font-bold text-primary mb-4" data-i18n="site_lists">Site Lists</h2>
+
+    <div class="grid grid-cols-2 gap-6">
+        <!-- Include List -->
+        <div class="glass-panel rounded-2xl border border-primary/10 p-6">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-1.5">
+                    <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-secondary" data-i18n="include">Include</h3>
+                    <button id="include-info-btn" class="text-secondary/40 hover:text-secondary transition-colors flex">
+                        <span class="material-symbols-outlined text-sm">info</span>
+                    </button>
+                </div>
+                <span class="material-symbols-outlined text-secondary">playlist_add</span>
+            </div>
+            <div class="flex gap-2 mb-4">
+                <input type="text" id="site-include-input" placeholder="example.com" data-i18n="placeholder_domain" data-i18n-attr="placeholder" autocomplete="off" spellcheck="false"
+                    class="flex-1 bg-surface-container-highest border border-outline-variant/30 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary/50">
+                <button id="site-include-add"
+                    class="px-4 py-2 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors" data-i18n="add">
+                    Add
+                </button>
+            </div>
+            <div id="site-include-list" class="space-y-2 max-h-[300px] overflow-y-auto">
+                <!-- Dynamic list -->
+            </div>
+        </div>
+
+        <!-- Exclude List -->
+        <div class="glass-panel rounded-2xl border border-primary/10 p-6">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-1.5">
+                    <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-error-dim" data-i18n="exclude">Exclude</h3>
+                    <button id="exclude-info-btn" class="text-error-dim/40 hover:text-error-dim transition-colors flex">
+                        <span class="material-symbols-outlined text-sm">info</span>
+                    </button>
+                </div>
+                <span class="material-symbols-outlined text-error-dim">playlist_remove</span>
+            </div>
+            <div class="flex gap-2 mb-4">
+                <input type="text" id="site-exclude-input" placeholder="example.com" data-i18n="placeholder_domain" data-i18n-attr="placeholder" autocomplete="off" spellcheck="false"
+                    class="flex-1 bg-surface-container-highest border border-outline-variant/30 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary/50">
+                <button id="site-exclude-add"
+                    class="px-4 py-2 bg-error-dim rounded-xl text-white font-bold text-xs uppercase tracking-wider hover:opacity-80 transition-colors" data-i18n="add">
+                    Add
+                </button>
+            </div>
+            <div id="site-exclude-list" class="space-y-2 max-h-[300px] overflow-y-auto">
+                <!-- Dynamic list -->
+            </div>
+        </div>
+    </div>
+    </div>
+</div>

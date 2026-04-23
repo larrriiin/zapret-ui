@@ -1,4 +1,4 @@
-window.i18n_ru = {
+export default {
     "title": "Zapret_ VPN",
     "nav_home": "Главная",
     "nav_sites": "Списки сайтов",

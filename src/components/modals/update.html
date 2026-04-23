@@ -1,0 +1,34 @@
+<!-- Update Available Modal -->
+<div id="update-modal"
+    class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+    <div class="glass-panel rounded-2xl border border-primary/30 p-8 max-w-md mx-4">
+        <div class="flex items-center gap-3 mb-4">
+            <span class="material-symbols-outlined text-primary text-2xl">system_update</span>
+            <h3 class="font-headline text-lg font-bold text-primary" data-i18n="update_available">Update Available</h3>
+        </div>
+        <p class="text-on-surface-variant text-sm mb-2" data-i18n="update_desc">A new version of Zapret is available!</p>
+        <div class="flex items-center gap-2 mb-6 text-sm">
+            <span class="text-on-surface-variant" data-i18n="current">Current:</span>
+            <span id="update-current-version" class="text-on-surface font-bold">vNONE</span>
+            <span class="text-on-surface-variant">→</span>
+            <span id="update-latest-version" class="text-secondary font-bold">1.9.8</span>
+        </div>
+        <div class="flex gap-3">
+            <button id="update-later"
+                class="flex-1 py-3 rounded-xl border border-outline-variant/30 text-on-surface-variant font-bold text-xs uppercase tracking-wider hover:bg-surface-container-high transition-colors" data-i18n="later">
+                Later
+            </button>
+            <button id="update-now"
+                class="flex-1 py-3 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors" data-i18n="update_now">
+                Update Now
+            </button>
+        </div>
+        <div id="update-status-container" class="hidden mt-6">
+            <div id="update-status-text" class="text-xs text-on-surface-variant font-mono mb-3 text-center">Checking...</div>
+            <div class="h-1.5 bg-surface-container-high rounded-full overflow-hidden border border-white/5">
+                <div id="update-progress-bar" class="h-full bg-secondary rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
+            </div>
+            <div class="mt-2 text-[10px] text-secondary/50 text-right uppercase tracking-tighter" id="update-progress-text">0%</div>
+        </div>
+    </div>
+</div>

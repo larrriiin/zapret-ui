@@ -1,0 +1,19 @@
+<!-- Latest Version Modal (no updates) -->
+<div id="latest-version-modal"
+    class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+    <div class="glass-panel rounded-2xl border border-secondary/30 p-8 max-w-md mx-4">
+        <div class="flex items-center gap-3 mb-4">
+            <span class="material-symbols-outlined text-secondary text-2xl">check_circle</span>
+            <h3 class="font-headline text-lg font-bold text-secondary" data-i18n="up_to_date">Up to Date</h3>
+        </div>
+        <p class="text-on-surface-variant text-sm mb-4" data-i18n="up_to_date_desc">You have the latest version installed.</p>
+        <div class="flex items-center justify-center gap-2 mb-6 py-3 bg-surface-container-high rounded-xl">
+            <span class="text-on-surface-variant text-sm" data-i18n="version">Version:</span>
+            <span id="latest-version-number" class="text-on-surface font-bold text-lg">vNONE</span>
+        </div>
+        <button id="latest-version-ok"
+            class="w-full py-3 bg-secondary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:opacity-80 transition-colors" data-i18n="ok">
+            OK
+        </button>
+    </div>
+</div>

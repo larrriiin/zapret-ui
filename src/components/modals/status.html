@@ -1,0 +1,19 @@
+<!-- Status Modal -->
+<div id="status-modal"
+    class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+    <div class="glass-panel rounded-2xl border border-secondary/30 p-8 max-w-lg w-full mx-4">
+        <div class="flex items-center gap-3 mb-4">
+            <span class="material-symbols-outlined text-secondary text-2xl">query_stats</span>
+            <h3 class="font-headline text-lg font-bold text-on-surface uppercase tracking-widest" data-i18n="system_status">System Status</h3>
+        </div>
+        <div class="bg-[#0a1022] rounded-xl p-6 font-mono text-sm leading-relaxed text-secondary/90 border border-outline-variant/10 whitespace-pre-wrap" id="status-content" data-i18n="checking_status">
+            Checking status...
+        </div>
+        <div class="mt-6 flex justify-end">
+            <button id="status-modal-close"
+                class="px-8 py-3 bg-secondary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:opacity-80 transition-colors" data-i18n="close">
+                Close
+            </button>
+        </div>
+    </div>
+</div>

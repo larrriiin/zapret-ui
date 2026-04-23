@@ -1,0 +1,23 @@
+<!-- Strategies First-Run Modal (no strategies installed) -->
+<div id="strategies-firstrun-modal"
+    class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="glass-panel rounded-2xl border border-primary/30 p-8 max-w-lg w-full mx-4">
+        <div class="flex items-center gap-3 mb-4">
+            <span class="material-symbols-outlined text-primary text-2xl">auto_awesome</span>
+            <h3 class="font-headline text-lg font-bold text-primary uppercase tracking-widest" data-i18n="firstrun_title">Strategy Setup</h3>
+        </div>
+        <p class="text-on-surface-variant text-sm mb-2" data-i18n="firstrun_desc">No strategies are installed. Download them from Flowseal's repository and let the wizard find the best one for your connection?</p>
+        <p class="text-on-surface-variant/70 text-xs mb-6" data-i18n="firstrun_hint">The test runs each strategy against Discord/YouTube/Google/DNS and picks the one with the highest HTTP+ping score.</p>
+        <div class="flex flex-col gap-2">
+            <button id="firstrun-download-test-btn"
+                class="w-full py-3 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-widest hover:bg-primary-dim transition-colors flex items-center justify-center gap-2">
+                <span class="material-symbols-outlined text-sm">auto_awesome</span>
+                <span data-i18n="firstrun_download_test">Download &amp; Test</span>
+            </button>
+            <button id="firstrun-download-only-btn"
+                class="w-full py-3 bg-surface-container-high rounded-xl text-on-surface font-bold text-xs uppercase tracking-widest hover:bg-surface-container-high/80 transition-colors" data-i18n="firstrun_download_only">Download Only</button>
+            <button id="firstrun-skip-btn"
+                class="w-full py-3 rounded-xl border border-outline-variant/30 text-on-surface-variant font-bold text-xs uppercase tracking-widest hover:bg-surface-container-high transition-colors" data-i18n="firstrun_skip">Not Now</button>
+        </div>
+    </div>
+</div>
