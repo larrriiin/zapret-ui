@@ -1406,7 +1406,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                             </div>
                             <div class="flex flex-col items-end gap-3">
                                 ${uiStatus}
-                                ${data.ui.available ? `<button class="px-4 py-2 bg-primary/20 hover:bg-primary/30 border border-primary/20 rounded-xl text-[10px] font-black text-primary uppercase transition-all active:scale-95 shadow-lg shadow-primary/5" onclick="window.downloadAndInstallUIUpdate(event, window.currentUpdateObject)">${t('update_now')}</button>` : ''}
+                                ${data.ui.available ? `<button data-action="update-ui" class="px-4 py-2 bg-primary/20 hover:bg-primary/30 border border-primary/20 rounded-xl text-[10px] font-black text-primary uppercase transition-all active:scale-95 shadow-lg shadow-primary/5">${t('update_now')}</button>` : ''}
                             </div>
                         </div>
 
@@ -1421,12 +1421,12 @@ window.addEventListener('DOMContentLoaded', async () => {
                             </div>
                             <div class="flex flex-col items-end gap-3">
                                 ${coreStatus}
-                                ${data.core.available ? `<button class="px-4 py-2 bg-secondary/20 hover:bg-secondary/30 border border-secondary/20 rounded-xl text-[10px] font-black text-secondary uppercase transition-all active:scale-95 shadow-lg shadow-secondary/5" onclick="window.downloadAndInstallCoreUpdate()">${t('update_now')}</button>` : ''}
+                                ${data.core.available ? `<button data-action="update-core" class="px-4 py-2 bg-secondary/20 hover:bg-secondary/30 border border-secondary/20 rounded-xl text-[10px] font-black text-secondary uppercase transition-all active:scale-95 shadow-lg shadow-secondary/5">${t('update_now')}</button>` : ''}
                             </div>
                         </div>
                     </div>
 
-                    <button class="w-full px-4 py-3 bg-white/5 text-on-surface-variant rounded-xl font-bold hover:bg-white/10 transition-all uppercase text-xs tracking-widest" onclick="this.closest('#update-modal').remove()">
+                    <button data-action="close-modal" class="w-full px-4 py-3 bg-white/5 text-on-surface-variant rounded-xl font-bold hover:bg-white/10 transition-all uppercase text-xs tracking-widest">
                         ${t('close')}
                     </button>
                 </div>
@@ -1434,6 +1434,15 @@ window.addEventListener('DOMContentLoaded', async () => {
         `;
         window.currentUpdateObject = data.ui.updateObj;
         document.body.appendChild(modal);
+
+        // Wire up buttons via addEventListener (inline onclick handlers are blocked
+        // by the auto-injected CSP nonce in script-src, which disables 'unsafe-inline').
+        const uiBtn = modal.querySelector('[data-action="update-ui"]');
+        if (uiBtn) uiBtn.addEventListener('click', (e) => downloadAndInstallUIUpdate(e, window.currentUpdateObject));
+        const coreBtn = modal.querySelector('[data-action="update-core"]');
+        if (coreBtn) coreBtn.addEventListener('click', () => downloadAndInstallCoreUpdate());
+        const closeBtn = modal.querySelector('[data-action="close-modal"]');
+        if (closeBtn) closeBtn.addEventListener('click', () => modal.remove());
     }
     
     async function downloadAndInstallUIUpdate(event, updateObj) {
