@@ -170,9 +170,50 @@
         <button id="tb-minimize" class="titlebar-btn" data-i18n="minimize" data-i18n-attr="title" title="Minimize">
             <span class="material-symbols-outlined text-on-surface-variant">remove</span>
         </button>
+        <button id="tb-maximize" class="titlebar-btn" data-i18n="maximize" data-i18n-attr="title" title="Maximize">
+            <span id="tb-maximize-icon" class="material-symbols-outlined text-on-surface-variant">crop_square</span>
+        </button>
         <button id="tb-close" class="titlebar-btn close" data-i18n="close" data-i18n-attr="title" title="Close">
             <span class="material-symbols-outlined text-on-surface-variant">close</span>
         </button>
+    </div>
+
+    <!-- Close menu (right-click on close button) -->
+    <div id="tb-close-menu" class="hidden fixed z-[10000] rounded-xl border border-primary/20 overflow-hidden shadow-2xl py-1"
+        style="background:#0d1225; min-width: 200px;">
+        <button id="tb-close-menu-tray" class="w-full text-left px-4 py-2 text-xs font-headline text-on-surface hover:bg-primary/10 flex items-center gap-2">
+            <span class="material-symbols-outlined text-sm text-primary/60">keyboard_arrow_down</span>
+            <span data-i18n="close_menu_tray">Minimize to tray</span>
+        </button>
+        <button id="tb-close-menu-exit" class="w-full text-left px-4 py-2 text-xs font-headline text-on-surface hover:bg-primary/10 flex items-center gap-2">
+            <span class="material-symbols-outlined text-sm text-error-dim">close</span>
+            <span data-i18n="close_menu_exit">Exit application</span>
+        </button>
+    </div>
+
+    <!-- Close confirmation modal -->
+    <div id="close-confirm-modal" class="hidden fixed inset-0 z-[10001] flex items-center justify-center" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);">
+        <div class="glass-panel rounded-2xl border border-primary/20 p-6 max-w-sm w-full mx-4" style="background: #0d1225;">
+            <h3 class="font-headline text-lg font-bold text-on-surface mb-2" data-i18n="close_confirm_title">Closing Zapret</h3>
+            <p class="text-sm text-on-surface-variant mb-6" data-i18n="close_confirm_body">What would you like to do?</p>
+            <div class="flex flex-col gap-2 mb-4">
+                <button id="close-confirm-tray"
+                    class="w-full py-3 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-widest hover:bg-primary-dim transition-colors flex items-center justify-center gap-2">
+                    <span class="material-symbols-outlined text-sm">keyboard_arrow_down</span>
+                    <span data-i18n="close_confirm_tray">Minimize to tray</span>
+                </button>
+                <button id="close-confirm-exit"
+                    class="w-full py-3 bg-surface-container-high border border-outline-variant/30 rounded-xl text-on-surface font-bold text-xs uppercase tracking-widest hover:border-error/50 hover:text-error-dim transition-colors flex items-center justify-center gap-2">
+                    <span class="material-symbols-outlined text-sm">close</span>
+                    <span data-i18n="close_confirm_exit">Exit application</span>
+                </button>
+            </div>
+            <label class="flex items-center gap-2 text-xs text-on-surface-variant cursor-pointer mb-4">
+                <input type="checkbox" id="close-confirm-remember" class="accent-primary">
+                <span data-i18n="close_confirm_remember">Remember my choice</span>
+            </label>
+            <button id="close-confirm-cancel" class="w-full py-2 text-xs text-on-surface-variant hover:text-primary transition-colors" data-i18n="cancel">Cancel</button>
+        </div>
     </div>
 
     <aside
@@ -230,12 +271,46 @@
                 <span class="material-symbols-outlined text-sm">translate</span>
                 <span id="lang-text">RU</span>
             </button>
+            <div class="relative">
+                <button id="settings-btn" data-i18n="settings" data-i18n-attr="title" title="Settings"
+                    class="flex items-center justify-center w-10 h-10 bg-surface-container-high/50 border border-outline-variant/20 rounded-xl text-primary/70 hover:text-primary transition-all">
+                    <span class="material-symbols-outlined text-base">settings</span>
+                </button>
+                <div id="settings-popover" class="hidden absolute right-0 top-12 z-[1000] rounded-2xl border border-primary/20 overflow-hidden shadow-2xl p-4 w-80" style="background:#0d1225;">
+                    <h4 class="font-headline text-[10px] font-bold uppercase tracking-[0.2em] text-primary/70 mb-3" data-i18n="settings">Settings</h4>
+                    <label class="flex items-start justify-between gap-3 py-2 cursor-pointer">
+                        <div class="flex-1">
+                            <div class="text-sm text-on-surface font-headline" data-i18n="autostart_label">Launch on Windows startup</div>
+                            <div class="text-[10px] text-on-surface-variant mt-0.5" data-i18n="autostart_hint">Start minimized to tray</div>
+                        </div>
+                        <button id="autostart-toggle" type="button" class="toggle-btn is-off flex-shrink-0 relative w-12 h-6 rounded-full transition-colors">
+                            <span class="toggle-thumb absolute top-0.5 left-0.5 w-5 h-5 bg-primary rounded-full shadow"></span>
+                        </button>
+                    </label>
+                    <div class="border-t border-outline-variant/10 my-3"></div>
+                    <div class="text-xs text-on-surface-variant/70 mb-2" data-i18n="close_pref_label">When the close button is clicked:</div>
+                    <div class="flex flex-col gap-1">
+                        <label class="flex items-center gap-2 text-xs text-on-surface cursor-pointer px-2 py-1.5 rounded hover:bg-primary/10">
+                            <input type="radio" name="close-pref" value="ask" class="accent-primary">
+                            <span data-i18n="close_pref_ask">Ask every time</span>
+                        </label>
+                        <label class="flex items-center gap-2 text-xs text-on-surface cursor-pointer px-2 py-1.5 rounded hover:bg-primary/10">
+                            <input type="radio" name="close-pref" value="tray" class="accent-primary">
+                            <span data-i18n="close_pref_tray">Minimize to tray</span>
+                        </label>
+                        <label class="flex items-center gap-2 text-xs text-on-surface cursor-pointer px-2 py-1.5 rounded hover:bg-primary/10">
+                            <input type="radio" name="close-pref" value="exit" class="accent-primary">
+                            <span data-i18n="close_pref_exit">Exit application</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
         </div>
     </header>
 
     <main class="ml-20 pt-20 h-screen overflow-hidden bg-surface" style="margin-top:30px;">
         <!-- Home Section -->
-        <div id="section-home" class="p-8 space-y-8">
+        <div id="section-home" class="p-8 space-y-8 max-w-[1400px] mx-auto">
 
             <section
                 class="relative h-[360px] flex flex-col items-center justify-center rounded-3xl overflow-hidden bg-surface-container-low/30 border border-outline-variant/10">
@@ -266,6 +341,12 @@
                             <div id="strategy-options"
                                 class="hidden fixed z-[999] rounded-2xl border border-primary/20 overflow-hidden shadow-2xl"
                                 style="background: #0d1225;">
+                                <div class="px-3 py-2 border-b border-outline-variant/10 flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-primary/60 text-base">search</span>
+                                    <input id="strategy-search" type="text" autocomplete="off" spellcheck="false"
+                                        class="flex-1 bg-transparent text-sm text-on-surface placeholder-on-surface-variant/50 focus:outline-none"
+                                        data-i18n="search_strategies" data-i18n-attr="placeholder" placeholder="Search strategies..." />
+                                </div>
                                 <div id="strategy-options-list" class="max-h-64 overflow-y-auto py-1">
                                     <!-- options injected by JS -->
                                 </div>
@@ -378,7 +459,8 @@
 
     <!-- Sites Section -->
     <div id="section-sites"
-        class="hidden fixed top-[30px] right-0 bottom-0 left-0 ml-20 pt-20 overflow-y-auto bg-surface z-10 p-8 space-y-6">
+        class="hidden fixed top-[30px] right-0 bottom-0 left-0 ml-20 pt-20 overflow-y-auto bg-surface z-10">
+        <div class="p-8 space-y-6 max-w-[1400px] mx-auto">
         <h2 class="font-headline text-2xl font-bold text-primary mb-4" data-i18n="site_lists">Site Lists</h2>
 
         <div class="grid grid-cols-2 gap-6">
@@ -430,11 +512,13 @@
                 </div>
             </div>
         </div>
+        </div>
     </div>
 
     <!-- IPs Section -->
     <div id="section-ips"
-        class="hidden fixed top-[30px] right-0 bottom-0 left-0 ml-20 pt-20 overflow-y-auto bg-surface z-10 p-8 space-y-6 pb-24">
+        class="hidden fixed top-[30px] right-0 bottom-0 left-0 ml-20 pt-20 overflow-y-auto bg-surface z-10">
+        <div class="p-8 space-y-6 pb-24 max-w-[1400px] mx-auto">
         <h2 class="font-headline text-2xl font-bold text-primary mb-4" data-i18n="ip_settings">IP Settings</h2>
 
         <div class="flex flex-col gap-6 w-full">
@@ -480,12 +564,13 @@
                 </div>
             </div>
         </div>
+        </div>
     </div>
 
     <!-- Diagnostics Section -->
     <div id="section-diagnostics"
-        class="hidden fixed top-[30px] right-0 bottom-0 left-0 ml-20 pt-20 overflow-y-auto bg-surface z-10 p-8 space-y-8">
-        
+        class="hidden fixed top-[30px] right-0 bottom-0 left-0 ml-20 pt-20 overflow-y-auto bg-surface z-10">
+        <div class="p-8 space-y-8 max-w-[1400px] mx-auto">
         <!-- Diagnostics Block -->
         <div class="glass-panel rounded-2xl border border-primary/10 p-6 w-full">
             <div class="flex items-center justify-between mb-6">
@@ -574,6 +659,7 @@
 
             <!-- Summary Results -->
             <div id="tests-results" class="hidden mt-4 space-y-2 w-full"></div>
+        </div>
         </div>
     </div>
 
