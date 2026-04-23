@@ -2726,6 +2726,11 @@ fn refresh_tray_menu(app: &tauri::AppHandle) {
     }
 }
 
+#[tauri::command]
+fn exit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -2737,6 +2742,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--autostart"]),
+        ))
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             let _ = app.get_webview_window("main")
                 .map(|w| {
@@ -2760,6 +2769,13 @@ pub fn run() {
             translations: Mutex::new(None),
         })
         .setup(|app| {
+            // Hide main window on --autostart so the app boots straight into tray
+            if std::env::args().any(|a| a == "--autostart") {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
+            }
+
             let quit_i = MenuItemBuilder::with_id("quit", "Exit").build(app)?;
             let show_i = MenuItemBuilder::with_id("show", "Restore window").build(app)?;
 
@@ -2972,6 +2988,7 @@ pub fn run() {
             save_test_results,
             load_test_results,
             update_tray_translations,
+            exit_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

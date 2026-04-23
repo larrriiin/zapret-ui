@@ -158,6 +158,8 @@ function initStrategyDropdown() {
 // ─── Стратегии ────────────────────────────────────────────────────────────────
 
 let cachedTestResults = null;
+let _allStrategies = [];
+const FAVORITES_KEY = 'zapret.favorites';
 
 function normConfigName(s) {
     return String(s || '').replace(/\.bat$/i, '').trim().toLowerCase();
@@ -180,76 +182,154 @@ async function loadCachedTestResults() {
     return cachedTestResults;
 }
 
-async function loadStrategies() {
+function getFavorites() {
+    try {
+        const raw = localStorage.getItem(FAVORITES_KEY);
+        if (!raw) return new Set();
+        const arr = JSON.parse(raw);
+        return new Set(Array.isArray(arr) ? arr : []);
+    } catch { return new Set(); }
+}
+
+function toggleFavorite(name) {
+    const favs = getFavorites();
+    if (favs.has(name)) favs.delete(name);
+    else favs.add(name);
+    try { localStorage.setItem(FAVORITES_KEY, JSON.stringify([...favs])); } catch {}
+    renderStrategyList();
+}
+
+function renderStrategyList() {
     const list = $('strategy-options-list');
+    if (!list) return;
+    const query = ($('strategy-search')?.value || '').trim().toLowerCase();
+    const favs = getFavorites();
+    const current = getStrategyValue();
+
+    list.innerHTML = '';
+
+    // Split favorites and rest, apply filter
+    const filter = (n) => !query || n.toLowerCase().includes(query);
+    const favItems = _allStrategies.filter(n => favs.has(n) && filter(n));
+    const restItems = _allStrategies.filter(n => !favs.has(n) && filter(n));
+
+    if (favItems.length === 0 && restItems.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'px-4 py-3 text-xs text-on-surface-variant/60 text-center';
+        empty.textContent = t('no_results') || 'No results';
+        list.appendChild(empty);
+        return;
+    }
+
+    const renderGroup = (items, isFavGroup) => {
+        if (items.length === 0) return;
+        if (isFavGroup) {
+            const hdr = document.createElement('div');
+            hdr.className = 'px-4 pt-2 pb-1 text-[9px] font-bold uppercase tracking-widest text-primary/50';
+            hdr.textContent = t('favorites') || 'Favorites';
+            list.appendChild(hdr);
+        } else if (favItems.length > 0) {
+            const sep = document.createElement('div');
+            sep.className = 'my-1 border-t border-outline-variant/10';
+            list.appendChild(sep);
+        }
+        items.forEach(name => {
+            const cached = findCachedResult(name);
+            const isBest = isCachedBest(name);
+            const isSelected = name === current;
+            const item = document.createElement('div');
+            item.dataset.value = name;
+            const baseCls = 'group w-full text-left px-4 py-2.5 text-sm font-headline text-on-surface hover:bg-primary/10 transition-colors flex items-center gap-2 cursor-pointer';
+            item.className = baseCls
+                + (isBest ? ' border-l-2 border-secondary' : '')
+                + (isSelected ? ' bg-primary/20 text-primary' : '');
+
+            const icon = document.createElement('span');
+            icon.className = 'material-symbols-outlined text-sm item-icon';
+            icon.style.color = isSelected ? '#ba9eff' : '';
+            icon.style.opacity = isSelected ? '1' : '0.3';
+            icon.textContent = 'chevron_right';
+            item.appendChild(icon);
+
+            const label = document.createElement('span');
+            label.className = 'truncate flex-1';
+            label.textContent = name;
+            item.appendChild(label);
+
+            if (cached) {
+                const pingTxt = cached.avg_ping_ms > 0 ? `${cached.avg_ping_ms}${t('ms')}` : '—';
+                const total = cached.http_ok + cached.http_error;
+                const color = cached.status === 'success' ? 'text-secondary'
+                    : cached.status === 'partial' ? 'text-primary' : 'text-error-dim';
+                const badge = document.createElement('span');
+                badge.className = `text-[10px] ${color} font-mono`;
+                badge.textContent = `${isBest ? '★ ' : ''}HTTP ${cached.http_ok}/${total} · ${pingTxt}`;
+                item.appendChild(badge);
+            }
+
+            const star = document.createElement('button');
+            star.type = 'button';
+            star.className = 'ml-1 opacity-60 hover:opacity-100 transition-opacity';
+            star.setAttribute('title', t('toggle_favorite') || 'Toggle favorite');
+            const starIcon = document.createElement('span');
+            starIcon.className = 'material-symbols-outlined text-sm';
+            starIcon.textContent = favs.has(name) ? 'star' : 'star_outline';
+            starIcon.style.color = favs.has(name) ? '#ffc857' : '';
+            star.appendChild(starIcon);
+            star.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleFavorite(name);
+            });
+            item.appendChild(star);
+
+            item.addEventListener('click', () => {
+                setStrategyValue(name, name);
+                closeStrategyDropdown();
+                renderStrategyList();
+
+                invoke('get_zapret_status').then(status => {
+                    if (status.running) {
+                        showRestartStatus(t('switching_strategy'), true);
+                        invoke('start_zapret', { strategy: name, mode: status.mode || 'service' }).then(() => {
+                            setTimeout(pollStatus, 500);
+                        });
+                    }
+                });
+            });
+            list.appendChild(item);
+        });
+    };
+
+    renderGroup(favItems, true);
+    renderGroup(restItems, false);
+}
+
+async function loadStrategies() {
     const sel  = $('strategy-select');
     try {
         const strategies = await invoke('get_strategies');
-        if (list) list.innerHTML = '';
-        if (sel)  sel.innerHTML  = '';
+        _allStrategies = Array.isArray(strategies) ? strategies : [];
+        if (sel) sel.innerHTML = '';
 
-        if (!strategies || strategies.length === 0) {
+        if (_allStrategies.length === 0) {
             $('strategy-label').textContent = t('no_strategies');
+            const list = $('strategy-options-list');
+            if (list) list.innerHTML = '';
             return;
         }
 
-        strategies.forEach(name => {
-            const opt = document.createElement('option');
-            opt.value = name;
-            opt.textContent = name;
-            if (sel) sel.appendChild(opt);
-
-            if (list) {
-                const item = document.createElement('button');
-                item.type = 'button';
-                item.dataset.value = name;
-                const cached = findCachedResult(name);
-                const isBest = isCachedBest(name);
-                const baseCls = 'w-full text-left px-4 py-2.5 text-sm font-headline text-on-surface hover:bg-primary/10 transition-colors flex items-center gap-2';
-                item.className = isBest ? baseCls + ' border-l-2 border-secondary' : baseCls;
-                let badges = '';
-                if (cached) {
-                    const pingTxt = cached.avg_ping_ms > 0 ? `${cached.avg_ping_ms}${t('ms')}` : '—';
-                    const total = cached.http_ok + cached.http_error;
-                    const color = cached.status === 'success' ? 'text-secondary'
-                        : cached.status === 'partial' ? 'text-primary' : 'text-error-dim';
-                    badges = `<span class="ml-auto text-[10px] ${color} font-mono">${isBest ? '★ ' : ''}HTTP ${cached.http_ok}/${total} · ${pingTxt}</span>`;
-                }
-                item.innerHTML = '<span class="material-symbols-outlined text-sm text-primary/30 item-icon">chevron_right</span><span class="truncate">' + name + '</span>' + badges;
-                item.addEventListener('click', () => {
-                    list.querySelectorAll('button').forEach(b => {
-                        b.classList.remove('bg-primary/20', 'text-primary');
-                        b.querySelector('.item-icon').style.opacity = '0.3';
-                    });
-                    item.classList.add('bg-primary/20', 'text-primary');
-                    item.querySelector('.item-icon').style.opacity = '1';
-                    setStrategyValue(name, name);
-                    closeStrategyDropdown();
-
-                    // Если сервис запущен, сразу переключаем на новую стратегию
-                    invoke('get_zapret_status').then(status => {
-                        if (status.running) {
-                            showRestartStatus(t('switching_strategy'), true);
-                            invoke('start_zapret', { strategy: name, mode: status.mode || 'service' }).then(() => {
-                                setTimeout(pollStatus, 500); // Даем время на старт и обновляем UI
-                            });
-                        }
-                    });
-                });
-                list.appendChild(item);
+        _allStrategies.forEach(name => {
+            if (sel) {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                sel.appendChild(opt);
             }
         });
 
-        const defaultName = strategies.includes('general') ? 'general' : strategies[0];
+        const defaultName = _allStrategies.includes('general') ? 'general' : _allStrategies[0];
         setStrategyValue(defaultName, defaultName);
-        if (list) {
-            list.querySelectorAll('button').forEach(b => {
-                if (b.dataset.value === defaultName) {
-                    b.classList.add('bg-primary/20', 'text-primary');
-                    b.querySelector('.item-icon').style.opacity = '1';
-                }
-            });
-        }
+        renderStrategyList();
 
     } catch (err) {
         console.error('Error loading strategies:', err);
@@ -722,9 +802,151 @@ window.addEventListener('DOMContentLoaded', async () => {
     try {
         const win = window.__TAURI__.window.getCurrentWindow();
         const tbMin   = $('tb-minimize');
+        const tbMax   = $('tb-maximize');
+        const tbMaxIcon = $('tb-maximize-icon');
         const tbClose = $('tb-close');
-        if (tbMin)   tbMin.addEventListener('click',   () => win.minimize());
-        if (tbClose) tbClose.addEventListener('click', () => win.close());
+        const tbCloseMenu = $('tb-close-menu');
+        const closeModal = $('close-confirm-modal');
+
+        const CLOSE_PREF_KEY = 'zapret.closePref'; // 'ask' | 'tray' | 'exit'
+        const getClosePref = () => localStorage.getItem(CLOSE_PREF_KEY) || 'ask';
+        const setClosePref = (v) => localStorage.setItem(CLOSE_PREF_KEY, v);
+
+        // Use win.close() (not win.hide()) so Rust-side CloseRequested handler
+        // runs and makes the tray icon visible + shows the "minimized" notification.
+        const doMinimizeToTray = () => { try { win.close(); } catch {} };
+        const doExit = () => { invoke('exit_app').catch(err => console.error('exit_app failed:', err)); };
+
+        const updateMaximizeIcon = async () => {
+            if (!tbMaxIcon) return;
+            try {
+                const isMax = await win.isMaximized();
+                tbMaxIcon.textContent = isMax ? 'filter_none' : 'crop_square';
+            } catch {}
+        };
+
+        if (tbMin) tbMin.addEventListener('click', () => win.minimize());
+        if (tbMax) tbMax.addEventListener('click', async () => {
+            try { await win.toggleMaximize(); } catch (e) { console.warn(e); }
+            updateMaximizeIcon();
+        });
+        // React to external resize (dbl-click drag region, keyboard shortcuts)
+        try {
+            win.onResized(() => updateMaximizeIcon());
+        } catch {}
+        updateMaximizeIcon();
+
+        // Hide close context menu on any outside click
+        const hideCloseMenu = () => { if (tbCloseMenu) tbCloseMenu.classList.add('hidden'); };
+        document.addEventListener('click', (e) => {
+            if (tbCloseMenu && !tbCloseMenu.contains(e.target) && e.target !== tbClose) hideCloseMenu();
+        });
+
+        const showCloseModal = () => {
+            if (!closeModal) { doMinimizeToTray(); return; }
+            const remember = $('close-confirm-remember');
+            if (remember) remember.checked = false;
+            closeModal.classList.remove('hidden');
+        };
+
+        if (tbClose) {
+            tbClose.addEventListener('click', () => {
+                hideCloseMenu();
+                const pref = getClosePref();
+                if (pref === 'exit') doExit();
+                else if (pref === 'tray') doMinimizeToTray();
+                else showCloseModal();
+            });
+            tbClose.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                if (!tbCloseMenu) return;
+                const rect = tbClose.getBoundingClientRect();
+                tbCloseMenu.style.top = (rect.bottom + 2) + 'px';
+                tbCloseMenu.style.right = (window.innerWidth - rect.right) + 'px';
+                tbCloseMenu.classList.remove('hidden');
+            });
+        }
+
+        const menuTray = $('tb-close-menu-tray');
+        const menuExit = $('tb-close-menu-exit');
+        if (menuTray) menuTray.addEventListener('click', () => { hideCloseMenu(); doMinimizeToTray(); });
+        if (menuExit) menuExit.addEventListener('click', () => { hideCloseMenu(); doExit(); });
+
+        const ccTray = $('close-confirm-tray');
+        const ccExit = $('close-confirm-exit');
+        const ccCancel = $('close-confirm-cancel');
+        const applyChoice = (choice) => {
+            const remember = $('close-confirm-remember');
+            if (remember?.checked) {
+                setClosePref(choice);
+                syncClosePrefRadios();
+            }
+            if (closeModal) closeModal.classList.add('hidden');
+            if (choice === 'exit') doExit();
+            else doMinimizeToTray();
+        };
+        if (ccTray) ccTray.addEventListener('click', () => applyChoice('tray'));
+        if (ccExit) ccExit.addEventListener('click', () => applyChoice('exit'));
+        if (ccCancel) ccCancel.addEventListener('click', () => { if (closeModal) closeModal.classList.add('hidden'); });
+
+        // Settings popover + autostart toggle + close-pref radios
+        const settingsBtn = $('settings-btn');
+        const settingsPopover = $('settings-popover');
+        if (settingsBtn && settingsPopover) {
+            settingsBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                settingsPopover.classList.toggle('hidden');
+            });
+            document.addEventListener('click', (e) => {
+                if (!settingsPopover.contains(e.target) && e.target !== settingsBtn) {
+                    settingsPopover.classList.add('hidden');
+                }
+            });
+        }
+
+        function syncClosePrefRadios() {
+            const pref = getClosePref();
+            document.querySelectorAll('input[name="close-pref"]').forEach(r => {
+                r.checked = (r.value === pref);
+            });
+        }
+        syncClosePrefRadios();
+        document.querySelectorAll('input[name="close-pref"]').forEach(r => {
+            r.addEventListener('change', () => { if (r.checked) setClosePref(r.value); });
+        });
+
+        const autostartToggle = $('autostart-toggle');
+        const syncAutostartUI = async () => {
+            if (!autostartToggle) return;
+            try {
+                const enabled = await invoke('plugin:autostart|is_enabled');
+                autostartToggle.classList.toggle('is-on', !!enabled);
+                autostartToggle.classList.toggle('is-off', !enabled);
+            } catch (err) {
+                console.warn('autostart is_enabled failed:', err);
+            }
+        };
+        if (autostartToggle) {
+            autostartToggle.addEventListener('click', async () => {
+                try {
+                    const enabled = await invoke('plugin:autostart|is_enabled');
+                    await invoke(enabled ? 'plugin:autostart|disable' : 'plugin:autostart|enable');
+                } catch (err) {
+                    console.error('autostart toggle failed:', err);
+                }
+                syncAutostartUI();
+            });
+        }
+        syncAutostartUI();
+
+        // Strategy search input
+        const search = $('strategy-search');
+        if (search) {
+            search.addEventListener('input', () => renderStrategyList());
+            // Clear search when dropdown opens fresh
+            const trigger = $('strategy-trigger');
+            if (trigger) trigger.addEventListener('click', () => { search.value = ''; renderStrategyList(); });
+        }
     } catch (e) {
         console.warn('Title bar controls unavailable:', e);
     }
