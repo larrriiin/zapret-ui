@@ -157,6 +157,29 @@ function initStrategyDropdown() {
 
 // ─── Стратегии ────────────────────────────────────────────────────────────────
 
+let cachedTestResults = null;
+
+function normConfigName(s) {
+    return String(s || '').replace(/\.bat$/i, '').trim().toLowerCase();
+}
+
+function findCachedResult(configName) {
+    if (!cachedTestResults || !cachedTestResults.results) return null;
+    const target = normConfigName(configName);
+    return cachedTestResults.results.find(r => normConfigName(r.config) === target) || null;
+}
+
+function isCachedBest(configName) {
+    if (!cachedTestResults || !cachedTestResults.best) return false;
+    return normConfigName(cachedTestResults.best) === normConfigName(configName);
+}
+
+async function loadCachedTestResults() {
+    try { cachedTestResults = await invoke('load_test_results'); }
+    catch (err) { cachedTestResults = null; }
+    return cachedTestResults;
+}
+
 async function loadStrategies() {
     const list = $('strategy-options-list');
     const sel  = $('strategy-select');
@@ -180,8 +203,19 @@ async function loadStrategies() {
                 const item = document.createElement('button');
                 item.type = 'button';
                 item.dataset.value = name;
-                item.className = 'w-full text-left px-4 py-2.5 text-sm font-headline text-on-surface hover:bg-primary/10 transition-colors flex items-center gap-2';
-                item.innerHTML = '<span class="material-symbols-outlined text-sm text-primary/30 item-icon">chevron_right</span><span>' + name + '</span>';
+                const cached = findCachedResult(name);
+                const isBest = isCachedBest(name);
+                const baseCls = 'w-full text-left px-4 py-2.5 text-sm font-headline text-on-surface hover:bg-primary/10 transition-colors flex items-center gap-2';
+                item.className = isBest ? baseCls + ' border-l-2 border-secondary' : baseCls;
+                let badges = '';
+                if (cached) {
+                    const pingTxt = cached.avg_ping_ms > 0 ? `${cached.avg_ping_ms}${t('ms')}` : '—';
+                    const total = cached.http_ok + cached.http_error;
+                    const color = cached.status === 'success' ? 'text-secondary'
+                        : cached.status === 'partial' ? 'text-primary' : 'text-error-dim';
+                    badges = `<span class="ml-auto text-[10px] ${color} font-mono">${isBest ? '★ ' : ''}HTTP ${cached.http_ok}/${total} · ${pingTxt}</span>`;
+                }
+                item.innerHTML = '<span class="material-symbols-outlined text-sm text-primary/30 item-icon">chevron_right</span><span class="truncate">' + name + '</span>' + badges;
                 item.addEventListener('click', () => {
                     list.querySelectorAll('button').forEach(b => {
                         b.classList.remove('bg-primary/20', 'text-primary');
@@ -712,6 +746,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         console.error('Failed to check admin privileges:', err);
     }
     
+    await loadCachedTestResults();
     await loadStrategies();
     initStrategyDropdown();
 
@@ -1509,14 +1544,16 @@ window.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // Run Tests functionality
+    // ─── Strategy Test Wizard ───────────────────────────────────────────────
     const runTestsBtn = $('run-tests-btn');
     const cancelTestsBtn = $('cancel-tests-btn');
-    const testsStatus = $('tests-status');
-    const testsLog = $('tests-log');
-    const testsResults = $('tests-results');
     let testsRunning = false;
     let selectedTestType = 'standard';
+    let wizardLastTestType = 'standard';
+
+    // Hide legacy inline test UI — wizard replaces it
+    const legacyNodes = ['tests-status', 'tests-log', 'tests-results'];
+    legacyNodes.forEach(id => { const el = $(id); if (el) el.classList.add('hidden'); });
 
     // Test type toggle
     document.querySelectorAll('[data-type]').forEach(btn => {
@@ -1533,7 +1570,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         });
     });
 
-    // Color map for log lines
+    // Color map for log lines (used inside wizard detailed log)
     const logColors = {
         error:   'text-error-dim',
         warning: 'text-primary',
@@ -1543,135 +1580,311 @@ window.addEventListener('DOMContentLoaded', async () => {
         info:    'text-on-surface/80',
     };
 
-    function appendLog(line, kind) {
-        const el = document.createElement('div');
-        el.className = logColors[kind] || 'text-on-surface/80';
-        el.textContent = line;
-        testsLog.appendChild(el);
-        // Auto-scroll to bottom
-        testsLog.scrollTop = testsLog.scrollHeight;
+    const WizardState = { Hidden: 'hidden', Preflight: 'preflight', Progress: 'progress', Results: 'results' };
+    let wizardUnlisten = { progress: null, configStart: null, best: null };
+
+    function showWizardStep(step) {
+        const modal = $('test-wizard-modal');
+        if (!modal) return;
+        if (step === WizardState.Hidden) {
+            modal.classList.add('hidden');
+            return;
+        }
+        modal.classList.remove('hidden');
+        ['wizard-preflight', 'wizard-progress', 'wizard-results'].forEach(id => {
+            const el = $(id);
+            if (el) el.classList.toggle('hidden', !id.endsWith(step));
+        });
     }
-    
+
+    async function unlistenWizard() {
+        for (const key of Object.keys(wizardUnlisten)) {
+            const fn = wizardUnlisten[key];
+            if (typeof fn === 'function') { try { fn(); } catch (_) { /* noop */ } }
+            wizardUnlisten[key] = null;
+        }
+    }
+
+    async function startWizardProgress(testType) {
+        wizardLastTestType = testType;
+        testsRunning = true;
+        runTestsBtn.disabled = true;
+        showWizardStep(WizardState.Progress);
+        $('wizard-overall-bar').style.width = '0%';
+        $('wizard-overall-counter').textContent = '0 / 0';
+        $('wizard-current-name').textContent = '—';
+        $('wizard-best-so-far').classList.add('hidden');
+        const logEl = $('wizard-log');
+        logEl.innerHTML = '';
+
+        wizardUnlisten.progress = await listen('test-progress', (event) => {
+            const { line, kind } = event.payload;
+            const row = document.createElement('div');
+            row.className = logColors[kind] || 'text-on-surface/80';
+            row.textContent = line;
+            logEl.appendChild(row);
+            logEl.scrollTop = logEl.scrollHeight;
+        });
+        wizardUnlisten.configStart = await listen('test-config-start', (event) => {
+            const { index, total, name } = event.payload;
+            $('wizard-overall-counter').textContent = `${index} / ${total}`;
+            const pct = total > 0 ? Math.min(100, ((index - 1) / total) * 100) : 0;
+            $('wizard-overall-bar').style.width = `${pct}%`;
+            $('wizard-current-name').textContent = name;
+        });
+        wizardUnlisten.best = await listen('test-best', (event) => {
+            const { config } = event.payload;
+            $('wizard-best-so-far').classList.remove('hidden');
+            $('wizard-best-name').textContent = config;
+        });
+
+        $('hero-status').textContent = t('testing');
+        $('hero-status').className = 'text-primary';
+        $('header-status').innerHTML = `<span class="text-primary">${t('status_label')}:</span> <span class="text-primary">${t('testing')}</span>`;
+
+        try {
+            const results = await invoke('run_tests', { testType, testMode: 'all' });
+            $('wizard-overall-bar').style.width = '100%';
+            results.sort((a, b) => (b.score || 0) - (a.score || 0));
+            const best = results[0] || null;
+            const payload = {
+                timestamp: new Date().toISOString(),
+                test_type: testType,
+                best: best ? best.config : null,
+                results,
+            };
+            try { await invoke('save_test_results', { payload }); } catch (err) { console.warn('save_test_results failed:', err); }
+            cachedTestResults = payload;
+            renderWizardResults(results, best);
+            await loadStrategies();
+        } catch (err) {
+            const logBox = $('wizard-log');
+            if (logBox) {
+                const row = document.createElement('div');
+                row.className = 'text-error-dim';
+                row.textContent = `${t('error')}: ${err}`;
+                logBox.appendChild(row);
+                logBox.scrollTop = logBox.scrollHeight;
+            }
+        } finally {
+            await unlistenWizard();
+            testsRunning = false;
+            runTestsBtn.disabled = false;
+            await pollStatus();
+        }
+    }
+
+    function renderWizardResults(results, best) {
+        showWizardStep(WizardState.Results);
+        const box = $('wizard-best-box');
+        if (best) {
+            box.classList.remove('hidden');
+            $('wizard-best-final-name').textContent = best.config.replace(/\.bat$/i, '');
+            const pingTxt = best.avg_ping_ms > 0 ? `${best.avg_ping_ms} ${t('ms')}` : '—';
+            const total = best.http_ok + best.http_error;
+            $('wizard-best-final-meta').textContent = `HTTP: ${best.http_ok}/${total} · ${t('ping_label')}: ${pingTxt}`;
+            const applyBest = async (mode) => {
+                try {
+                    const strategyName = best.config.replace(/\.bat$/i, '');
+                    setStrategyValue(strategyName, strategyName);
+                    await invoke('start_zapret', { strategy: strategyName, mode });
+                } catch (err) {
+                    console.error('Apply best failed:', err);
+                }
+                showWizardStep(WizardState.Hidden);
+                await pollStatus();
+            };
+            $('wizard-apply-service-btn').onclick = () => applyBest('service');
+            $('wizard-apply-temp-btn').onclick = () => applyBest('temporary');
+        } else {
+            box.classList.add('hidden');
+        }
+
+        const list = $('wizard-results-list');
+        list.innerHTML = '';
+        results.forEach(r => {
+            const row = document.createElement('div');
+            const borderColor = r.status === 'success' ? 'border-secondary/30'
+                : r.status === 'partial' ? 'border-primary/30' : 'border-error-dim/30';
+            const icon = r.status === 'success' ? 'check_circle'
+                : r.status === 'partial' ? 'warning' : 'error';
+            const iconColor = r.status === 'success' ? 'text-secondary'
+                : r.status === 'partial' ? 'text-primary' : 'text-error-dim';
+            const isBest = best && r.config === best.config;
+            const pingTxt = r.avg_ping_ms > 0 ? `${r.avg_ping_ms} ${t('ms')}` : '—';
+            const total = r.http_ok + r.http_error;
+            row.className = `rounded-xl border ${borderColor} p-3 flex items-center justify-between gap-3`;
+            row.innerHTML = `
+                <div class="flex items-center gap-2 min-w-0 flex-1">
+                    <span class="material-symbols-outlined ${iconColor} text-base shrink-0">${icon}</span>
+                    <span class="font-mono text-xs text-on-surface truncate">${escapeHtml(r.config.replace(/\.bat$/i, ''))}</span>
+                    ${isBest ? `<span class="text-[9px] bg-secondary/20 text-secondary px-2 py-0.5 rounded-full uppercase tracking-widest shrink-0">${t('wizard_best_badge')}</span>` : ''}
+                </div>
+                <div class="text-[10px] text-on-surface-variant text-right shrink-0">
+                    HTTP ${r.http_ok}/${total} · Ping ${pingTxt}
+                </div>
+            `;
+            list.appendChild(row);
+        });
+    }
+
+    function renderPreflight(blockers, testType) {
+        const box = $('wizard-preflight-blockers');
+        box.innerHTML = '';
+        const hasOnlyFixable = blockers.length > 0 && blockers.every(b => b.action === 'stop');
+        blockers.forEach(b => {
+            const row = document.createElement('div');
+            const borderColor = b.severity === 'error' ? 'border-error-dim/40' : 'border-primary/40';
+            row.className = `rounded-xl border ${borderColor} p-3 flex items-center gap-3`;
+            row.innerHTML = `
+                <span class="material-symbols-outlined text-primary text-xl">${b.icon}</span>
+                <span class="text-sm text-on-surface flex-1">${escapeHtml(b.text)}</span>
+            `;
+            box.appendChild(row);
+        });
+
+        const fixBtn = $('wizard-preflight-fix-btn');
+        fixBtn.disabled = !hasOnlyFixable;
+        fixBtn.classList.toggle('opacity-50', !hasOnlyFixable);
+        fixBtn.classList.toggle('cursor-not-allowed', !hasOnlyFixable);
+        fixBtn.onclick = async () => {
+            fixBtn.disabled = true;
+            try {
+                await invoke('stop_zapret');
+                await new Promise(r => setTimeout(r, 1500));
+                await runWizard(testType);
+            } catch (err) {
+                console.error('stop_zapret failed:', err);
+                fixBtn.disabled = false;
+            }
+        };
+    }
+
+    async function runWizard(testType) {
+        showWizardStep(WizardState.Preflight);
+        let pre;
+        try { pre = await invoke('precheck_tests'); } catch (err) {
+            console.error('precheck_tests failed:', err);
+            showWizardStep(WizardState.Hidden);
+            return;
+        }
+
+        const blockers = [];
+        if (!pre.is_admin) blockers.push({ severity: 'error', icon: 'shield', text: t('wizard_need_admin') });
+        if (pre.service_installed || pre.service_running) {
+            blockers.push({ severity: 'warn', icon: 'build', text: t('wizard_service_blocker'), action: 'stop' });
+        } else if (pre.winws_running) {
+            blockers.push({ severity: 'warn', icon: 'build', text: t('wizard_winws_blocker'), action: 'stop' });
+        }
+        if (pre.strategies_count === 0) {
+            blockers.push({ severity: 'error', icon: 'folder_off', text: t('wizard_no_strategies') });
+        }
+
+        if (blockers.length === 0) {
+            await startWizardProgress(testType);
+            return;
+        }
+        renderPreflight(blockers, testType);
+    }
+
     if (runTestsBtn) {
         runTestsBtn.addEventListener('click', async () => {
             if (testsRunning) return;
-            
-            testsRunning = true;
-            runTestsBtn.disabled = true;
-            runTestsBtn.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">refresh</span> Testing...';
-            cancelTestsBtn.classList.remove('hidden');
-
-            testsStatus.classList.remove('hidden');
-            testsStatus.textContent = t('test_running_info', { type: selectedTestType === 'dpi' ? 'DPI' : 'Standard' });
-            testsStatus.className = 'text-sm mb-3 text-primary';
-
-            // Clear previous
-            testsLog.innerHTML = '';
-            testsLog.classList.remove('hidden');
-            testsResults.innerHTML = '';
-            testsResults.classList.add('hidden');
-
-            // Update main header status to Testing...
-            $('hero-status').textContent = t('testing');
-            $('hero-status').className = 'text-primary';
-            $('header-status').innerHTML = `<span class="text-primary"><span data-i18n="status_label">${t('status_label')}</span>:</span> <span class="text-primary" data-i18n="testing">${t('testing')}</span>`;
-
-            // Subscribe to streaming events
-            let unlistenProgress, unlistenDone;
-            unlistenProgress = await window.__TAURI__.event.listen('test-progress', (event) => {
-                const { line, kind } = event.payload;
-                appendLog(line, kind);
-            });
-            unlistenDone = await window.__TAURI__.event.listen('test-done', () => {
-                if (unlistenProgress) unlistenProgress();
-                if (unlistenDone) unlistenDone();
-            });
-            
-            try {
-                const results = await invoke('run_tests', {
-                    testType: selectedTestType,
-                    testMode: 'all'
-                });
-                
-                testsStatus.textContent = `Tests completed. ${results.length} configurations tested.`;
-                testsStatus.className = 'text-sm mb-3 text-secondary';
-
-                if (results.length > 0) {
-                    testsResults.classList.remove('hidden');
-
-                    // Best strategy
-                    let bestStrategy = null;
-                    let bestScore = -Infinity;
-                    results.forEach(r => {
-                        const score = r.http_ok + r.ping_ok - r.http_error * 2 - r.ping_fail;
-                        if (score > bestScore) { bestScore = score; bestStrategy = r; }
-                    });
-
-                    window.downloadAndInstallCoreUpdate = downloadAndInstallCoreUpdate;
-
-                    if (bestStrategy) {
-                        const bestRow = document.createElement('div');
-                        bestRow.className = 'glass-panel rounded-xl border border-secondary/50 p-4 bg-secondary/5';
-                        bestRow.innerHTML = `
-                            <div class="flex items-center gap-3">
-                                <span class="material-symbols-outlined text-secondary text-xl">trophy</span>
-                                <div>
-                                    <h4 class="font-headline text-sm font-bold text-secondary">Best Strategy</h4>
-                                    <p class="text-xs text-on-surface-variant mt-1">${bestStrategy.config.replace('.bat', '')}</p>
-                                </div>
-                            </div>
-                        `;
-                        testsResults.appendChild(bestRow);
-                    }
-
-                    results.forEach(result => {
-                        const row = document.createElement('div');
-                        const isBest = bestStrategy && result.config === bestStrategy.config;
-                        let borderColor = result.status === 'success' ? 'border-secondary/30' : result.status === 'partial' ? 'border-primary/30' : 'border-error-dim/30';
-                        let icon = result.status === 'success' ? 'check_circle' : result.status === 'partial' ? 'warning' : 'error';
-                        let iconColor = result.status === 'success' ? 'text-secondary' : result.status === 'partial' ? 'text-primary' : 'text-error-dim';
-                        row.className = `glass-panel rounded-xl border ${borderColor} p-3 flex items-center justify-between`;
-                        row.innerHTML = `
-                            <div class="flex items-center gap-2">
-                                <span class="material-symbols-outlined ${iconColor} text-base">${icon}</span>
-                                <span class="font-headline text-xs font-bold text-on-surface">${result.config.replace('.bat', '')}</span>
-                                ${isBest ? '<span class="text-[9px] bg-secondary/20 text-secondary px-2 py-0.5 rounded-full uppercase tracking-wider">Best</span>' : ''}
-                            </div>
-                            <div class="text-[10px] text-on-surface-variant text-right">
-                                HTTP: <span class="text-secondary">${result.http_ok}✓</span><span class="text-error-dim">${result.http_error > 0 ? ' ' + result.http_error + '✗' : ''}</span>
-                                Ping: <span class="text-secondary">${result.ping_ok}✓</span><span class="text-error-dim">${result.ping_fail > 0 ? ' ' + result.ping_fail + '✗' : ''}</span>
-                            </div>
-                        `;
-                        testsResults.appendChild(row);
-                    });
-                }
-
-            } catch (err) {
-                if (unlistenProgress) unlistenProgress();
-                if (unlistenDone) unlistenDone();
-                testsStatus.textContent = 'Error: ' + err;
-                testsStatus.className = 'text-sm mb-3 text-error-dim';
-            } finally {
-                testsRunning = false;
-                runTestsBtn.disabled = false;
-                runTestsBtn.innerHTML = '<span class="material-symbols-outlined text-sm">science</span> Run Tests';
-                cancelTestsBtn.classList.add('hidden');
-                await pollStatus();
-            }
+            await runWizard(selectedTestType);
         });
     }
-    
+
+    $('wizard-close-btn')?.addEventListener('click', () => {
+        if (testsRunning) {
+            // Tests still running — tell backend to cancel, but keep modal open until finish
+            invoke('cancel_tests').catch(() => {});
+        } else {
+            showWizardStep(WizardState.Hidden);
+        }
+    });
+    $('wizard-preflight-cancel-btn')?.addEventListener('click', () => showWizardStep(WizardState.Hidden));
+    $('wizard-cancel-tests-btn')?.addEventListener('click', async () => {
+        try { await invoke('cancel_tests'); } catch (err) { console.error('cancel_tests:', err); }
+    });
+    $('wizard-done-btn')?.addEventListener('click', () => showWizardStep(WizardState.Hidden));
+    $('wizard-rerun-btn')?.addEventListener('click', async () => {
+        await runWizard(wizardLastTestType);
+    });
+
     if (cancelTestsBtn) {
         cancelTestsBtn.addEventListener('click', async () => {
-            testsStatus.textContent = 'Cancelling...';
             cancelTestsBtn.disabled = true;
-            try {
-                await invoke('cancel_tests');
-            } catch (err) {
-                console.error('Cancel error:', err);
-            }
+            try { await invoke('cancel_tests'); } catch (err) { console.error('Cancel error:', err); }
         });
     }
+
+    // ─── First-run Strategies Modal ─────────────────────────────────────────
+    const FIRSTRUN_KEY = 'zapret.firstrun.dismissed';
+    const firstrunModal = $('strategies-firstrun-modal');
+
+    function closeFirstrun(dismiss) {
+        if (firstrunModal) firstrunModal.classList.add('hidden');
+        if (dismiss) localStorage.setItem(FIRSTRUN_KEY, '1');
+    }
+
+    $('firstrun-skip-btn')?.addEventListener('click', () => closeFirstrun(true));
+    $('firstrun-download-only-btn')?.addEventListener('click', async () => {
+        closeFirstrun(false);
+        const modal = $('first-launch-modal');
+        const statusEl = $('first-launch-status');
+        const progressBar = $('first-launch-progress-bar');
+        const progressText = $('first-launch-progress-text');
+        if (modal) modal.classList.remove('hidden');
+        if (statusEl) statusEl.textContent = t('initializing_download');
+        const unlistenProg = await listen('download-progress', (event) => {
+            const pct = event.payload;
+            if (progressBar) progressBar.style.width = pct + '%';
+            if (progressText) progressText.textContent = pct + '%';
+            if (statusEl && pct < 90) statusEl.textContent = t('downloading_core');
+            if (statusEl && pct >= 90) statusEl.textContent = t('extracting');
+        });
+        try {
+            await invoke('download_and_install_update');
+            if (statusEl) statusEl.textContent = t('install_complete');
+            if (progressBar) progressBar.style.width = '100%';
+            if (progressText) progressText.textContent = '100%';
+            await new Promise(r => setTimeout(r, 1000));
+            if (modal) modal.classList.add('hidden');
+            await loadStrategies();
+        } catch (err) {
+            if (statusEl) statusEl.textContent = t('download_failed') + ': ' + err;
+        } finally {
+            try { unlistenProg(); } catch (_) { /* noop */ }
+        }
+    });
+    $('firstrun-download-test-btn')?.addEventListener('click', async () => {
+        $('firstrun-download-only-btn')?.click();
+        // After download click, wait a bit then trigger wizard
+        const check = setInterval(async () => {
+            try {
+                const pre = await invoke('precheck_tests');
+                if (pre.strategies_count > 0) {
+                    clearInterval(check);
+                    await runWizard(selectedTestType);
+                }
+            } catch (_) { /* still installing */ }
+        }, 2000);
+        // Safety cap: stop polling after 3 minutes
+        setTimeout(() => clearInterval(check), 180000);
+    });
+
+    // Show firstrun modal if no strategies and not dismissed
+    (async () => {
+        if (localStorage.getItem(FIRSTRUN_KEY) === '1') return;
+        try {
+            const pre = await invoke('precheck_tests');
+            if (pre.strategies_count === 0 && firstrunModal) {
+                firstrunModal.classList.remove('hidden');
+            }
+        } catch (err) {
+            console.warn('precheck_tests failed on startup:', err);
+        }
+    })();
 
     const checkStatusBtn = $('check-status-btn');
     const statusModal = $('status-modal');
