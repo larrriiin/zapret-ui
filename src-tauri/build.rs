@@ -18,5 +18,20 @@ fn main() {
         }
     }
 
+    // 4. Read .env file to inject proxy credentials
+    let env_path = Path::new("../.env");
+    if let Ok(env_str) = fs::read_to_string(env_path) {
+        for line in env_str.lines() {
+            let line = line.trim();
+            if line.starts_with("ZAPRET_UPDATE_PROXY=") {
+                if let Some((_, val)) = line.split_once('=') {
+                    let val = val.trim_matches(|c| c == '"' || c == '\'');
+                    println!("cargo:rustc-env=ZAPRET_UPDATE_PROXY={}", val);
+                }
+            }
+        }
+    }
+    println!("cargo:rerun-if-changed=../.env");
+
     tauri_build::build();
 }

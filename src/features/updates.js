@@ -26,16 +26,91 @@ async function downloadAndInstallUIUpdate(event, updateObj) {
   }
 }
 
-async function downloadAndInstallCoreUpdate() {
+async function downloadAndInstallCoreUpdate(useProxy = false, customProxy = null) {
   try {
     const modalTitle = document.querySelector('#update-modal h3');
     if (modalTitle) modalTitle.textContent = t('downloading_installing');
-    await invoke('download_and_install_update');
+    await invoke('download_and_install_update', { useProxy, customProxy });
     if (modalTitle) modalTitle.textContent = t('update_installed_restarting');
     setTimeout(() => location.reload(), 1500);
   } catch (err) {
     console.error('Core update failed:', err);
-    alert('Core update failed: ' + err);
+    showProxyFallbackModal(err, 
+      () => downloadAndInstallCoreUpdate(true),
+      (proxy) => downloadAndInstallCoreUpdate(true, proxy),
+      () => downloadAndInstallCoreUpdate(false)
+    );
+    throw err;
+  }
+}
+
+function showProxyFallbackModal(errStr, onTryProxy, onCustomProxy, onRetryNoProxy, isCustomProxyStage = false) {
+  const oldModal = $('proxy-fallback-modal');
+  if (oldModal) oldModal.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'proxy-fallback-modal';
+  modal.className = 'fixed inset-0 z-[2000] flex items-center justify-center p-6 bg-background/80 backdrop-blur-md animate-fade-in';
+  
+  let content = '';
+  if (!isCustomProxyStage) {
+    content = `
+      <div class="bg-surface-container-high border border-outline-variant/30 rounded-3xl p-8 max-w-md w-full shadow-2xl animate-scale-in">
+        <h3 class="font-headline text-xl font-black text-error mb-4">Ошибка загрузки</h3>
+        <p class="text-on-surface-variant text-sm mb-6">Похоже, мы не можем получить обновление. Попробуйте использовать прокси или включить VPN. Скорее всего, обновление исправит эту ошибку.</p>
+        <p class="text-[10px] text-error-dim font-mono bg-error/10 p-2 rounded mb-6 break-words max-h-32 overflow-y-auto">${errStr}</p>
+        <div class="flex flex-col gap-3">
+          <button id="proxy-btn-vpn" class="w-full px-4 py-3 bg-white/5 hover:bg-white/10 text-on-surface rounded-xl font-bold transition-all uppercase text-xs tracking-wider">Включил VPN</button>
+          <button id="proxy-btn-proxy" class="w-full px-4 py-3 bg-secondary/20 hover:bg-secondary/30 text-secondary border border-secondary/20 rounded-xl font-black transition-all uppercase text-xs tracking-wider shadow-lg shadow-secondary/5">Через прокси</button>
+          <button id="proxy-btn-close" class="w-full px-4 py-3 mt-2 text-on-surface-variant rounded-xl font-bold hover:bg-white/5 transition-all uppercase text-xs tracking-widest">${t('close') || 'Закрыть'}</button>
+        </div>
+      </div>
+    `;
+  } else {
+    content = `
+      <div class="bg-surface-container-high border border-outline-variant/30 rounded-3xl p-8 max-w-md w-full shadow-2xl animate-scale-in">
+        <h3 class="font-headline text-xl font-black text-error mb-4">Прокси не сработал</h3>
+        <p class="text-on-surface-variant text-sm mb-4">Наш тестовый прокси не смог загрузить обновление. Вы можете указать свой прокси-сервер (SOCKS5 или HTTP).</p>
+        <input type="text" id="custom-proxy-input" placeholder="socks5://user:pass@ip:port" class="w-full bg-background border border-outline-variant/30 rounded-xl px-4 py-3 text-sm text-on-surface mb-6 focus:outline-none focus:border-primary transition-colors">
+        <div class="flex flex-col gap-3">
+          <button id="proxy-btn-custom" class="w-full px-4 py-3 bg-secondary/20 hover:bg-secondary/30 text-secondary border border-secondary/20 rounded-xl font-black transition-all uppercase text-xs tracking-wider shadow-lg shadow-secondary/5">Скачать</button>
+          <button id="proxy-btn-close" class="w-full px-4 py-3 mt-2 text-on-surface-variant rounded-xl font-bold hover:bg-white/5 transition-all uppercase text-xs tracking-widest">${t('close') || 'Закрыть'}</button>
+        </div>
+      </div>
+    `;
+  }
+
+  modal.innerHTML = content;
+  document.body.appendChild(modal);
+
+  modal.querySelector('#proxy-btn-close')?.addEventListener('click', () => modal.remove());
+  if (!isCustomProxyStage) {
+    modal.querySelector('#proxy-btn-vpn')?.addEventListener('click', () => {
+      modal.remove();
+      onRetryNoProxy();
+    });
+    modal.querySelector('#proxy-btn-proxy')?.addEventListener('click', () => {
+      const btn = modal.querySelector('#proxy-btn-proxy');
+      btn.disabled = true;
+      btn.innerHTML = `<span class="material-symbols-outlined text-sm animate-spin">refresh</span> Загрузка...`;
+      onTryProxy().then(() => modal.remove()).catch(err => {
+        modal.remove();
+        showProxyFallbackModal(err, onTryProxy, onCustomProxy, onRetryNoProxy, true);
+      });
+    });
+  } else {
+    modal.querySelector('#proxy-btn-custom')?.addEventListener('click', () => {
+      const val = modal.querySelector('#custom-proxy-input').value.trim();
+      if (!val) return;
+      const btn = modal.querySelector('#proxy-btn-custom');
+      btn.disabled = true;
+      btn.innerHTML = `<span class="material-symbols-outlined text-sm animate-spin">refresh</span> Загрузка...`;
+      onCustomProxy(val).then(() => modal.remove()).catch(err => {
+        btn.disabled = false;
+        btn.innerHTML = 'Скачать';
+        alert('Ошибка: ' + err);
+      });
+    });
   }
 }
 
@@ -89,7 +164,7 @@ function showDualUpdateModal(data, manual = false) {
               <span class="text-[10px] font-bold text-secondary/70 uppercase tracking-wider mb-1">${t('zapret_core')}</span>
               <div class="flex items-center gap-2">
                 <span class="text-sm font-bold text-on-surface">v${data.core.current}</span>
-                ${data.core.available ? `<span class="material-symbols-outlined text-xs text-on-surface-variant/40">arrow_forward</span> <span class="text-sm font-bold text-secondary">v${data.core.latest}</span>` : ''}
+                ${data.core.available ? `<span class="material-symbols-outlined text-xs text-on-surface-variant/40">arrow_forward</span> <span class="text-sm font-bold text-secondary">${data.core.latest === 'Error' ? 'Ошибка' : 'v' + data.core.latest}</span>` : ''}
               </div>
             </div>
             <div class="flex flex-col items-end gap-3">
@@ -110,7 +185,7 @@ function showDualUpdateModal(data, manual = false) {
 
   modal.querySelector('#modal-close-btn')?.addEventListener('click', () => modal.remove());
   modal.querySelector('#modal-update-ui-btn')?.addEventListener('click', (e) => downloadAndInstallUIUpdate(e, currentUpdateObject));
-  modal.querySelector('#modal-update-core-btn')?.addEventListener('click', () => downloadAndInstallCoreUpdate());
+  modal.querySelector('#modal-update-core-btn')?.addEventListener('click', () => downloadAndInstallCoreUpdate().catch(console.error));
 }
 
 async function checkForUpdates(manual = false) {
@@ -130,17 +205,24 @@ async function checkForUpdates(manual = false) {
         console.warn('UI update check failed (normal in dev):', err);
         return null;
       }),
-      invoke('get_remote_core_version').catch((err) => 'Remote Err: ' + err),
+      invoke('get_remote_core_version', { useProxy: false, customProxy: null }).catch(async (err) => {
+        try {
+          return await invoke('get_remote_core_version', { useProxy: true, customProxy: null });
+        } catch {
+          return 'Error';
+        }
+      }),
       invoke('get_local_version_cmd').catch((err) => 'Local Err: ' + err),
     ]);
 
     const hasUIUpdate = !!uiUpdate;
-    const hasCoreUpdate = coreRemoteVersion !== 'Unknown' && coreLocalVersion !== 'Unknown' && coreRemoteVersion !== coreLocalVersion;
+    const hasCoreUpdate = coreRemoteVersion !== 'Unknown' && coreRemoteVersion !== 'Error' && coreLocalVersion !== 'Unknown' && coreRemoteVersion !== coreLocalVersion;
+    const showCoreError = manual && coreRemoteVersion === 'Error';
 
-    if (hasUIUpdate || hasCoreUpdate || manual) {
+    if (hasUIUpdate || hasCoreUpdate || showCoreError || manual) {
       showDualUpdateModal({
         ui: { available: hasUIUpdate, current: uiLocalVersion, latest: hasUIUpdate ? uiUpdate.version : uiLocalVersion, updateObj: uiUpdate },
-        core: { available: hasCoreUpdate, current: coreLocalVersion, latest: coreRemoteVersion },
+        core: { available: hasCoreUpdate || showCoreError, current: coreLocalVersion, latest: coreRemoteVersion },
       }, manual);
     }
   } catch (err) {
@@ -217,7 +299,7 @@ function initLegacyUpdateNowButton() {
         if (statusEl && pct >= 90) statusEl.textContent = t('extracting_installing');
       });
 
-      const result = await invoke('download_and_install_update');
+      const result = await invoke('download_and_install_update', { useProxy: false, customProxy: null });
       if (unlisten) unlisten();
       if (progressBar) progressBar.style.width = '100%';
       if (progressText) progressText.textContent = '100%';
@@ -249,6 +331,12 @@ function initLegacyUpdateNowButton() {
         try { await invoke('start_zapret', { strategy: zapretStrategy, mode: zapretMode }); await pollStatus(); } catch {}
       }
       updateNowBtn.disabled = false;
+
+      showProxyFallbackModal(err, 
+        () => downloadAndInstallCoreUpdate(true),
+        (proxy) => downloadAndInstallCoreUpdate(true, proxy),
+        () => downloadAndInstallCoreUpdate(false)
+      );
     }
   });
 }

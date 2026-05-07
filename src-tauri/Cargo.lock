@@ -6129,9 +6129,10 @@ dependencies = [
 
 [[package]]
 name = "zapret-ui"
-version = "26.4.17"
+version = "26.5.1"
 dependencies = [
  "base64 0.22.1",
+ "futures-util",
  "reqwest",
  "serde",
  "serde_json",

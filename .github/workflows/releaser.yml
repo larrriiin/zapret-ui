@@ -37,6 +37,7 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ZAPRET_UPDATE_PROXY: ${{ secrets.ZAPRET_UPDATE_PROXY }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Zapret-UI ${{ github.ref_name }}"

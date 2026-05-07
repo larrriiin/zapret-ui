@@ -32,5 +32,7 @@ jobs:
       # We simply build the app to generate and save the cache for future tags.
       # No signing or release steps are needed here.
       - name: Build to populate cache
+        env:
+          ZAPRET_UPDATE_PROXY: ${{ secrets.ZAPRET_UPDATE_PROXY }}
         run: |
           npx tauri build --no-bundle

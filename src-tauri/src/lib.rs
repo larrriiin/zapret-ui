@@ -589,15 +589,30 @@ fn get_local_version_cmd() -> String {
 }
 
 #[tauri::command]
-async fn get_remote_core_version() -> Result<String, String> {
-    let client = reqwest::Client::new();
+async fn get_remote_core_version(
+    use_proxy: Option<bool>,
+    custom_proxy: Option<String>,
+) -> Result<String, String> {
+    let mut client_builder = reqwest::Client::builder();
+    
+    let use_proxy = use_proxy.unwrap_or(false);
+    if use_proxy {
+        let proxy_url = custom_proxy.or_else(|| option_env!("ZAPRET_UPDATE_PROXY").map(|s| s.to_string()));
+        if let Some(proxy_url) = proxy_url {
+            if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
+                client_builder = client_builder.proxy(proxy);
+            }
+        }
+    }
+
+    let client = client_builder.build().map_err(|e| e.to_string())?;
     let response = client
         .get("https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt")
         .send()
         .await
-        .map_err(|e: reqwest::Error| e.to_string())?;
+        .map_err(|e| e.to_string())?;
     
-    let text = response.text().await.map_err(|e: reqwest::Error| e.to_string())?;
+    let text = response.text().await.map_err(|e| e.to_string())?;
     Ok(text.trim().to_string())
 }
 
@@ -1522,7 +1537,11 @@ fn is_ip_or_cidr(s: &str) -> bool {
 
 
 #[tauri::command]
-async fn download_and_install_update(window: tauri::Window) -> Result<String, String> {
+async fn download_and_install_update(
+    window: tauri::Window,
+    use_proxy: Option<bool>,
+    custom_proxy: Option<String>,
+) -> Result<String, String> {
     let dir = find_binaries_dir();
     let temp_dir = std::env::temp_dir().join("zapret_update");
 
@@ -1549,37 +1568,38 @@ async fn download_and_install_update(window: tauri::Window) -> Result<String, St
 
     window.emit("download-progress", 5).ok();
 
-    // Fetch version
-    let version_cmd = format!(
-        "try {{ (Invoke-WebRequest -Uri '{}' -Headers @{{'Cache-Control'='no-cache'}} -UseBasicParsing -TimeoutSec 10).Content.Trim() }} catch {{ exit 1 }}",
-        GITHUB_VERSION_URL
-    );
-    let out = Command::new(powershell_path())
-        .args(["-NoProfile", "-Command", &version_cmd])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
+    // Prepare proxy client
+    let mut client_builder = reqwest::Client::builder();
+    let use_proxy = use_proxy.unwrap_or(false);
+    if use_proxy {
+        let proxy_url = custom_proxy.or_else(|| option_env!("ZAPRET_UPDATE_PROXY").map(|s| s.to_string()));
+        if let Some(proxy_url) = proxy_url {
+            if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
+                client_builder = client_builder.proxy(proxy);
+            }
+        }
+    }
+    let client = client_builder.build().map_err(|e| format!("Failed to build http client: {}", e))?;
 
-    let latest_version = match out {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-        _ => return Err("Failed to fetch latest version tag".to_string()),
-    };
+    // Fetch version
+    let latest_version = client
+        .get(GITHUB_VERSION_URL)
+        .header("Cache-Control", "no-cache")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch version: {}", e))?
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read version: {}", e))?
+        .trim()
+        .to_string();
 
     window.emit("download-progress", 10).ok();
 
-    // Download — use the simple Invoke-WebRequest (proven reliable)
+    // Download update
     let download_url = format!("https://github.com/Flowseal/zapret-discord-youtube/releases/download/{}/zapret-discord-youtube-{}.zip", latest_version, latest_version);
     let zip_path = temp_dir.join("update.zip");
 
-    let ps_cmd = format!(
-        "$ProgressPreference = 'SilentlyContinue'; \
-         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
-         try {{ Invoke-WebRequest -Uri '{}' -OutFile '{}' -TimeoutSec 300 -UseBasicParsing; Write-Host 'DONE' }} catch {{ Write-Host ('ERR:' + $_.Exception.Message); exit 1 }}",
-        download_url,
-        zip_path.to_str().unwrap_or("")
-    );
-
-    // Spawn a background thread that sends fake progress ticks every 2s
-    // Progress goes 10 → 88, then we jump to 92 after download completes
     use std::sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -1601,26 +1621,44 @@ async fn download_and_install_update(window: tauri::Window) -> Result<String, St
         }
     });
 
-    let out = Command::new(powershell_path())
-        .args(["-NoProfile", "-Command", &ps_cmd])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
+    let mut response = client
+        .get(&download_url)
+        .send()
+        .await
+        .map_err(|e| {
+            done_flag.store(true, Ordering::Relaxed);
+            format!("Download failed: {}", e)
+        })?;
+
+    if !response.status().is_success() {
+        done_flag.store(true, Ordering::Relaxed);
+        return Err(format!("Download failed with status: {}", response.status()));
+    }
+
+    use futures_util::StreamExt;
+    let mut file = std::fs::File::create(&zip_path).map_err(|e| {
+        done_flag.store(true, Ordering::Relaxed);
+        format!("Failed to create update zip file: {}", e)
+    })?;
+
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(bytes) => {
+                use std::io::Write;
+                if let Err(e) = file.write_all(&bytes) {
+                    done_flag.store(true, Ordering::Relaxed);
+                    return Err(format!("Failed to write to zip file: {}", e));
+                }
+            }
+            Err(e) => {
+                done_flag.store(true, Ordering::Relaxed);
+                return Err(format!("Error while downloading: {}", e));
+            }
+        }
+    }
 
     done_flag.store(true, Ordering::Relaxed);
-
-    match out {
-        Ok(o) if o.status.success() => {}
-        Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr);
-            let stdout = String::from_utf8_lossy(&o.stdout);
-            return Err(format!(
-                "Download failed: {} {}",
-                stderr.trim(),
-                stdout.trim()
-            ));
-        }
-        Err(e) => return Err(format!("Failed to launch download: {}", e)),
-    }
 
     if !zip_path.exists() {
         return Err("Download failed: output file not found".to_string());
