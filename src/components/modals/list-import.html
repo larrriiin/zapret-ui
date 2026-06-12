@@ -1,0 +1,66 @@
+<!-- List Import Modal -->
+<div id="list-import-modal"
+    class="hidden fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center">
+    <div class="bg-[#0d1225]/90 backdrop-blur-xl rounded-2xl border border-primary/30 p-8 max-w-lg w-full mx-4 shadow-2xl space-y-6">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-primary text-2xl">edit_document</span>
+                <h3 id="list-import-title" class="font-headline text-lg font-bold text-on-surface uppercase tracking-widest" data-i18n="import_btn">Import List</h3>
+            </div>
+            <button id="list-import-close-x" class="text-on-surface-variant hover:text-on-surface transition-colors flex">
+                <span class="material-symbols-outlined text-lg">close</span>
+            </button>
+        </div>
+
+        <div class="space-y-4">
+            <label class="block">
+                <span class="text-xs font-bold text-on-surface-variant uppercase tracking-wider block mb-2" data-i18n="import_paste_domains">Paste domains (one per line):</span>
+                <textarea id="list-import-textarea" rows="8" placeholder="example.com&#10;google.com&#10;youtube.com" spellcheck="false"
+                    class="w-full bg-surface-container-highest border border-outline-variant/30 rounded-xl px-4 py-3 text-sm outline-none focus:border-primary/50 font-mono resize-none text-on-surface"></textarea>
+            </label>
+
+            <div class="flex items-center justify-between gap-4">
+                <span class="text-xs text-on-surface-variant" data-i18n="import_or_file">Or choose a text file:</span>
+                <input type="file" id="list-import-file-input" accept=".txt" class="hidden">
+                <button id="list-import-file-btn" type="button"
+                    class="px-4 py-2 bg-surface-container-high border border-outline-variant/30 rounded-xl text-xs font-bold text-on-surface hover:border-primary/50 hover:text-primary transition-all flex items-center gap-2">
+                    <span class="material-symbols-outlined text-sm">upload_file</span>
+                    <span data-i18n="choose_file">Choose File</span>
+                </button>
+            </div>
+            
+            <div class="border-t border-outline-variant/10 my-4"></div>
+
+            <div class="space-y-2">
+                <span class="text-xs font-bold text-on-surface-variant uppercase tracking-wider block" data-i18n="import_mode">Import mode:</span>
+                <div class="flex flex-col gap-2">
+                    <label class="flex items-center gap-3 cursor-pointer p-3 bg-surface-container-high/40 rounded-xl border border-outline-variant/10 hover:border-primary/30 transition-colors">
+                        <input type="radio" name="import-mode" value="append" checked class="accent-primary">
+                        <div class="flex-1">
+                            <span class="text-sm font-semibold text-on-surface block" data-i18n="import_mode_append">Append</span>
+                            <span class="text-[10px] text-on-surface-variant block" data-i18n="import_mode_append_desc">Add new entries, keeping existing ones</span>
+                        </div>
+                    </label>
+                    <label class="flex items-center gap-3 cursor-pointer p-3 bg-surface-container-high/40 rounded-xl border border-outline-variant/10 hover:border-primary/30 transition-colors">
+                        <input type="radio" name="import-mode" value="replace" class="accent-primary">
+                        <div class="flex-1">
+                            <span class="text-sm font-semibold text-on-surface block" data-i18n="import_mode_replace">Replace</span>
+                            <span class="text-[10px] text-error-dim block" data-i18n="import_mode_replace_desc">WARNING: Overwrite the entire list</span>
+                        </div>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex gap-3 pt-2">
+            <button id="list-import-cancel"
+                class="flex-1 py-3 bg-surface-container-high border border-outline-variant/30 rounded-xl text-on-surface-variant font-bold text-xs uppercase tracking-wider hover:bg-surface-container-highest transition-colors" data-i18n="cancel">
+                Cancel
+            </button>
+            <button id="list-import-submit"
+                class="flex-1 py-3 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors" data-i18n="add">
+                Add
+            </button>
+        </div>
+    </div>
+</div>

@@ -1439,6 +1439,35 @@ fn remove_from_user_list(filename: String, entry: String) -> Result<(), String> 
     Ok(())
 }
 
+/// Saves user list to a text file selected by the user via Save File Dialog
+#[tauri::command]
+fn save_user_list_to_file(filename: String) -> Result<bool, String> {
+    let lines = read_user_list(filename.clone())?;
+    let content = lines.join("\r\n");
+
+    let default_name = if filename.contains("general") {
+        "list-general-user.txt"
+    } else if filename.contains("exclude") {
+        "list-exclude-user.txt"
+    } else {
+        "user-list.txt"
+    };
+
+    let file_path = rfd::FileDialog::new()
+        .set_title("Сохранить список как...")
+        .add_filter("Text Files (*.txt)", &["txt"])
+        .set_file_name(default_name)
+        .save_file();
+
+    if let Some(path) = file_path {
+        std::fs::write(&path, content)
+            .map_err(|e| format!("Не удалось сохранить файл: {}", e))?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
 /// Updates the IPSet list from remote source (same as service.bat)
 #[tauri::command]
 async fn update_ipset_list() -> Result<String, String> {
@@ -3012,6 +3041,7 @@ pub fn run() {
             write_user_list,
             add_to_user_list,
             remove_from_user_list,
+            save_user_list_to_file,
             update_ipset_list,
             get_remote_core_version,
             download_and_install_update,
