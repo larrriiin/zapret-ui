@@ -2819,6 +2819,12 @@ pub fn run() {
                     let _ = w.show();
                     let _ = w.unminimize();
                     let _ = w.set_focus();
+
+                    let state = app.state::<AppState>();
+                    let tray_opt = state.tray_handle.lock_unpoisoned().clone();
+                    if let Some(tray) = tray_opt {
+                        let _ = tray.set_visible(false);
+                    }
                 });
         }))
         .manage(AppState {
@@ -2836,8 +2842,9 @@ pub fn run() {
             translations: Mutex::new(None),
         })
         .setup(|app| {
+            let is_autostart = std::env::args().any(|a| a == "--autostart");
             // Hide main window on --autostart so the app boots straight into tray
-            if std::env::args().any(|a| a == "--autostart") {
+            if is_autostart {
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.hide();
                 }
@@ -2960,10 +2967,10 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Сохраняем обработчик трея и скрываем его изначально
+            // Сохраняем обработчик трея и задаем изначальную видимость (показываем в трее при автостарте)
             {
                 let state = app.state::<AppState>();
-                let _ = tray.set_visible(false);
+                let _ = tray.set_visible(is_autostart);
                 *state.tray_handle.lock_unpoisoned() = Some(tray);
             }
 
