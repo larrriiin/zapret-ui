@@ -1650,7 +1650,7 @@ async fn download_and_install_update(
         }
     });
 
-    let mut response = client
+    let response = client
         .get(&download_url)
         .send()
         .await
