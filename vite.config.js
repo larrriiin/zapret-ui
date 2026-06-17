@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import tailwindcss from '@tailwindcss/vite';
 
 // Vite configuration for the Tauri frontend.
 // - `src/` holds the entry `index.html`, modules, HTML fragments and assets.
@@ -7,6 +8,7 @@ import { defineConfig } from 'vite';
 // - Dev server listens on the Tauri-standard port 1420 and is attached to
 //   `tauri dev` through `build.devUrl`.
 export default defineConfig({
+  plugins: [tailwindcss()],
   root: 'src',
   publicDir: false,
   base: './',

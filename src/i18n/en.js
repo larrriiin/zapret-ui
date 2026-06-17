@@ -189,5 +189,12 @@ export default {
     "search_strategies": "Search strategies...",
     "favorites": "Favorites",
     "toggle_favorite": "Toggle favorite",
-    "no_results": "No results"
+    "no_results": "No results",
+    "clear_btn": "Clear",
+    "search_placeholder": "Search list...",
+    "confirm_clear": "Are you sure you want to clear this list? This cannot be undone.",
+    "confirm_backup_restore": "Are you sure you want to restore the backup? This will overwrite your current site lists and IP exclusions.",
+    "duplicate_warning": "Already in list",
+    "backup_export_btn": "Create Backup",
+    "backup_import_btn": "Restore Backup"
 };

@@ -1,0 +1,21 @@
+<!-- Custom Confirmation Dialog Modal -->
+<div id="confirm-modal"
+    class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[10002] flex items-center justify-center">
+    <div class="glass-panel rounded-2xl border border-primary/30 p-8 max-w-md mx-4 w-full" style="background: #0d1225;">
+        <div class="flex items-center gap-3 mb-4">
+            <span class="material-symbols-outlined text-primary text-2xl">help_outline</span>
+            <h3 id="confirm-modal-title" class="font-headline text-lg font-bold text-primary" data-i18n="information">Confirm</h3>
+        </div>
+        <p id="confirm-modal-body" class="text-on-surface-variant text-sm mb-6"></p>
+        <div class="flex gap-3">
+            <button id="confirm-modal-cancel"
+                class="flex-1 py-3 rounded-xl border border-outline-variant/30 text-on-surface-variant font-bold text-xs uppercase tracking-wider hover:bg-surface-container-high transition-colors" data-i18n="cancel">
+                Cancel
+            </button>
+            <button id="confirm-modal-ok"
+                class="flex-1 py-3 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors" data-i18n="ok">
+                OK
+            </button>
+        </div>
+    </div>
+</div>

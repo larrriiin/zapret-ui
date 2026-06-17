@@ -1468,6 +1468,71 @@ fn save_user_list_to_file(filename: String) -> Result<bool, String> {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct BackupData {
+    version: u32,
+    include: Vec<String>,
+    exclude: Vec<String>,
+    ips: Vec<String>,
+}
+
+/// Exports all lists (include, exclude, ips) to a JSON backup file
+#[tauri::command]
+fn export_backup_file() -> Result<bool, String> {
+    let include = read_user_list("list-general-user.txt".to_string()).unwrap_or_default();
+    let exclude = read_user_list("list-exclude-user.txt".to_string()).unwrap_or_default();
+    let ips = read_user_list("ipset-exclude-user.txt".to_string()).unwrap_or_default();
+
+    let backup = BackupData {
+        version: 1,
+        include,
+        exclude,
+        ips,
+    };
+
+    let content = serde_json::to_string_pretty(&backup)
+        .map_err(|e| format!("Не удалось сериализовать резервную копию: {}", e))?;
+
+    let file_path = rfd::FileDialog::new()
+        .set_title("Сохранить резервную копию...")
+        .add_filter("JSON Files (*.json)", &["json"])
+        .set_file_name("zapret-backup.json")
+        .save_file();
+
+    if let Some(path) = file_path {
+        std::fs::write(&path, content)
+            .map_err(|e| format!("Не удалось сохранить файл резервной копии: {}", e))?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+/// Imports all lists (include, exclude, ips) from a JSON backup file
+#[tauri::command]
+fn import_backup_file() -> Result<bool, String> {
+    let file_path = rfd::FileDialog::new()
+        .set_title("Восстановить резервную копию...")
+        .add_filter("JSON Files (*.json)", &["json"])
+        .pick_file();
+
+    if let Some(path) = file_path {
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| format!("Не удалось прочитать файл резервной копии: {}", e))?;
+
+        let backup: BackupData = serde_json::from_str(&content)
+            .map_err(|e| format!("Неверный формат файла резервной копии: {}", e))?;
+
+        write_user_list("list-general-user.txt".to_string(), backup.include)?;
+        write_user_list("list-exclude-user.txt".to_string(), backup.exclude)?;
+        write_user_list("ipset-exclude-user.txt".to_string(), backup.ips)?;
+
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
 /// Updates the IPSet list from remote source (same as service.bat)
 #[tauri::command]
 async fn update_ipset_list() -> Result<String, String> {
@@ -1571,6 +1636,7 @@ async fn download_and_install_update(
     use_proxy: Option<bool>,
     custom_proxy: Option<String>,
 ) -> Result<String, String> {
+    let filters_status = get_filters_status();
     let dir = find_binaries_dir();
     let temp_dir = std::env::temp_dir().join("zapret_update");
 
@@ -1740,6 +1806,10 @@ async fn download_and_install_update(
             let _ = std::fs::copy(entry.path(), new_lists_dir.join(entry.file_name()));
         }
     }
+
+    // Restore settings after update
+    let _ = set_game_filter(filters_status.game_filter);
+    let _ = set_ipset_filter(filters_status.ipset);
 
     let _ = std::fs::remove_dir_all(&temp_dir);
     window.emit("download-progress", 100).ok();
@@ -3049,6 +3119,8 @@ pub fn run() {
             add_to_user_list,
             remove_from_user_list,
             save_user_list_to_file,
+            export_backup_file,
+            import_backup_file,
             update_ipset_list,
             get_remote_core_version,
             download_and_install_update,

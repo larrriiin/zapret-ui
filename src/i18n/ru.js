@@ -183,11 +183,17 @@ export default {
     "close_confirm_title": "Закрытие Zapret",
     "close_confirm_body": "Что сделать?",
     "close_confirm_tray": "Свернуть в трей",
-    "close_confirm_exit": "Закрыть приложение",
+    "close_confirm_exit": "Закрывать приложение",
     "close_confirm_remember": "Запомнить выбор",
-    "cancel": "Отмена",
     "search_strategies": "Поиск стратегий...",
     "favorites": "Избранные",
     "toggle_favorite": "В избранное",
-    "no_results": "Нет результатов"
+    "no_results": "Нет результатов",
+    "clear_btn": "Очистить",
+    "search_placeholder": "Поиск по списку...",
+    "confirm_clear": "Вы уверены, что хотите полностью очистить этот список? Это действие нельзя отменить.",
+    "confirm_backup_restore": "Вы уверены, что хотите восстановить резервную копию? Это полностью перезапишет текущие списки сайтов и исключений IP.",
+    "duplicate_warning": "Уже в списке",
+    "backup_export_btn": "Создать бэкап",
+    "backup_import_btn": "Восстановить бэкап"
 };

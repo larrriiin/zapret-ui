@@ -5,41 +5,7 @@
     <meta charset="utf-8" />
     <meta content="width=device-width, initial-scale=1.0" name="viewport" />
     <title>Zapret_ VPN</title>
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap&subset=cyrillic,latin"
-        rel="stylesheet" />
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
-        rel="stylesheet" />
-    <script id="tailwind-config">
-        tailwind.config = {
-            darkMode: "class",
-            theme: {
-                extend: {
-                    "colors": {
-                        "primary": "#ba9eff",
-                        "primary-dim": "#8455ef",
-                        "on-primary": "#39008c",
-                        "secondary": "#53ddfc",
-                        "tertiary": "#ec63ff",
-                        "background": "#070d1f",
-                        "surface": "#070d1f",
-                        "on-background": "#dfe4fe",
-                        "on-surface": "#dfe4fe",
-                        "on-surface-variant": "#a5aac2",
-                        "outline-variant": "#41475b",
-                        "surface-container-high": "#171f36",
-                        "surface-container-highest": "#1c253e",
-                        "error-dim": "#d73357"
-                    },
-                    "fontFamily": {
-                        "headline": ["Inter"],
-                        "body": ["Inter"]
-                    }
-                },
-            },
-        }
-    </script>
+
     <style>
         .material-symbols-outlined {
             font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
@@ -224,15 +190,15 @@
                     <div class="text-xs text-on-surface-variant/70 mb-2" data-i18n="close_pref_label">When the close button is clicked:</div>
                     <div class="flex flex-col gap-1">
                         <label class="flex items-center gap-2 text-xs text-on-surface cursor-pointer px-2 py-1.5 rounded hover:bg-primary/10">
-                            <input type="radio" name="close-pref" value="ask" class="accent-primary">
+                            <input type="radio" name="close-pref" value="ask" class="border-outline-variant/30 bg-surface-container-highest text-primary focus:ring-primary focus:ring-offset-background h-4 w-4">
                             <span data-i18n="close_pref_ask">Ask every time</span>
                         </label>
                         <label class="flex items-center gap-2 text-xs text-on-surface cursor-pointer px-2 py-1.5 rounded hover:bg-primary/10">
-                            <input type="radio" name="close-pref" value="tray" class="accent-primary">
+                            <input type="radio" name="close-pref" value="tray" class="border-outline-variant/30 bg-surface-container-highest text-primary focus:ring-primary focus:ring-offset-background h-4 w-4">
                             <span data-i18n="close_pref_tray">Minimize to tray</span>
                         </label>
                         <label class="flex items-center gap-2 text-xs text-on-surface cursor-pointer px-2 py-1.5 rounded hover:bg-primary/10">
-                            <input type="radio" name="close-pref" value="exit" class="accent-primary">
+                            <input type="radio" name="close-pref" value="exit" class="border-outline-variant/30 bg-surface-container-highest text-primary focus:ring-primary focus:ring-offset-background h-4 w-4">
                             <span data-i18n="close_pref_exit">Exit application</span>
                         </label>
                     </div>
