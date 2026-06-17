@@ -1,6 +1,6 @@
 [package]
 name = "zapret-ui"
-version = "26.6.3"
+version = "26.6.4"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"

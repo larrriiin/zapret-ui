@@ -30,6 +30,7 @@ import { initDiagnostics } from './features/diagnostics.js';
 import { initWizard } from './features/wizard.js';
 import { initFirstRun, maybeShowFirstRun } from './features/firstrun.js';
 import { initStatusCheck } from './features/status-check.js';
+import { initPrank } from './features/prank.js';
 
 // Mount HTML fragments synchronously so `[data-i18n]` elements are already in
 // the DOM when Tailwind's CDN JIT observer and i18n engine run over them.
@@ -72,6 +73,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   initWizard();
   initFirstRun();
   initStatusCheck();
+  initPrank();
 
   // Global restart-related buttons (live in top-level modals/banner).
   $('lang-switcher')?.addEventListener('click', toggleLanguage);
