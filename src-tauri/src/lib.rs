@@ -32,7 +32,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri_plugin_notification::NotificationExt;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
-static PRANK_WINDOW_STATE: Mutex<Option<(bool, bool, bool)>> = Mutex::new(None);
 const GITHUB_VERSION_URL: &str =
     "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt";
 const GITHUB_RELEASE_API: &str =
@@ -2865,26 +2864,6 @@ fn refresh_tray_menu(app: &tauri::AppHandle) {
 }
 
 #[tauri::command]
-fn close_prank(app: tauri::AppHandle) {
-    if let Some(main_window) = app.get_webview_window("main") {
-        let mut state_opt = None;
-        if let Ok(mut lock) = PRANK_WINDOW_STATE.lock() {
-            state_opt = lock.take();
-        }
-        if let Some((was_minimized, was_visible, was_fullscreen)) = state_opt {
-            if !was_fullscreen {
-                let _ = main_window.set_fullscreen(false);
-            }
-            if was_minimized {
-                let _ = main_window.minimize();
-            } else if !was_visible {
-                let _ = main_window.hide();
-            }
-        }
-    }
-}
-
-#[tauri::command]
 fn exit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
@@ -3077,63 +3056,6 @@ pub fn run() {
                 refresh_tray_menu(app.handle());
             }
 
-            // ─── EASTER EGG JOKE FEATURE (PROCESS POLLING THREAD) ───────────
-            #[cfg(windows)]
-            {
-                let app_handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    let targets = [
-                        "LeagueClient.exe",
-                        "League of Legends.exe",
-                        "LeagueClientUx.exe",
-                        "dota2.exe",
-                        "cs2.exe",
-                    ];
-                    loop {
-                        std::thread::sleep(std::time::Duration::from_secs(3));
-                        
-                        let mut is_running = false;
-                        for &process_name in &targets {
-                            let output = Command::new(system32_tool("tasklist.exe"))
-                                .args(["/fi", &format!("IMAGENAME eq {}", process_name), "/fo", "csv", "/nh"])
-                                .creation_flags(CREATE_NO_WINDOW)
-                                .output();
-                            match output {
-                                Ok(out) => {
-                                    let stdout = String::from_utf8_lossy(&out.stdout).to_lowercase();
-                                    if stdout.contains(&process_name.to_lowercase()) {
-                                        is_running = true;
-                                        break;
-                                    }
-                                }
-                                Err(_) => {}
-                            }
-                        }
-
-                        if is_running {
-                            if let Some(main_window) = app_handle.get_webview_window("main") {
-                                let was_minimized = main_window.is_minimized().unwrap_or(false);
-                                let was_visible = main_window.is_visible().unwrap_or(true);
-                                let was_fullscreen = main_window.is_fullscreen().unwrap_or(false);
-
-                                if let Ok(mut lock) = PRANK_WINDOW_STATE.lock() {
-                                    *lock = Some((was_minimized, was_visible, was_fullscreen));
-                                }
-
-                                // Bring to front and go fullscreen
-                                let _ = main_window.show();
-                                let _ = main_window.unminimize();
-                                let _ = main_window.set_focus();
-                                let _ = main_window.set_fullscreen(true);
-
-                                let _ = app_handle.emit("game-started", ());
-                            }
-                            break;
-                        }
-                    }
-                });
-            }
-
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -3183,7 +3105,6 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            close_prank,
             get_strategies,
             get_local_version_cmd,
             get_ui_version_cmd,
