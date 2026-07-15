@@ -416,6 +416,90 @@ async fn fetch_expected_sha256(version: &str, asset_name: &str) -> Result<String
     Ok(hex.to_ascii_lowercase())
 }
 
+#[derive(Clone, Debug)]
+pub struct SfReleaseInfo {
+    pub version: String,
+    pub download_url: String,
+    pub md5sum: String,
+}
+
+pub async fn fetch_sf_release_info(client: &reqwest::Client) -> Result<SfReleaseInfo, String> {
+    let sf_url = "https://sourceforge.net/projects/zapret-discord-youtube.mirror/best_release.json";
+    let response = client
+        .get(sf_url)
+        .header("Cache-Control", "no-cache")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send SourceForge request: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("SourceForge returned status: {}", response.status()));
+    }
+    
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse SourceForge JSON: {}", e))?;
+
+    // Try to get from platform_releases.windows, otherwise release
+    let windows_release = body.get("platform_releases")
+        .and_then(|pr| pr.get("windows"));
+
+    let release_obj = windows_release.unwrap_or_else(|| {
+        body.get("release").unwrap_or(&serde_json::Value::Null)
+    });
+
+    if release_obj.is_null() {
+        return Err("No release information found in SourceForge JSON".to_string());
+    }
+
+    let filename = release_obj.get("filename")
+        .and_then(|f| f.as_str())
+        .ok_or_else(|| "Missing filename in SourceForge JSON".to_string())?;
+
+    let download_url = release_obj.get("url")
+        .and_then(|u| u.as_str())
+        .ok_or_else(|| "Missing url in SourceForge JSON".to_string())?;
+
+    let md5sum = release_obj.get("md5sum")
+        .and_then(|m| m.as_str())
+        .ok_or_else(|| "Missing md5sum in SourceForge JSON".to_string())?;
+
+    let parts: Vec<&str> = filename.split('/').filter(|s| !s.is_empty()).collect();
+    let version = if let Some(first_part) = parts.first() {
+        first_part.to_string()
+    } else {
+        return Err("Failed to parse version from SourceForge filename".to_string());
+    };
+
+    Ok(SfReleaseInfo {
+        version,
+        download_url: download_url.to_string(),
+        md5sum: md5sum.to_string(),
+    })
+}
+
+/// Computes the MD5 digest of a file as a lowercase hex string.
+pub fn md5_file(path: &std::path::Path) -> Result<String, String> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
+    let mut context = md5::Context::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+        if n == 0 {
+            break;
+        }
+        context.consume(&buf[..n]);
+    }
+    let digest = context.compute();
+    Ok(format!("{:x}", digest))
+}
+
 /// On Windows, `std::fs::canonicalize` returns the verbatim/extended-length
 /// form (e.g. `\\?\C:\foo\bar`). That form is fine for Rust's file APIs but
 /// breaks `cmd.exe` and downstream `.bat` scripts, which refuse to use it as
@@ -606,14 +690,35 @@ async fn get_remote_core_version(
     }
 
     let client = client_builder.build().map_err(|e| e.to_string())?;
-    let response = client
+    
+    let response_res = client
         .get("https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt")
         .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    
-    let text = response.text().await.map_err(|e| e.to_string())?;
-    Ok(text.trim().to_string())
+        .await;
+
+    match response_res {
+        Ok(resp) => {
+            let status = resp.status();
+            if status.is_success() {
+                if let Ok(text) = resp.text().await {
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() && !trimmed.contains("Not Found") {
+                        return Ok(trimmed.to_string());
+                    }
+                }
+            }
+            if let Ok(info) = fetch_sf_release_info(&client).await {
+                return Ok(info.version);
+            }
+            Err(format!("GitHub returned status {} and SourceForge fallback failed", status))
+        }
+        Err(e) => {
+            if let Ok(info) = fetch_sf_release_info(&client).await {
+                return Ok(info.version);
+            }
+            Err(format!("Failed to connect to GitHub ({}) and SourceForge fallback failed", e))
+        }
+    }
 }
 
 fn get_ui_version() -> String {
@@ -1676,23 +1781,45 @@ async fn download_and_install_update(
     }
     let client = client_builder.build().map_err(|e| format!("Failed to build http client: {}", e))?;
 
-    // Fetch version
-    let latest_version = client
-        .get(GITHUB_VERSION_URL)
-        .header("Cache-Control", "no-cache")
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch version: {}", e))?
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read version: {}", e))?
-        .trim()
-        .to_string();
+    // Fetch version from GitHub with fallback to SourceForge
+    let mut fetched_from_sf = false;
+    let mut sf_info: Option<SfReleaseInfo> = None;
+
+    let latest_version = match client.get(GITHUB_VERSION_URL).header("Cache-Control", "no-cache").send().await {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.text().await {
+                Ok(text) => {
+                    let trimmed = text.trim().to_string();
+                    if !trimmed.is_empty() && !trimmed.contains("Not Found") {
+                        trimmed
+                    } else {
+                        fetched_from_sf = true;
+                        let info = fetch_sf_release_info(&client).await?;
+                        let version = info.version.clone();
+                        sf_info = Some(info);
+                        version
+                    }
+                }
+                Err(_) => {
+                    fetched_from_sf = true;
+                    let info = fetch_sf_release_info(&client).await?;
+                    let version = info.version.clone();
+                    sf_info = Some(info);
+                    version
+                }
+            }
+        }
+        _ => {
+            fetched_from_sf = true;
+            let info = fetch_sf_release_info(&client).await?;
+            let version = info.version.clone();
+            sf_info = Some(info);
+            version
+        }
+    };
 
     window.emit("download-progress", 10).ok();
 
-    // Download update
-    let download_url = format!("https://github.com/Flowseal/zapret-discord-youtube/releases/download/{}/zapret-discord-youtube-{}.zip", latest_version, latest_version);
     let zip_path = temp_dir.join("update.zip");
 
     use std::sync::{
@@ -1716,19 +1843,57 @@ async fn download_and_install_update(
         }
     });
 
-    let response = client
-        .get(&download_url)
-        .send()
-        .await
-        .map_err(|e| {
-            done_flag.store(true, Ordering::Relaxed);
-            format!("Download failed: {}", e)
-        })?;
+    // 1. Try downloading from GitHub
+    let mut response = None;
+    let mut downloaded_from_sf = false;
 
-    if !response.status().is_success() {
-        done_flag.store(true, Ordering::Relaxed);
-        return Err(format!("Download failed with status: {}", response.status()));
+    if !fetched_from_sf {
+        let github_url = format!("https://github.com/Flowseal/zapret-discord-youtube/releases/download/{}/zapret-discord-youtube-{}.zip", latest_version, latest_version);
+        if let Ok(resp) = client.get(&github_url).send().await {
+            if resp.status().is_success() {
+                response = Some(resp);
+            }
+        }
     }
+
+    // 2. If GitHub failed or wasn't tried, try SourceForge
+    if response.is_none() {
+        // Ensure we have SF info loaded
+        let info = match sf_info {
+            Some(i) => i,
+            None => fetch_sf_release_info(&client).await?,
+        };
+
+        // Try downloading from the direct SourceForge URL
+        match client.get(&info.download_url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                response = Some(resp);
+                downloaded_from_sf = true;
+                sf_info = Some(info);
+            }
+            _ => {
+                // Also try downloading from the generic latest URL user requested as fallback
+                let generic_url = "https://sourceforge.net/projects/zapret-discord-youtube.mirror/files/latest/download";
+                match client.get(generic_url).send().await {
+                    Ok(resp) if resp.status().is_success() => {
+                        response = Some(resp);
+                        downloaded_from_sf = true;
+                        sf_info = Some(info);
+                    }
+                    Ok(resp) => {
+                        done_flag.store(true, Ordering::Relaxed);
+                        return Err(format!("SourceForge download failed with status: {}", resp.status()));
+                    }
+                    Err(e) => {
+                        done_flag.store(true, Ordering::Relaxed);
+                        return Err(format!("Failed to download from both GitHub and SourceForge. SF error: {}", e));
+                    }
+                }
+            }
+        }
+    }
+
+    let response = response.unwrap();
 
     use futures_util::StreamExt;
     let mut file = std::fs::File::create(&zip_path).map_err(|e| {
@@ -1759,20 +1924,31 @@ async fn download_and_install_update(
         return Err("Download failed: output file not found".to_string());
     }
 
-    // Verify the downloaded archive against the SHA-256 digest published by
-    // GitHub for this release asset. If verification fails we delete the file
-    // and abort — we must never extract an archive whose integrity is in
-    // question, because its contents are executed as part of the bypass
-    // toolchain with elevated privileges.
-    let asset_name = format!("zapret-discord-youtube-{}.zip", latest_version);
-    let expected_sha256 = fetch_expected_sha256(&latest_version, &asset_name).await?;
-    let actual_sha256 = sha256_file(&zip_path)?;
-    if actual_sha256 != expected_sha256 {
-        let _ = std::fs::remove_file(&zip_path);
-        return Err(format!(
-            "Checksum mismatch for {}: expected {}, got {}",
-            asset_name, expected_sha256, actual_sha256
-        ));
+    // Verify integrity of downloaded archive
+    if downloaded_from_sf {
+        if let Some(info) = sf_info {
+            let actual_md5 = md5_file(&zip_path)?;
+            if actual_md5 != info.md5sum.to_ascii_lowercase() {
+                let _ = std::fs::remove_file(&zip_path);
+                return Err(format!(
+                    "Checksum mismatch (MD5) for SourceForge download: expected {}, got {}",
+                    info.md5sum, actual_md5
+                ));
+            }
+        } else {
+            return Err("Downloaded from SourceForge but release metadata is missing".to_string());
+        }
+    } else {
+        let asset_name = format!("zapret-discord-youtube-{}.zip", latest_version);
+        let expected_sha256 = fetch_expected_sha256(&latest_version, &asset_name).await?;
+        let actual_sha256 = sha256_file(&zip_path)?;
+        if actual_sha256 != expected_sha256 {
+            let _ = std::fs::remove_file(&zip_path);
+            return Err(format!(
+                "Checksum mismatch (SHA-256) for {}: expected {}, got {}",
+                asset_name, expected_sha256, actual_sha256
+            ));
+        }
     }
 
     // Extraction
