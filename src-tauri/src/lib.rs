@@ -1400,14 +1400,7 @@ try {{
     Ok("Connected".into())
 }
 
-/// Полностью останавливает zapret.
-/// Требует прав администратора — запрашивает их через PowerShell -Verb RunAs.
-#[tauri::command]
-fn stop_zapret(state: State<'_, AppState>) {
-    // Скрипт остановки передаётся elevated-повершеллу через -EncodedCommand
-    // (см. start_zapret — та же TOCTOU-защита). Никакого промежуточного
-    // `.bat` в `%TEMP%` больше не пишем: подменить payload между write и
-    // elevated-exec под нашим UID больше нельзя.
+fn stop_zapret_internal() -> Result<(), String> {
     let ps_script = r#"$ErrorActionPreference = 'Continue'
 $sys = "$env:SystemRoot\System32"
 try { Stop-Service -Name zapret -Force -ErrorAction SilentlyContinue } catch {}
@@ -1423,7 +1416,7 @@ foreach ($svc in @('WinDivert','WinDivert14')) {
 }
 "#;
     let encoded = encode_powershell_command(ps_script);
-    let _ = Command::new(powershell_path())
+    let status = Command::new(powershell_path())
         .args([
             "-NoProfile",
             "-WindowStyle",
@@ -1433,8 +1426,20 @@ foreach ($svc in @('WinDivert','WinDivert14')) {
         ])
         .env("ZAPRET_PS_PAYLOAD", &encoded)
         .creation_flags(CREATE_NO_WINDOW)
-        .output();
+        .status();
 
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(format!("PowerShell process exited with status: {}", s)),
+        Err(e) => Err(format!("Failed to start PowerShell: {}", e)),
+    }
+}
+
+/// Полностью останавливает zapret.
+/// Требует прав администратора — запрашивает их через PowerShell -Verb RunAs.
+#[tauri::command]
+fn stop_zapret(state: State<'_, AppState>) {
+    let _ = stop_zapret_internal();
     *state.active_strategy.lock_unpoisoned() = None;
 }
 
@@ -1741,6 +1746,9 @@ async fn download_and_install_update(
     use_proxy: Option<bool>,
     custom_proxy: Option<String>,
 ) -> Result<String, String> {
+    // Stop the zapret service and processes to release file locks before update
+    let _ = stop_zapret_internal();
+
     let filters_status = get_filters_status();
     let dir = find_binaries_dir();
     let temp_dir = std::env::temp_dir().join("zapret_update");
@@ -2002,18 +2010,23 @@ fn copy_dir_contents(src: &std::path::Path, dst: &std::path::Path) -> Result<(),
         let dest_path = dst.join(&file_name);
 
         if path.is_dir() {
-            let _ = std::fs::create_dir_all(&dest_path);
-            let _ = copy_dir_contents(&path, &dest_path);
+            std::fs::create_dir_all(&dest_path).map_err(|e| format!("Failed to create directory {:?}: {}", dest_path, e))?;
+            copy_dir_contents(&path, &dest_path)?;
         } else {
-            if std::fs::copy(&path, &dest_path).is_err() {
+            if let Err(e) = std::fs::copy(&path, &dest_path) {
                 // If it fails (likely due to lock), try to rename the locked destination file first
                 let mut old_path = dest_path.clone();
                 let new_name = format!("{}.old", file_name.to_str().unwrap_or("locked"));
                 old_path.set_file_name(new_name);
-                let _ = std::fs::rename(&dest_path, &old_path); // ignore rename errors
+                
+                if std::fs::rename(&dest_path, &old_path).is_err() {
+                    return Err(format!("Failed to copy file {:?} to {:?}: {}", path, dest_path, e));
+                }
 
-                // Attempt copy again
-                let _ = std::fs::copy(&path, &dest_path);
+                // Attempt copy again after rename
+                std::fs::copy(&path, &dest_path).map_err(|e2| {
+                    format!("Failed to copy file {:?} to {:?} after renaming: {}", path, dest_path, e2)
+                })?;
             }
         }
     }
