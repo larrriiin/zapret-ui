@@ -1,12 +1,12 @@
 [Русский](#russian) | [English](#english)
 
+Проект сделан на основе проекта Flowseal - https://github.com/Flowseal/zapret-discord-youtube
+
 <a name="russian"></a>
 ## Описание (RU)
 **Zapret UI** — это современный графический интерфейс для утилиты `zapret`, предназначенной для обхода систем анализа трафика (DPI). Приложение упрощает настройку и управление службой, позволяя легко переключать стратегии, редактировать списки доменов и следить за состоянием сервиса.
 
-<img width="1086" height="741" alt="image" src="https://github.com/user-attachments/assets/d529bf11-b531-4b5d-87c2-eec62edafd19" />
-<img width="1094" height="742" alt="image" src="https://github.com/user-attachments/assets/3374dbdb-05b2-42ee-a2f0-2dc0168d229c" />
-
+<img width="1093" height="745" alt="image" src="https://github.com/user-attachments/assets/2483e948-f351-40f2-ac62-fe23b7f40b2c" />
 
 ### Основные возможности
 - **Управление службой**: Запуск zapret как полноценного Windows-сервиса или в режиме временного процесса.
