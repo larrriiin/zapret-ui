@@ -195,7 +195,7 @@ async function checkForUpdates(manual = false) {
 
   if (manual && checkUpdatesBtn) {
     checkUpdatesBtn.disabled = true;
-    checkUpdatesBtn.innerHTML = `<span class="material-symbols-outlined text-sm animate-spin">refresh</span> ${t('updating')}`;
+    checkUpdatesBtn.innerHTML = `<span class="material-symbols-outlined text-base animate-spin">refresh</span>`;
   }
 
   try {
@@ -231,7 +231,7 @@ async function checkForUpdates(manual = false) {
   } finally {
     if (manual && checkUpdatesBtn) {
       checkUpdatesBtn.disabled = false;
-      checkUpdatesBtn.innerHTML = `<span class="material-symbols-outlined text-sm">update</span> <span data-i18n="check_updates">${t('check_updates')}</span>`;
+      checkUpdatesBtn.innerHTML = `<span class="material-symbols-outlined text-base">update</span>`;
     }
   }
 }

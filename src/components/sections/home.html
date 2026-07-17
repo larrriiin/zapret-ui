@@ -4,14 +4,22 @@
     <section
         class="relative h-[360px] flex flex-col items-center justify-center rounded-3xl overflow-hidden bg-surface-container-low/30 border border-outline-variant/10">
         <div class="absolute inset-0 bg-gradient-to-b from-[#ba9eff]/5 to-transparent z-0"></div>
+        
+        <!-- Dotted Globe Background Graphic -->
+        <div class="absolute right-[-150px] top-[-70px] h-[550px] opacity-30 pointer-events-none z-0 select-none mix-blend-screen overflow-hidden"
+             style="mask-image: linear-gradient(to left, black 5%, transparent 50%); -webkit-mask-image: linear-gradient(to left, black 5%, transparent 50%);">
+            <img src="./assets/globe.png" class="w-full h-full object-contain filter brightness-110" alt="Globe Graphic">
+        </div>
 
         <div class="relative z-10 flex flex-col items-center text-center w-full max-w-md px-6">
-            <h2 class="font-headline text-3xl font-black text-on-background tracking-tighter mb-6 uppercase whitespace-nowrap">
+            <h2 class="font-headline text-3xl font-black text-on-background tracking-tighter mb-3 uppercase whitespace-nowrap">
                 <span id="hero-status" class="text-error-dim" data-i18n="status_disconnected">Disconnected</span>
             </h2>
+            <!-- Gradient divider under status -->
+            <div class="mb-5 mx-auto" style="width:96px; height:4px; border-radius:99px; background: linear-gradient(90deg, transparent 0%, #ba9eff 40%, #7c6dff 60%, transparent 100%); box-shadow: 0 0 12px #ba9eff88;"></div>
 
-            <div class="w-full space-y-3 mb-8 text-left">
-                <h3 class="font-headline text-[10px] font-bold uppercase tracking-[0.2em] text-primary/70 ml-2" data-i18n="routing_strategy">
+            <div class="w-full space-y-3 mb-2 text-left">
+                <h3 class="font-headline text-[10px] font-bold uppercase tracking-[0.2em] text-primary/70 text-center" data-i18n="routing_strategy">
                     Routing Strategy</h3>
                 <!-- Custom dropdown -->
                 <div id="strategy-dropdown" class="relative">
@@ -33,7 +41,7 @@
                         <div class="px-3 py-2 border-b border-outline-variant/10 flex items-center gap-2">
                             <span class="material-symbols-outlined text-primary/60 text-base">search</span>
                             <input id="strategy-search" type="text" autocomplete="off" spellcheck="false"
-                                class="flex-1 bg-transparent text-sm text-on-surface placeholder-on-surface-variant/50 focus:outline-none"
+                                class="flex-1 bg-transparent text-sm text-on-surface placeholder-on-surface-variant/50 outline-none border-none ring-0 focus:outline-none focus:ring-0"
                                 data-i18n="search_strategies" data-i18n-attr="placeholder" placeholder="Search strategies..." />
                         </div>
                         <div id="strategy-options-list" class="max-h-64 overflow-y-auto py-1">
@@ -43,7 +51,7 @@
                 </div>
             </div>
 
-            <div class="flex flex-col gap-2 w-full px-4">
+            <div class="flex flex-col gap-2 w-full">
                 <button id="connect-btn" data-action="start" data-mode="service"
                     class="group relative w-full py-4 bg-primary rounded-2xl transition-all duration-300 hover:scale-[1.02] hover:shadow-[0_0_40px_rgba(186,158,255,0.3)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">
                     <span
@@ -92,13 +100,13 @@
             </div>
             <div class="grid grid-cols-2 gap-3">
                 <div id="ipset-loaded"
-                    class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
+                    class="glass-panel py-5 px-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
                     <span class="material-symbols-outlined text-primary text-xl">download_done</span>
                     <span
                         class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant" data-i18n="loaded">Loaded</span>
                 </div>
                 <div id="ipset-any"
-                    class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
+                    class="glass-panel py-5 px-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
                     <span class="material-symbols-outlined text-secondary text-xl">all_inclusive</span>
                     <span
                         class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant" data-i18n="any">Any</span>
@@ -121,20 +129,20 @@
             </div>
             <div class="grid grid-cols-3 gap-3">
                 <div id="game-all"
-                    class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
+                    class="glass-panel py-5 px-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
                     <span class="material-symbols-outlined text-primary text-xl">Layers</span>
                     <span
                         class="text-[10px] font-bold uppercase tracking-tighter text-on-surface-variant text-center leading-none">TCP
                         + UDP</span>
                 </div>
                 <div id="game-tcp"
-                    class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
+                    class="glass-panel py-5 px-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
                     <span class="material-symbols-outlined text-secondary text-xl">terminal</span>
                     <span
                         class="text-[10px] font-bold uppercase tracking-tighter text-on-surface-variant">TCP</span>
                 </div>
                 <div id="game-udp"
-                    class="glass-panel p-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
+                    class="glass-panel py-5 px-4 rounded-2xl border border-primary/10 flex flex-col items-center gap-2 hover:border-primary/40 transition-colors cursor-pointer">
                     <span class="material-symbols-outlined text-tertiary text-xl">router</span>
                     <span
                         class="text-[10px] font-bold uppercase tracking-tighter text-on-surface-variant" data-i18n="udp">UDP</span>

@@ -6401,7 +6401,7 @@ dependencies = [
 
 [[package]]
 name = "zapret-ui"
-version = "26.7.1"
+version = "26.7.2"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
@@ -6418,6 +6418,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tokio",
  "zip 8.5.1",
 ]
 

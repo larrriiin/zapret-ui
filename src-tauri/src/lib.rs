@@ -51,6 +51,7 @@ struct AppState {
     notification_shown: AtomicBool,
     last_strategy: Mutex<Option<String>>,
     translations: Mutex<Option<TrayTranslations>>,
+    temp_process_child: Mutex<Option<std::process::Child>>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Clone)]
@@ -823,6 +824,30 @@ fn parse_bat_args(strategy: &str) -> Result<String, String> {
     Ok(final_args.trim().to_string())
 }
 
+/// Splits a command-line arguments string into separate arguments, respecting double quotes
+fn split_arguments(s: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '"' {
+            in_quotes = !in_quotes;
+        } else if c.is_whitespace() && !in_quotes {
+            if !current.is_empty() {
+                args.push(current.clone());
+                current.clear();
+            }
+        } else {
+            current.push(c);
+        }
+    }
+    if !current.is_empty() {
+        args.push(current);
+    }
+    args
+}
+
 /// Проверяет, запущен ли winws.exe через tasklist.
 fn is_zapret_service_running() -> bool {
     let output = Command::new(system32_tool("sc.exe"))
@@ -1240,6 +1265,7 @@ fn set_ipset_filter(mode: String) -> Result<(), String> {
 /// Запускает стратегию по имени .bat файла.
 #[tauri::command]
 fn start_zapret(
+    _app: tauri::AppHandle,
     strategy: String,
     mode: String,
     state: State<'_, AppState>,
@@ -1381,18 +1407,26 @@ try {{
             }
         }
     } else {
-        let bat_str = bat_path
-            .to_str()
-            .ok_or("Невалидный путь к bat-файлу")?
-            .to_string();
+        let bin_path = dir.join("bin").join("winws.exe");
+        if !bin_path.exists() {
+            return Err("winws.exe not found".to_string());
+        }
 
-        let mut cmd = Command::new("cmd");
-        cmd.args(["/c", &bat_str]);
+        let args_str = parse_bat_args(&strategy)?;
+        let args = split_arguments(&args_str);
+
+        let mut cmd = Command::new(&bin_path);
+        cmd.args(&args);
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::null());
         #[cfg(windows)]
         cmd.creation_flags(CREATE_NO_WINDOW);
 
-        cmd.spawn()
-            .map_err(|e| format!("Не удалось запустить стратегию: {}", e))?;
+        let child = cmd
+            .spawn()
+            .map_err(|e| format!("Не удалось запустить winws.exe напрямую: {}", e))?;
+
+        *state.temp_process_child.lock_unpoisoned() = Some(child);
     }
 
     *state.active_strategy.lock_unpoisoned() = Some(strategy.clone());
@@ -1439,6 +1473,12 @@ foreach ($svc in @('WinDivert','WinDivert14')) {
 /// Требует прав администратора — запрашивает их через PowerShell -Verb RunAs.
 #[tauri::command]
 fn stop_zapret(state: State<'_, AppState>) {
+    {
+        let mut child_lock = state.temp_process_child.lock_unpoisoned();
+        if let Some(mut child) = child_lock.take() {
+            let _ = child.kill();
+        }
+    }
     let _ = stop_zapret_internal();
     *state.active_strategy.lock_unpoisoned() = None;
 }
@@ -2495,6 +2535,87 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     })
 }
 
+#[derive(serde::Serialize)]
+struct SiteCheckResult {
+    domain: String,
+    dns_resolved_ips: Vec<String>,
+    dns_status: String,
+    dns_message: String,
+    http_status: String,
+    http_code: Option<u16>,
+    http_message: String,
+    ping_ms: Option<u32>,
+    is_zapret_running: bool,
+}
+
+#[tauri::command]
+async fn check_site(domain: String, state: State<'_, AppState>) -> Result<SiteCheckResult, String> {
+    let domain_clean = domain
+        .trim()
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .to_string();
+
+    if domain_clean.is_empty() {
+        return Err("Empty domain".to_string());
+    }
+
+    let status = get_zapret_status(state);
+    let zapret_running = status.running;
+
+    // 1. DNS Resolution
+    let dns_result = tokio::net::lookup_host(format!("{}:443", domain_clean)).await;
+    let mut ips = Vec::new();
+    let (dns_status, dns_message) = match dns_result {
+        Ok(addrs) => {
+            for addr in addrs {
+                let socket_addr: std::net::SocketAddr = addr;
+                let ip_str = socket_addr.ip().to_string();
+                if !ips.contains(&ip_str) {
+                    ips.push(ip_str);
+                }
+            }
+            if ips.is_empty() {
+                ("error".to_string(), "No IP addresses resolved".to_string())
+            } else {
+                ("ok".to_string(), format!("Resolved {} IPs", ips.len()))
+            }
+        }
+        Err(e) => ("error".to_string(), format!("DNS resolution failed: {}", e)),
+    };
+
+    // 2. TCP connection test (Ping)
+    let mut ping_ms = None;
+    if !ips.is_empty() {
+        let ip = &ips[0];
+        if let Ok(socket_addr) = format!("{}:443", ip).parse::<std::net::SocketAddr>() {
+            let start = std::time::Instant::now();
+            let connect_timeout = std::time::Duration::from_secs(3);
+            if let Ok(Ok(_)) = tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(socket_addr)).await {
+                ping_ms = Some(start.elapsed().as_millis() as u32);
+            }
+        }
+    }
+
+    // 3. HTTPS GET test (moved to frontend JS for accurate browser SNI/TLS/proxy compatibility)
+    let (http_status, http_code, http_message) = ("".to_string(), None, "".to_string());
+
+    Ok(SiteCheckResult {
+        domain: domain_clean,
+        dns_resolved_ips: ips,
+        dns_status,
+        dns_message,
+        http_status,
+        http_code,
+        http_message,
+        ping_ms,
+        is_zapret_running: zapret_running,
+    })
+}
+
 /// Clears Discord cache
 #[tauri::command]
 fn clear_discord_cache() -> Result<String, String> {
@@ -3053,7 +3174,8 @@ fn refresh_tray_menu(app: &tauri::AppHandle) {
 }
 
 #[tauri::command]
-fn exit_app(app: tauri::AppHandle) {
+fn exit_app(app: tauri::AppHandle, state: State<'_, AppState>) {
+    stop_zapret(state);
     app.exit(0);
 }
 
@@ -3099,6 +3221,7 @@ pub fn run() {
             notification_shown: AtomicBool::new(false),
             last_strategy: Mutex::new(None),
             translations: Mutex::new(None),
+            temp_process_child: Mutex::new(None),
         })
         .setup(|app| {
             let is_autostart = std::env::args().any(|a| a == "--autostart");
@@ -3160,6 +3283,8 @@ pub fn run() {
                 .on_menu_event(move |app, event| {
                     match event.id.as_ref() {
                         "quit" => {
+                            let state = app.state::<AppState>();
+                            stop_zapret(state);
                             app.exit(0);
                         }
                         "show" => {
@@ -3186,7 +3311,7 @@ pub fn run() {
                                     .or(status.strategy)
                                     .or_else(|| available.first().cloned());
                                 if let Some(s) = strategy {
-                                    let _ = start_zapret(s, "service".to_string(), state);
+                                    let _ = start_zapret(app.clone(), s, "service".to_string(), state);
                                 }
                             }
                             refresh_tray_menu(app);
@@ -3195,7 +3320,7 @@ pub fn run() {
                             let strategy = &id[6..];
                             let state = app.state::<AppState>();
                             let _ =
-                                start_zapret(strategy.to_string(), "service".to_string(), state);
+                                start_zapret(app.clone(), strategy.to_string(), "service".to_string(), state);
                             refresh_tray_menu(app);
                         }
                         _ => {}
@@ -3325,6 +3450,7 @@ pub fn run() {
             load_test_results,
             update_tray_translations,
             exit_app,
+            check_site,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

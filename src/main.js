@@ -1,7 +1,7 @@
 import './styles.css';
 import { mountComponents } from './components/index.js';
 import { $, invoke } from './lib/core.js';
-import { initI18n, toggleLanguage, onLangChange, syncTrayLocalization } from './lib/i18n.js';
+import { initI18n, toggleLanguage, setLanguage, onLangChange, syncTrayLocalization } from './lib/i18n.js';
 import { state } from './lib/state.js';
 import {
   updateRestartBanner,
@@ -74,7 +74,11 @@ window.addEventListener('DOMContentLoaded', async () => {
   initStatusCheck();
 
   // Global restart-related buttons (live in top-level modals/banner).
-  $('lang-switcher')?.addEventListener('click', toggleLanguage);
+  document.querySelectorAll('input[name="lang-pref"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      if (e.target.checked) setLanguage(e.target.value);
+    });
+  });
 
   $('restart-later')?.addEventListener('click', () => {
     hideRestartModal();
