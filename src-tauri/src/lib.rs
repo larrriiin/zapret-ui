@@ -669,6 +669,11 @@ fn get_local_version() -> String {
 }
 
 #[tauri::command]
+fn get_update_proxy() -> Option<String> {
+    option_env!("ZAPRET_UPDATE_PROXY").map(|s| s.to_string())
+}
+
+#[tauri::command]
 fn get_local_version_cmd() -> String {
     get_local_version()
 }
@@ -3194,6 +3199,7 @@ fn exit_app(app: tauri::AppHandle, state: State<'_, AppState>) {
     app.exit(0);
 }
 
+
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -3437,6 +3443,7 @@ pub fn run() {
             get_strategies,
             get_local_version_cmd,
             get_ui_version_cmd,
+            get_update_proxy,
             get_zapret_status,
             get_filters_status,
             set_game_filter,

@@ -118,6 +118,107 @@
         .section-enter {
             animation: secFadeIn 0.16s ease forwards;
         }
+
+        /* Neon Lamp Divider styles */
+        .status-lamp {
+            width: 96px;
+            height: 4px;
+            border-radius: 99px;
+            margin: 0 auto 20px auto;
+            transition: background 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .status-lamp.is-off {
+            background: rgba(223, 228, 254, 0.08) !important;
+            box-shadow: 0 0 0px transparent !important;
+            opacity: 0.35 !important;
+            transition: background 1.5s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 1.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 1.5s ease !important;
+        }
+
+        .status-lamp.is-on {
+            opacity: 1 !important;
+            animation: neon-spark 0.6s ease-out forwards, neon-glow 28s infinite 0.6s;
+            transition: none !important;
+        }
+
+        @keyframes neon-spark {
+            0% { opacity: 0.1; background: rgba(223, 228, 254, 0.08); box-shadow: none; }
+            10% { opacity: 0.8; background: linear-gradient(90deg, transparent, #ba9eff, transparent); box-shadow: 0 0 15px rgba(186, 158, 255, 0.6); }
+            15% { opacity: 0.2; background: rgba(223, 228, 254, 0.08); box-shadow: none; }
+            25% { opacity: 0.9; background: linear-gradient(90deg, transparent, #53ddfc, transparent); box-shadow: 0 0 25px rgba(83, 221, 252, 0.7); }
+            30% { opacity: 0.3; background: rgba(223, 228, 254, 0.08); box-shadow: none; }
+            45% { opacity: 0.7; background: linear-gradient(90deg, transparent, #ba9eff, transparent); box-shadow: 0 0 15px rgba(186, 158, 255, 0.5); }
+            50% { opacity: 0.2; background: rgba(223, 228, 254, 0.08); box-shadow: none; }
+            65% { opacity: 0.95; background: linear-gradient(90deg, transparent, #53ddfc, #ba9eff, transparent); box-shadow: 0 0 35px rgba(186, 158, 255, 0.8), 0 0 20px rgba(83, 221, 252, 0.5); }
+            70% { opacity: 0.5; background: rgba(223, 228, 254, 0.08); box-shadow: none; }
+            85% { opacity: 1; background: linear-gradient(90deg, transparent, #ba9eff, transparent); box-shadow: 0 0 35px rgba(186, 158, 255, 0.9); }
+            100% { opacity: 1; background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #a27aff 70%, transparent 100%); box-shadow: 0 0 20px rgba(186, 158, 255, 0.8), 0 0 35px rgba(162, 122, 255, 0.4); }
+        }
+
+        @keyframes neon-glow {
+            /* Steady Purple state */
+            0%, 25%, 50%, 70%, 100% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 18px rgba(186, 158, 255, 0.65), 0 0 28px rgba(132, 85, 239, 0.35);
+                opacity: 1;
+            }
+            12%, 37%, 62% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 26px rgba(186, 158, 255, 0.9), 0 0 40px rgba(162, 122, 255, 0.45);
+                opacity: 1;
+            }
+
+            /* 40%: single realistic quick neon double-flicker */
+            40% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 6px rgba(186, 158, 255, 0.25), 0 0 10px rgba(132, 85, 239, 0.1);
+                opacity: 0.55;
+            }
+            40.4% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 22px rgba(186, 158, 255, 0.8);
+                opacity: 0.95;
+            }
+            40.8% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 8px rgba(186, 158, 255, 0.35);
+                opacity: 0.65;
+            }
+            41.5% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 18px rgba(186, 158, 255, 0.65);
+                opacity: 1;
+            }
+
+            /* 75% to 88%: Slow rare drift to cyan/blue and back */
+            75% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 18px rgba(186, 158, 255, 0.65);
+                opacity: 1;
+            }
+            82% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 15%, #53ddfc 80%, transparent 100%);
+                box-shadow: 0 0 24px rgba(186, 158, 255, 0.65), 0 0 35px rgba(83, 221, 252, 0.5);
+                opacity: 1;
+            }
+            88% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 18px rgba(186, 158, 255, 0.65);
+                opacity: 1;
+            }
+            
+            /* 90%: a quick micro-flicker while returning to purple */
+            90% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 5px rgba(186, 158, 255, 0.2);
+                opacity: 0.5;
+            }
+            90.4% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 18px rgba(186, 158, 255, 0.65);
+                opacity: 1;
+            }
+        }
     </style>
 </head>
 

@@ -188,9 +188,28 @@ function showDualUpdateModal(data, manual = false) {
   modal.querySelector('#modal-update-core-btn')?.addEventListener('click', () => downloadAndInstallCoreUpdate().catch(console.error));
 }
 
+async function checkUIUpdateWithFallback() {
+  const { check } = getUpdater();
+  const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), ms));
+  
+  try {
+    return await Promise.race([check(), timeout(5000)]);
+  } catch (err) {
+    console.warn('UI update check failed/timed out without proxy, trying with proxy:', err);
+    try {
+      const proxyUrl = await invoke('get_update_proxy');
+      if (proxyUrl) {
+        return await Promise.race([check({ proxy: proxyUrl }), timeout(8000)]);
+      }
+    } catch (proxyErr) {
+      console.error('UI update check failed/timed out with proxy too:', proxyErr);
+    }
+  }
+  return null;
+}
+
 async function checkForUpdates(manual = false) {
   if (!window.__TAURI__) return;
-  const { check } = getUpdater();
   const checkUpdatesBtn = $('check-updates-btn');
 
   if (manual && checkUpdatesBtn) {
@@ -201,10 +220,7 @@ async function checkForUpdates(manual = false) {
   try {
     const uiLocalVersion = await invoke('get_ui_version_cmd');
     const [uiUpdate, coreRemoteVersion, coreLocalVersion] = await Promise.all([
-      check().catch((err) => {
-        console.warn('UI update check failed (normal in dev):', err);
-        return null;
-      }),
+      checkUIUpdateWithFallback(),
       invoke('get_remote_core_version', { useProxy: false, customProxy: null }).catch(async (err) => {
         try {
           return await invoke('get_remote_core_version', { useProxy: true, customProxy: null });

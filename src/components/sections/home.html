@@ -5,18 +5,13 @@
         class="relative h-[360px] flex flex-col items-center justify-center rounded-3xl overflow-hidden bg-surface-container-low/30 border border-outline-variant/10">
         <div class="absolute inset-0 bg-gradient-to-b from-[#ba9eff]/5 to-transparent z-0"></div>
         
-        <!-- Dotted Globe Background Graphic -->
-        <div class="absolute right-[-150px] top-[-70px] h-[550px] opacity-30 pointer-events-none z-0 select-none mix-blend-screen overflow-hidden"
-             style="mask-image: linear-gradient(to left, black 5%, transparent 50%); -webkit-mask-image: linear-gradient(to left, black 5%, transparent 50%);">
-            <img id="globe-image" src="" class="w-full h-full object-contain filter brightness-110" alt="Globe Graphic">
-        </div>
 
         <div class="relative z-10 flex flex-col items-center text-center w-full max-w-md px-6">
             <h2 class="font-headline text-3xl font-black text-on-background tracking-tighter mb-3 uppercase whitespace-nowrap">
                 <span id="hero-status" class="text-error-dim" data-i18n="status_disconnected">Disconnected</span>
             </h2>
             <!-- Gradient divider under status -->
-            <div class="mb-5 mx-auto" style="width:96px; height:4px; border-radius:99px; background: linear-gradient(90deg, transparent 0%, #ba9eff 40%, #7c6dff 60%, transparent 100%); box-shadow: 0 0 12px #ba9eff88;"></div>
+            <div id="status-lamp-divider" class="status-lamp is-off"></div>
 
             <div class="w-full space-y-3 mb-2 text-left">
                 <h3 class="font-headline text-[10px] font-bold uppercase tracking-[0.2em] text-primary/70 text-center" data-i18n="routing_strategy">

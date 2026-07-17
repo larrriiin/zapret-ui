@@ -1,5 +1,4 @@
 import './styles.css';
-import globeUrl from './assets/globe.png';
 import { mountComponents } from './components/index.js';
 import { $, invoke } from './lib/core.js';
 import { initI18n, toggleLanguage, setLanguage, onLangChange, syncTrayLocalization } from './lib/i18n.js';
@@ -36,11 +35,6 @@ import { initStatusCheck } from './features/status-check.js';
 // the DOM when Tailwind's CDN JIT observer and i18n engine run over them.
 mountComponents();
 
-// Dynamically assign the built asset URL to the globe image so Vite compiles it
-const globeImg = $('globe-image');
-if (globeImg) {
-  globeImg.src = globeUrl;
-}
 
 window.addEventListener('DOMContentLoaded', async () => {
   initI18n();

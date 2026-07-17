@@ -174,6 +174,8 @@ export default {
     "settings": "Settings",
     "autostart_label": "Launch on Windows startup",
     "autostart_hint": "Start minimized to tray",
+    "splashscreen_label": "Show splash screen on startup",
+    "splashscreen_hint": "Play intro video when starting the app",
     "close_pref_label": "When the close button is clicked:",
     "close_pref_ask": "Ask every time",
     "close_pref_tray": "Minimize to tray",

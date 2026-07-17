@@ -174,6 +174,8 @@ export default {
     "settings": "Настройки",
     "autostart_label": "Запускать при старте Windows",
     "autostart_hint": "Запускать свёрнутым в трей",
+    "splashscreen_label": "Показывать заставку при запуске",
+    "splashscreen_hint": "Воспроизводить вступительное видео при запуске",
     "close_pref_label": "При нажатии на крестик:",
     "close_pref_ask": "Спрашивать каждый раз",
     "close_pref_tray": "Сворачивать в трей",
