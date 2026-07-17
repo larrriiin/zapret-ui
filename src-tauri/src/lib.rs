@@ -1483,6 +1483,21 @@ fn stop_zapret(state: State<'_, AppState>) {
     *state.active_strategy.lock_unpoisoned() = None;
 }
 
+fn stop_zapret_on_exit(state: State<'_, AppState>) {
+    {
+        let mut child_lock = state.temp_process_child.lock_unpoisoned();
+        if let Some(mut child) = child_lock.take() {
+            let _ = child.kill();
+            let _ = Command::new(system32_tool("taskkill.exe"))
+                .arg("/F")
+                .arg("/IM")
+                .arg("winws.exe")
+                .creation_flags(CREATE_NO_WINDOW)
+                .output();
+        }
+    }
+}
+
 // ─── User Lists Management ────────────────────────────────────────────────────
 
 /// Reads lines from a file in the lists directory, filtering out comments and empty lines
@@ -3175,7 +3190,7 @@ fn refresh_tray_menu(app: &tauri::AppHandle) {
 
 #[tauri::command]
 fn exit_app(app: tauri::AppHandle, state: State<'_, AppState>) {
-    stop_zapret(state);
+    stop_zapret_on_exit(state);
     app.exit(0);
 }
 
@@ -3284,7 +3299,7 @@ pub fn run() {
                     match event.id.as_ref() {
                         "quit" => {
                             let state = app.state::<AppState>();
-                            stop_zapret(state);
+                            stop_zapret_on_exit(state);
                             app.exit(0);
                         }
                         "show" => {
