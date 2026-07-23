@@ -145,5 +145,71 @@
             </div>
         </section>
 
+    </div><!-- /grid grid-cols-2 -->
+
+    <!-- Fake Replacement Section -->
+    <section class="glass-panel p-6 rounded-3xl border border-outline-variant/10 space-y-4">
+        <div class="flex items-center justify-between px-2 h-6">
+            <div class="flex items-center gap-1.5">
+                <h3 class="font-headline text-xs font-bold uppercase tracking-[0.2em] text-primary/70" data-i18n="fake_packets_title">Фейковые пакеты (UDP)</h3>
+                <button id="fakes-info-btn" class="text-primary/40 hover:text-primary transition-colors flex cursor-pointer">
+                    <span class="material-symbols-outlined text-sm">info</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-8 items-start">
+            <!-- Discord UDP Fake Card -->
+            <div class="glass-panel p-5 rounded-2xl border border-primary/10 space-y-4 hover:border-primary/40 transition-colors relative z-20">
+                <div class="flex items-center gap-3 px-1">
+                    <span class="material-symbols-outlined text-primary text-xl">graphic_eq</span>
+                    <span class="text-xs font-bold text-on-surface font-headline uppercase tracking-wider" data-i18n="discord_fake_label">Discord UDP (Voice)</span>
+                </div>
+
+                <!-- Custom Dropdown -->
+                <div id="discord-fake-dropdown" class="relative">
+                    <button id="discord-fake-trigger" type="button"
+                        class="glass-panel w-full flex items-center justify-between rounded-xl border border-primary/10 px-4 py-3 font-mono text-xs text-on-surface hover:border-primary/30 transition-colors cursor-pointer">
+                        <span id="discord-fake-label" class="truncate text-on-surface">loading...</span>
+                        <span class="material-symbols-outlined text-primary/60 text-base ml-2 transition-transform" id="discord-fake-chevron">expand_more</span>
+                    </button>
+
+                    <div id="discord-fake-options"
+                        class="hidden absolute top-full left-0 right-0 mt-2 z-50 rounded-2xl border border-primary/20 overflow-hidden shadow-2xl"
+                        style="background: #0d1225;">
+                        <div id="discord-fake-options-list" class="max-h-56 overflow-y-auto py-1">
+                            <!-- Options populated by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- GameFilter UDP Fake Card -->
+            <div class="glass-panel p-5 rounded-2xl border border-primary/10 space-y-4 hover:border-primary/40 transition-colors relative z-20">
+                <div class="flex items-center gap-3 px-1">
+                    <span class="material-symbols-outlined text-secondary text-xl">sports_esports</span>
+                    <span class="text-xs font-bold text-on-surface font-headline uppercase tracking-wider" data-i18n="game_fake_label">GameFilter UDP</span>
+                </div>
+
+                <!-- Custom Dropdown -->
+                <div id="game-fake-dropdown" class="relative">
+                    <button id="game-fake-trigger" type="button"
+                        class="glass-panel w-full flex items-center justify-between rounded-xl border border-primary/10 px-4 py-3 font-mono text-xs text-on-surface hover:border-primary/30 transition-colors cursor-pointer">
+                        <span id="game-fake-label" class="truncate text-on-surface">loading...</span>
+                        <span class="material-symbols-outlined text-secondary/60 text-base ml-2 transition-transform" id="game-fake-chevron">expand_more</span>
+                    </button>
+
+                    <div id="game-fake-options"
+                        class="hidden absolute top-full left-0 right-0 mt-2 z-50 rounded-2xl border border-primary/20 overflow-hidden shadow-2xl"
+                        style="background: #0d1225;">
+                        <div id="game-fake-options-list" class="max-h-56 overflow-y-auto py-1">
+                            <!-- Options populated by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
     </div>
 </div><!-- /section-home -->

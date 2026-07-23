@@ -217,5 +217,14 @@ export default {
     "diagnostics_hide_successful": "Скрыть успешные проверки",
     "diagnostics_show_all_hidden": "Показать всё ({count} скрыто)",
     "diagnostics_running": "Запуск...",
-    "language_label": "Язык интерфейса"
+    "language_label": "Язык интерфейса",
+    "fake_packets_title": "Фейковые пакеты (UDP)",
+    "fake_packets_desc": "Замена используемого фейк-пакета для подмены UDP-трафика (Discord Voice и игр)",
+    "discord_fake_label": "Discord UDP (Voice)",
+    "game_fake_label": "GameFilter UDP",
+    "fake_profile_subtitle": "Профиль генерации трафика",
+    "active_fake": "Активный фейк",
+    "select_fake_placeholder": "Выберите фейк...",
+    "fakes_info_title": "Замена используемого фейка",
+    "fakes_info_content": "Функционал подмены UDP-пакетов позволяет выбрать бинарный файл фейка (`.bin`) из папки `bin`.<br><br><b>Для чего это нужно:</b><br>Провайдеры могут блокировать или глушить стандартные варианты фейк-пакетов. Если у вас перестает работать голосовая связь в Discord или соединение в играх, попробуйте сменить вариант фейка (например, на Google, Steam, QUIC или STUN)."
 };

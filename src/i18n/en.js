@@ -218,5 +218,14 @@ export default {
     "diagnostics_hide_successful": "Hide Successful Checks",
     "diagnostics_show_all_hidden": "Show All Checks ({count} hidden)",
     "diagnostics_running": "Running...",
-    "language_label": "Language"
+    "language_label": "Language",
+    "fake_packets_title": "UDP Fake Packets",
+    "fake_packets_desc": "Replace active fake binary payloads for UDP traffic (Discord Voice & Games)",
+    "discord_fake_label": "Discord UDP (Voice)",
+    "game_fake_label": "GameFilter UDP",
+    "fake_profile_subtitle": "Traffic generation profile",
+    "active_fake": "Active fake",
+    "select_fake_placeholder": "Select fake...",
+    "fakes_info_title": "Active Fake Replacement",
+    "fakes_info_content": "Allows replacing active binary fake payloads (`.bin`) from the `bin` directory for UDP traffic.<br><br><b>Why use this:</b><br>ISPs may block or throttle standard fake payload patterns. If Discord voice calls or game connections fail, try switching to a different fake file variant (e.g. Google, Steam, QUIC, or STUN)."
 };

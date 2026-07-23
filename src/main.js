@@ -16,6 +16,7 @@ import { initTitlebar } from './features/titlebar.js';
 import { initNavigation, showSection } from './features/navigation.js';
 import { initConnectButtons } from './features/connect.js';
 import { initFilterButtons, pollFilters } from './features/filters.js';
+import { initFakeSelectors, pollFakes } from './features/fakes.js';
 import {
   initStrategyDropdown,
   loadStrategies,
@@ -56,16 +57,19 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   await pollStatus();
   await pollFilters();
+  await pollFakes();
   syncTrayLocalization();
 
   setInterval(async () => {
     await pollStatus();
     await pollFilters();
+    await pollFakes();
   }, 2000);
 
   initNavigation();
   initConnectButtons();
   initFilterButtons();
+  initFakeSelectors();
   initUserLists();
   initInfoModals();
   initUpdates();
@@ -118,6 +122,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   onLangChange(() => {
     pollStatus();
     pollFilters();
+    pollFakes();
     renderStrategyList();
     refreshOpenInfoModal();
   });

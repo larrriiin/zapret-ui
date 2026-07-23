@@ -1267,6 +1267,136 @@ fn set_ipset_filter(mode: String) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct FakeFileItem {
+    pub name: String,
+    pub filename: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct FakesInfo {
+    pub current_discord_fake: String,
+    pub current_game_fake: String,
+    pub available_fakes: Vec<FakeFileItem>,
+}
+
+/// Возвращает информацию о доступных фейках и текущих активных фейках
+#[tauri::command]
+fn get_fakes_info() -> Result<FakesInfo, String> {
+    let bin_dir = find_binaries_dir().join("bin");
+    if !bin_dir.exists() {
+        return Err("bin folder not found".to_string());
+    }
+
+    let discord_active_path = bin_dir.join("ACTIVE_DISCORD_UDP.bin");
+    let game_active_path = bin_dir.join("ACTIVE_GAME_UDP.bin");
+
+    let discord_hash = if discord_active_path.exists() {
+        sha256_file(&discord_active_path).ok()
+    } else {
+        None
+    };
+
+    let game_hash = if game_active_path.exists() {
+        sha256_file(&game_active_path).ok()
+    } else {
+        None
+    };
+
+    let mut available_fakes = Vec::new();
+    let mut fake_hashes: Vec<(String, String)> = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(&bin_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("bin") {
+                if let Some(file_name_str) = path.file_name().and_then(|s| s.to_str()) {
+                    if file_name_str.starts_with("ACTIVE_") {
+                        continue;
+                    }
+                    let base_name = path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if base_name.is_empty() {
+                        continue;
+                    }
+                    let hash = sha256_file(&path).unwrap_or_default();
+                    fake_hashes.push((base_name.clone(), hash));
+                    available_fakes.push(FakeFileItem {
+                        name: base_name,
+                        filename: file_name_str.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    available_fakes.sort_by(|a, b| natural_sort_compare(&a.name, &b.name));
+    fake_hashes.sort_by(|a, b| natural_sort_compare(&a.0, &b.0));
+
+    let mut current_discord_fake = "quic_initial_steamcommunity_com".to_string();
+    if let Some(ref d_hash) = discord_hash {
+        for (name, hash) in &fake_hashes {
+            if hash.eq_ignore_ascii_case(d_hash) {
+                current_discord_fake = name.clone();
+            }
+        }
+    }
+
+    // Determine current GameFilter fake
+    let mut current_game_fake = "quic_initial_dbankcloud_ru".to_string();
+    if let Some(ref g_hash) = game_hash {
+        for (name, hash) in &fake_hashes {
+            if hash.eq_ignore_ascii_case(g_hash) {
+                current_game_fake = name.clone();
+            }
+        }
+    }
+
+    Ok(FakesInfo {
+        current_discord_fake,
+        current_game_fake,
+        available_fakes,
+    })
+}
+
+/// Заменяет активный фейк (discord или game) на указанный файл-фейк
+#[tauri::command]
+fn set_active_fake(fake_type: String, fake_name: String) -> Result<(), String> {
+    let bin_dir = find_binaries_dir().join("bin");
+    if !bin_dir.exists() {
+        return Err("bin folder not found".to_string());
+    }
+
+    let target_bin = match fake_type.as_str() {
+        "discord" => "ACTIVE_DISCORD_UDP.bin",
+        "game" => "ACTIVE_GAME_UDP.bin",
+        _ => return Err("Invalid fake type".to_string()),
+    };
+
+    if fake_name.contains('/') || fake_name.contains('\\') || fake_name.contains("..") {
+        return Err("Invalid fake file name".to_string());
+    }
+
+    let source_path = bin_dir.join(format!("{}.bin", fake_name));
+    if !source_path.exists() {
+        return Err(format!("Fake file '{}.bin' not found", fake_name));
+    }
+
+    let target_bin_path = bin_dir.join(target_bin);
+
+    if target_bin_path.exists() {
+        let _ = std::fs::remove_file(&target_bin_path);
+    }
+
+    std::fs::copy(&source_path, &target_bin_path)
+        .map_err(|e| format!("Failed to replace active fake: {}", e))?;
+
+    Ok(())
+}
+
 /// Запускает стратегию по имени .bat файла.
 #[tauri::command]
 fn start_zapret(
@@ -3448,6 +3578,8 @@ pub fn run() {
             get_filters_status,
             set_game_filter,
             set_ipset_filter,
+            get_fakes_info,
+            set_active_fake,
             start_zapret,
             stop_zapret,
             read_user_list,
