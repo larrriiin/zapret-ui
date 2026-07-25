@@ -34,7 +34,7 @@ jobs:
           shared-key: 'zapret-ui-rust-cache'
       - name: install frontend dependencies
         run: npm install
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ZAPRET_UPDATE_PROXY: ${{ secrets.ZAPRET_UPDATE_PROXY }}
