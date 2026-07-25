@@ -31,11 +31,12 @@ use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri_plugin_notification::NotificationExt;
 
+mod core;
+mod providers;
+use core::CoreProvider;
+use providers::{parse_fallback_release, FlowsealProvider};
+
 const CREATE_NO_WINDOW: u32 = 0x08000000;
-const GITHUB_VERSION_URL: &str =
-    "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt";
-const GITHUB_RELEASE_API: &str =
-    "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/tags";
 const GITHUB_USER_AGENT: &str = "zapret-ui-updater";
 
 struct AppState {
@@ -104,11 +105,7 @@ fn is_safe_strategy_name(name: &str) -> bool {
     if name.is_empty() || name.len() > 128 {
         return false;
     }
-    if name.contains("..")
-        || name.contains('/')
-        || name.contains('\\')
-        || name.contains(':')
-    {
+    if name.contains("..") || name.contains('/') || name.contains('\\') || name.contains(':') {
         return false;
     }
     if name.starts_with('.')
@@ -120,10 +117,7 @@ fn is_safe_strategy_name(name: &str) -> bool {
     }
     name.chars().all(|c| {
         c.is_ascii_alphanumeric()
-            || matches!(
-                c,
-                ' ' | '(' | ')' | '[' | ']' | '.' | '_' | '-' | '+' | ','
-            )
+            || matches!(c, ' ' | '(' | ')' | '[' | ']' | '.' | '_' | '-' | '+' | ',')
     })
 }
 
@@ -168,8 +162,7 @@ fn powershell_path() -> PathBuf {
     {
         let system_root =
             std::env::var("SystemRoot").unwrap_or_else(|_| String::from(r"C:\Windows"));
-        PathBuf::from(system_root)
-            .join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
+        PathBuf::from(system_root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
     }
     #[cfg(not(windows))]
     {
@@ -228,10 +221,7 @@ fn resolve_list_path(filename: &str) -> Result<PathBuf, String> {
             .map_err(|e| format!("Failed to resolve {}: {}", file_path.display(), e))?;
         let canonical_file = strip_verbatim_prefix(canonical_file);
         if !canonical_file.starts_with(&canonical_parent) {
-            return Err(format!(
-                "List file {} escapes its directory",
-                filename
-            ));
+            return Err(format!("List file {} escapes its directory", filename));
         }
         Ok(canonical_file)
     } else {
@@ -287,9 +277,8 @@ fn extract_zip_safely(zip_path: &std::path::Path, dest: &std::path::Path) -> Res
         let out_path = canonical_dest.join(&rel);
 
         if entry.is_dir() {
-            std::fs::create_dir_all(&out_path).map_err(|e| {
-                format!("Failed to create dir {}: {}", out_path.display(), e)
-            })?;
+            std::fs::create_dir_all(&out_path)
+                .map_err(|e| format!("Failed to create dir {}: {}", out_path.display(), e))?;
             continue;
         }
         if let Some(parent) = out_path.parent() {
@@ -365,7 +354,7 @@ async fn fetch_expected_sha256(version: &str, asset_name: &str) -> Result<String
         return Err(format!("Invalid upstream version tag: {}", version));
     }
 
-    let url = format!("{}/{}", GITHUB_RELEASE_API, version);
+    let url = FlowsealProvider::new(find_binaries_dir()).release_api_url(version);
     let client = reqwest::Client::builder()
         .user_agent(GITHUB_USER_AGENT)
         .build()
@@ -417,67 +406,27 @@ async fn fetch_expected_sha256(version: &str, asset_name: &str) -> Result<String
     Ok(hex.to_ascii_lowercase())
 }
 
-#[derive(Clone, Debug)]
-pub struct SfReleaseInfo {
-    pub version: String,
-    pub download_url: String,
-    pub md5sum: String,
-}
+pub type SfReleaseInfo = core::FallbackRelease;
 
 pub async fn fetch_sf_release_info(client: &reqwest::Client) -> Result<SfReleaseInfo, String> {
-    let sf_url = "https://sourceforge.net/projects/zapret-discord-youtube.mirror/best_release.json";
+    let provider = FlowsealProvider::new(find_binaries_dir());
     let response = client
-        .get(sf_url)
+        .get(provider.fallback_metadata_url())
         .header("Cache-Control", "no-cache")
         .send()
         .await
         .map_err(|e| format!("Failed to send SourceForge request: {}", e))?;
-    
     if !response.status().is_success() {
-        return Err(format!("SourceForge returned status: {}", response.status()));
+        return Err(format!(
+            "SourceForge returned status: {}",
+            response.status()
+        ));
     }
-    
     let body: serde_json::Value = response
         .json()
         .await
         .map_err(|e| format!("Failed to parse SourceForge JSON: {}", e))?;
-
-    // Try to get from platform_releases.windows, otherwise release
-    let windows_release = body.get("platform_releases")
-        .and_then(|pr| pr.get("windows"));
-
-    let release_obj = windows_release.unwrap_or_else(|| {
-        body.get("release").unwrap_or(&serde_json::Value::Null)
-    });
-
-    if release_obj.is_null() {
-        return Err("No release information found in SourceForge JSON".to_string());
-    }
-
-    let filename = release_obj.get("filename")
-        .and_then(|f| f.as_str())
-        .ok_or_else(|| "Missing filename in SourceForge JSON".to_string())?;
-
-    let download_url = release_obj.get("url")
-        .and_then(|u| u.as_str())
-        .ok_or_else(|| "Missing url in SourceForge JSON".to_string())?;
-
-    let md5sum = release_obj.get("md5sum")
-        .and_then(|m| m.as_str())
-        .ok_or_else(|| "Missing md5sum in SourceForge JSON".to_string())?;
-
-    let parts: Vec<&str> = filename.split('/').filter(|s| !s.is_empty()).collect();
-    let version = if let Some(first_part) = parts.first() {
-        first_part.to_string()
-    } else {
-        return Err("Failed to parse version from SourceForge filename".to_string());
-    };
-
-    Ok(SfReleaseInfo {
-        version,
-        download_url: download_url.to_string(),
-        md5sum: md5sum.to_string(),
-    })
+    parse_fallback_release(&body)
 }
 
 /// Computes the MD5 digest of a file as a lowercase hex string.
@@ -641,31 +590,7 @@ fn elevate_if_needed() {
 }
 
 fn get_local_version() -> String {
-    let dir = find_binaries_dir();
-    let service_bat = dir.join("service.bat");
-    
-    if !service_bat.exists() {
-        return format!("Err: Not Found at {:?}", service_bat);
-    }
-
-    match std::fs::read_to_string(&service_bat) {
-        Ok(content) => {
-            for line in content.lines() {
-                let lowercase = line.to_lowercase();
-                if lowercase.contains("local_version=") {
-                    let parts: Vec<&str> = line.splitn(2, '=').collect();
-                    if parts.len() > 1 {
-                        let version = parts[1].trim().trim_matches('"');
-                        if !version.is_empty() {
-                            return version.to_string();
-                        }
-                    }
-                }
-            }
-            "Err: No Version String Found".to_string()
-        }
-        Err(e) => format!("Err: Read Failed ({})", e),
-    }
+    FlowsealProvider::new(find_binaries_dir()).local_version()
 }
 
 #[tauri::command]
@@ -684,10 +609,11 @@ async fn get_remote_core_version(
     custom_proxy: Option<String>,
 ) -> Result<String, String> {
     let mut client_builder = reqwest::Client::builder();
-    
+
     let use_proxy = use_proxy.unwrap_or(false);
     if use_proxy {
-        let proxy_url = custom_proxy.or_else(|| option_env!("ZAPRET_UPDATE_PROXY").map(|s| s.to_string()));
+        let proxy_url =
+            custom_proxy.or_else(|| option_env!("ZAPRET_UPDATE_PROXY").map(|s| s.to_string()));
         if let Some(proxy_url) = proxy_url {
             if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
                 client_builder = client_builder.proxy(proxy);
@@ -696,9 +622,9 @@ async fn get_remote_core_version(
     }
 
     let client = client_builder.build().map_err(|e| e.to_string())?;
-    
+
     let response_res = client
-        .get("https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt")
+        .get(FlowsealProvider::new(find_binaries_dir()).version_url())
         .send()
         .await;
 
@@ -716,13 +642,19 @@ async fn get_remote_core_version(
             if let Ok(info) = fetch_sf_release_info(&client).await {
                 return Ok(info.version);
             }
-            Err(format!("GitHub returned status {} and SourceForge fallback failed", status))
+            Err(format!(
+                "GitHub returned status {} and SourceForge fallback failed",
+                status
+            ))
         }
         Err(e) => {
             if let Ok(info) = fetch_sf_release_info(&client).await {
                 return Ok(info.version);
             }
-            Err(format!("Failed to connect to GitHub ({}) and SourceForge fallback failed", e))
+            Err(format!(
+                "Failed to connect to GitHub ({}) and SourceForge fallback failed",
+                e
+            ))
         }
     }
 }
@@ -739,94 +671,15 @@ fn get_ui_version_cmd() -> String {
 
 #[tauri::command]
 fn ensure_binaries_present() -> bool {
-    let bin_dir = find_binaries_dir();
-    // In production, binaries is a folder inside resources.
-    // In dev, it's next to src-tauri.
-    // find_binaries_dir already handles this.
-    bin_dir.exists() && bin_dir.join("service.bat").exists()
+    FlowsealProvider::new(find_binaries_dir()).is_installed()
 }
 
 fn parse_bat_args(strategy: &str) -> Result<String, String> {
     if !is_safe_strategy_name(strategy) {
         return Err(format!("Invalid strategy name: {}", strategy));
     }
-    let dir = find_binaries_dir();
-    let bat_path = dir.join(format!("{}.bat", strategy));
-    let content = std::fs::read_to_string(&bat_path)
-        .map_err(|e| format!("Не удалось прочитать {}.bat: {}", strategy, e))?;
-
-    // Читаем текущие значения фильтров для подстановки
     let filters = get_filters_status();
-    let game_filter_mode = filters.game_filter;
-
-    // Для disabled используем "12" (порт не используется)
-    let (gf, gftcp, gfudp) = match game_filter_mode.as_str() {
-        "all" => ("1024-65535", "1024-65535", "1024-65535"),
-        "tcp" => ("1024-65535", "1024-65535", "12"),
-        "udp" => ("1024-65535", "12", "1024-65535"),
-        _ => ("12", "12", "12"),
-    };
-
-    let bin_path = dir.join("bin").to_str().unwrap_or("").to_string() + "\\";
-    let lists_path = dir.join("lists").to_str().unwrap_or("").to_string() + "\\";
-    let root_path = dir.to_str().unwrap_or("").to_string() + "\\";
-
-    // Ищем строку с запуском winws.exe и собираем все строки продолжения (^)
-    let lines: Vec<&str> = content.lines().collect();
-    let mut found_idx: Option<usize> = None;
-    for (i, line) in lines.iter().enumerate() {
-        if line.to_lowercase().contains("winws.exe") {
-            found_idx = Some(i);
-            break;
-        }
-    }
-
-    let found_idx =
-        found_idx.ok_or_else(|| format!("Не найдена строка с winws.exe в {}.bat", strategy))?;
-
-    // Собираем полную команду: первая строка + все строки-продолжения (^)
-    let mut full_command = String::new();
-    for raw in lines.iter().skip(found_idx) {
-        let line = raw.trim();
-        if let Some(rest) = line.strip_suffix('^') {
-            full_command.push_str(rest);
-            full_command.push(' ');
-        } else {
-            full_command.push_str(line);
-            break;
-        }
-    }
-
-    // Извлекаем аргументы после winws.exe
-    let cmd_lower = full_command.to_lowercase();
-    let mut args = String::new();
-    if let Some(pos) = cmd_lower.find("winws.exe\"") {
-        args = full_command[pos + "winws.exe\"".len()..].to_string();
-    } else if let Some(pos) = cmd_lower.find("winws.exe ") {
-        args = full_command[pos + "winws.exe ".len()..].to_string();
-    }
-
-    // Подстановка переменных (эмуляция service.bat)
-    args = args.replace("%GameFilter%", gf);
-    args = args.replace("%GameFilterTCP%", gftcp);
-    args = args.replace("%GameFilterUDP%", gfudp);
-    args = args.replace("%BIN%", &bin_path);
-    args = args.replace("%LISTS%", &lists_path);
-
-    // Замена @ на абсолютный путь к корню binaries. Аргументы возвращаются
-    // без бэт-экранирования кавычек; экранирование для конкретного способа
-    // запуска (bat / sc / PowerShell) делается на вызывающей стороне.
-    let mut final_args = String::new();
-    for word in args.split_whitespace() {
-        let mut w = word.to_string();
-        if w.starts_with("\"@") {
-            w = format!("\"{}{}", root_path, &w[2..]);
-        }
-        final_args.push_str(&w);
-        final_args.push(' ');
-    }
-
-    Ok(final_args.trim().to_string())
+    FlowsealProvider::new(find_binaries_dir()).parse_strategy(strategy, &filters.game_filter)
 }
 
 /// Splits a command-line arguments string into separate arguments, respecting double quotes
@@ -1025,31 +878,7 @@ fn check_status_full() -> Result<String, String> {
 /// Список стратегий — имена .bat файлов из binaries/ (без service.bat).
 #[tauri::command]
 fn get_strategies() -> Result<Vec<String>, String> {
-    let dir = find_binaries_dir();
-    let entries = std::fs::read_dir(&dir)
-        .map_err(|e| format!("Failed to read binaries ({:?}): {}", dir, e))?;
-
-    let mut list: Vec<String> = entries
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .and_then(|x| x.to_str())
-                .map(|x| x.eq_ignore_ascii_case("bat"))
-                .unwrap_or(false)
-        })
-        .filter_map(|e| {
-            e.path()
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_string())
-        })
-        .filter(|name| name != "service")
-        .collect();
-
-    // Natural sort (Windows-style) so ALT2 comes before ALT11
-    list.sort_by(|a, b| natural_sort_compare(a, b));
-    Ok(list)
+    FlowsealProvider::new(find_binaries_dir()).strategies()
 }
 
 /// Compare strings using natural sort (numbers compared numerically)
@@ -1453,16 +1282,10 @@ fn start_zapret(
         // the registry. That way the service points at the *real* executable
         // under `binaries/bin/`, not at a symlink that could later be
         // redirected to an attacker-controlled binary.
-        let bin_path_raw = dir.join("bin").join("winws.exe");
+        let bin_path_raw = FlowsealProvider::new(&dir).winws_executable();
         let bin_path = std::fs::canonicalize(&bin_path_raw)
             .map(strip_verbatim_prefix)
-            .map_err(|e| {
-                format!(
-                    "Failed to resolve {}: {}",
-                    bin_path_raw.display(),
-                    e
-                )
-            })?;
+            .map_err(|e| format!("Failed to resolve {}: {}", bin_path_raw.display(), e))?;
         if !bin_path.starts_with(&dir) {
             return Err(format!(
                 "winws.exe resolves outside binaries dir: {}",
@@ -1541,7 +1364,7 @@ try {{
             }
         }
     } else {
-        let bin_path = dir.join("bin").join("winws.exe");
+        let bin_path = FlowsealProvider::new(&dir).winws_executable();
         if !bin_path.exists() {
             return Err("winws.exe not found".to_string());
         }
@@ -1759,8 +1582,7 @@ fn save_user_list_to_file(filename: String) -> Result<bool, String> {
         .save_file();
 
     if let Some(path) = file_path {
-        std::fs::write(&path, content)
-            .map_err(|e| format!("Не удалось сохранить файл: {}", e))?;
+        std::fs::write(&path, content).map_err(|e| format!("Не удалось сохранить файл: {}", e))?;
         Ok(true)
     } else {
         Ok(false)
@@ -1836,8 +1658,10 @@ fn import_backup_file() -> Result<bool, String> {
 #[tauri::command]
 async fn update_ipset_list() -> Result<String, String> {
     let dir = find_binaries_dir();
-    let list_file = dir.join("lists").join("ipset-all.txt");
-    let url = "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/.service/ipset-service.txt";
+    let provider = FlowsealProvider::new(&dir);
+    debug_assert_eq!(provider.id(), "flowseal");
+    let list_file = provider.paths().lists_dir().join("ipset-all.txt");
+    let url = provider.ipset_url();
 
     // Check if curl exists in System32
     let curl_path = std::path::Path::new(r"C:\Windows\System32\curl.exe");
@@ -1927,8 +1751,6 @@ fn is_ip_or_cidr(s: &str) -> bool {
     }
 }
 
-
-
 #[tauri::command]
 async fn download_and_install_update(
     window: tauri::Window,
@@ -1969,35 +1791,35 @@ async fn download_and_install_update(
     let mut client_builder = reqwest::Client::builder();
     let use_proxy = use_proxy.unwrap_or(false);
     if use_proxy {
-        let proxy_url = custom_proxy.or_else(|| option_env!("ZAPRET_UPDATE_PROXY").map(|s| s.to_string()));
+        let proxy_url =
+            custom_proxy.or_else(|| option_env!("ZAPRET_UPDATE_PROXY").map(|s| s.to_string()));
         if let Some(proxy_url) = proxy_url {
             if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
                 client_builder = client_builder.proxy(proxy);
             }
         }
     }
-    let client = client_builder.build().map_err(|e| format!("Failed to build http client: {}", e))?;
+    let client = client_builder
+        .build()
+        .map_err(|e| format!("Failed to build http client: {}", e))?;
 
     // Fetch version from GitHub with fallback to SourceForge
+    let provider = FlowsealProvider::new(&dir);
     let mut fetched_from_sf = false;
     let mut sf_info: Option<SfReleaseInfo> = None;
 
-    let latest_version = match client.get(GITHUB_VERSION_URL).header("Cache-Control", "no-cache").send().await {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.text().await {
-                Ok(text) => {
-                    let trimmed = text.trim().to_string();
-                    if !trimmed.is_empty() && !trimmed.contains("Not Found") {
-                        trimmed
-                    } else {
-                        fetched_from_sf = true;
-                        let info = fetch_sf_release_info(&client).await?;
-                        let version = info.version.clone();
-                        sf_info = Some(info);
-                        version
-                    }
-                }
-                Err(_) => {
+    let latest_version = match client
+        .get(provider.version_url())
+        .header("Cache-Control", "no-cache")
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => match resp.text().await {
+            Ok(text) => {
+                let trimmed = text.trim().to_string();
+                if !trimmed.is_empty() && !trimmed.contains("Not Found") {
+                    trimmed
+                } else {
                     fetched_from_sf = true;
                     let info = fetch_sf_release_info(&client).await?;
                     let version = info.version.clone();
@@ -2005,7 +1827,14 @@ async fn download_and_install_update(
                     version
                 }
             }
-        }
+            Err(_) => {
+                fetched_from_sf = true;
+                let info = fetch_sf_release_info(&client).await?;
+                let version = info.version.clone();
+                sf_info = Some(info);
+                version
+            }
+        },
         _ => {
             fetched_from_sf = true;
             let info = fetch_sf_release_info(&client).await?;
@@ -2045,7 +1874,7 @@ async fn download_and_install_update(
     let mut downloaded_from_sf = false;
 
     if !fetched_from_sf {
-        let github_url = format!("https://github.com/Flowseal/zapret-discord-youtube/releases/download/{}/zapret-discord-youtube-{}.zip", latest_version, latest_version);
+        let github_url = provider.release_download_url(&latest_version);
         if let Ok(resp) = client.get(&github_url).send().await {
             if resp.status().is_success() {
                 response = Some(resp);
@@ -2070,7 +1899,7 @@ async fn download_and_install_update(
             }
             _ => {
                 // Also try downloading from the generic latest URL user requested as fallback
-                let generic_url = "https://sourceforge.net/projects/zapret-discord-youtube.mirror/files/latest/download";
+                let generic_url = provider.fallback_latest_url();
                 match client.get(generic_url).send().await {
                     Ok(resp) if resp.status().is_success() => {
                         response = Some(resp);
@@ -2079,11 +1908,17 @@ async fn download_and_install_update(
                     }
                     Ok(resp) => {
                         done_flag.store(true, Ordering::Relaxed);
-                        return Err(format!("SourceForge download failed with status: {}", resp.status()));
+                        return Err(format!(
+                            "SourceForge download failed with status: {}",
+                            resp.status()
+                        ));
                     }
                     Err(e) => {
                         done_flag.store(true, Ordering::Relaxed);
-                        return Err(format!("Failed to download from both GitHub and SourceForge. SF error: {}", e));
+                        return Err(format!(
+                            "Failed to download from both GitHub and SourceForge. SF error: {}",
+                            e
+                        ));
                     }
                 }
             }
@@ -2136,7 +1971,7 @@ async fn download_and_install_update(
             return Err("Downloaded from SourceForge but release metadata is missing".to_string());
         }
     } else {
-        let asset_name = format!("zapret-discord-youtube-{}.zip", latest_version);
+        let asset_name = provider.archive_name(&latest_version);
         let expected_sha256 = fetch_expected_sha256(&latest_version, &asset_name).await?;
         let actual_sha256 = sha256_file(&zip_path)?;
         if actual_sha256 != expected_sha256 {
@@ -2199,7 +2034,8 @@ fn copy_dir_contents(src: &std::path::Path, dst: &std::path::Path) -> Result<(),
         let dest_path = dst.join(&file_name);
 
         if path.is_dir() {
-            std::fs::create_dir_all(&dest_path).map_err(|e| format!("Failed to create directory {:?}: {}", dest_path, e))?;
+            std::fs::create_dir_all(&dest_path)
+                .map_err(|e| format!("Failed to create directory {:?}: {}", dest_path, e))?;
             copy_dir_contents(&path, &dest_path)?;
         } else {
             if let Err(e) = std::fs::copy(&path, &dest_path) {
@@ -2207,14 +2043,20 @@ fn copy_dir_contents(src: &std::path::Path, dst: &std::path::Path) -> Result<(),
                 let mut old_path = dest_path.clone();
                 let new_name = format!("{}.old", file_name.to_str().unwrap_or("locked"));
                 old_path.set_file_name(new_name);
-                
+
                 if std::fs::rename(&dest_path, &old_path).is_err() {
-                    return Err(format!("Failed to copy file {:?} to {:?}: {}", path, dest_path, e));
+                    return Err(format!(
+                        "Failed to copy file {:?} to {:?}: {}",
+                        path, dest_path, e
+                    ));
                 }
 
                 // Attempt copy again after rename
                 std::fs::copy(&path, &dest_path).map_err(|e2| {
-                    format!("Failed to copy file {:?} to {:?} after renaming: {}", path, dest_path, e2)
+                    format!(
+                        "Failed to copy file {:?} to {:?} after renaming: {}",
+                        path, dest_path, e2
+                    )
                 })?;
             }
         }
@@ -2743,7 +2585,10 @@ async fn check_site(domain: String, state: State<'_, AppState>) -> Result<SiteCh
         if let Ok(socket_addr) = format!("{}:443", ip).parse::<std::net::SocketAddr>() {
             let start = std::time::Instant::now();
             let connect_timeout = std::time::Duration::from_secs(3);
-            if let Ok(Ok(_)) = tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(socket_addr)).await {
+            if let Ok(Ok(_)) =
+                tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(socket_addr))
+                    .await
+            {
                 ping_ms = Some(start.elapsed().as_millis() as u32);
             }
         }
@@ -2926,8 +2771,7 @@ fn test_results_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .path()
         .app_data_dir()
         .map_err(|e| format!("Failed to resolve app data dir: {}", e))?;
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("Failed to create app data dir: {}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create app data dir: {}", e))?;
     Ok(dir.join("test_results.json"))
 }
 
@@ -2936,8 +2780,7 @@ fn save_test_results(app: tauri::AppHandle, payload: SavedTestResults) -> Result
     let path = test_results_path(&app)?;
     let json = serde_json::to_string_pretty(&payload)
         .map_err(|e| format!("Failed to serialize test results: {}", e))?;
-    std::fs::write(&path, json)
-        .map_err(|e| format!("Failed to write test results: {}", e))?;
+    std::fs::write(&path, json).map_err(|e| format!("Failed to write test results: {}", e))?;
     Ok(())
 }
 
@@ -2975,8 +2818,7 @@ async fn run_tests(
     test_mode: String,
 ) -> Result<Vec<TestResult>, String> {
     let dir = find_binaries_dir();
-    let utils_dir = dir.join("utils");
-    let ps_script = utils_dir.join("test zapret.ps1");
+    let ps_script = FlowsealProvider::new(&dir).test_script();
 
     if !ps_script.exists() {
         return Err(
@@ -3146,10 +2988,7 @@ async fn run_tests(
 
         // Structured event: "Best config: X"
         if let Some(rest) = line.strip_prefix("Best config:") {
-            let _ = app.emit(
-                "test-best",
-                serde_json::json!({ "config": rest.trim() }),
-            );
+            let _ = app.emit("test-best", serde_json::json!({ "config": rest.trim() }));
         }
 
         let _ = app.emit(
@@ -3237,7 +3076,9 @@ async fn run_tests(
 /// единицы измерения (например `AvgPing: 45 ms` → 45) и запятые в конце
 /// (`Ping OK: 5,` → 5).
 fn extract_number(text: &str, prefix: &str) -> i32 {
-    let Some(pos) = text.find(prefix) else { return 0 };
+    let Some(pos) = text.find(prefix) else {
+        return 0;
+    };
     let after = &text[pos + prefix.len()..];
     let mut started = false;
     let mut digits = String::new();
@@ -3328,7 +3169,6 @@ fn exit_app(app: tauri::AppHandle, state: State<'_, AppState>) {
     app.exit(0);
 }
 
-
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -3345,18 +3185,17 @@ pub fn run() {
             Some(vec!["--autostart"]),
         ))
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            let _ = app.get_webview_window("main")
-                .map(|w| {
-                    let _ = w.show();
-                    let _ = w.unminimize();
-                    let _ = w.set_focus();
+            let _ = app.get_webview_window("main").map(|w| {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
 
-                    let state = app.state::<AppState>();
-                    let tray_opt = state.tray_handle.lock_unpoisoned().clone();
-                    if let Some(tray) = tray_opt {
-                        let _ = tray.set_visible(false);
-                    }
-                });
+                let state = app.state::<AppState>();
+                let tray_opt = state.tray_handle.lock_unpoisoned().clone();
+                if let Some(tray) = tray_opt {
+                    let _ = tray.set_visible(false);
+                }
+            });
         }))
         .manage(AppState {
             active_strategy: Mutex::new(None),
@@ -3461,7 +3300,8 @@ pub fn run() {
                                     .or(status.strategy)
                                     .or_else(|| available.first().cloned());
                                 if let Some(s) = strategy {
-                                    let _ = start_zapret(app.clone(), s, "service".to_string(), state);
+                                    let _ =
+                                        start_zapret(app.clone(), s, "service".to_string(), state);
                                 }
                             }
                             refresh_tray_menu(app);
@@ -3469,8 +3309,12 @@ pub fn run() {
                         id if id.starts_with("strat_") => {
                             let strategy = &id[6..];
                             let state = app.state::<AppState>();
-                            let _ =
-                                start_zapret(app.clone(), strategy.to_string(), "service".to_string(), state);
+                            let _ = start_zapret(
+                                app.clone(),
+                                strategy.to_string(),
+                                "service".to_string(),
+                                state,
+                            );
                             refresh_tray_menu(app);
                         }
                         _ => {}
