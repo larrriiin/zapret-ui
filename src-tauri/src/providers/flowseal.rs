@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, path::PathBuf};
 
-use crate::core::{CorePaths, CoreProvider, FallbackRelease};
+use crate::core::{Checksum, CorePaths, CoreProvider, CoreRelease};
 
 const VERSION_URL: &str =
     "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt";
@@ -36,6 +36,33 @@ impl FlowsealProvider {
             })
             .filter(|version| !version.is_empty())
             .ok_or_else(|| "Err: No Version String Found".to_string())
+    }
+
+    pub async fn fetch_fallback_release(
+        &self,
+        client: &reqwest::Client,
+    ) -> Result<CoreRelease, String> {
+        let response = client
+            .get(FALLBACK_METADATA_URL)
+            .header("Cache-Control", "no-cache")
+            .send()
+            .await
+            .map_err(|e| format!("Failed to send SourceForge request: {e}"))?;
+        if !response.status().is_success() {
+            return Err(format!(
+                "SourceForge returned status: {}",
+                response.status()
+            ));
+        }
+        let body = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse SourceForge JSON: {e}"))?;
+        parse_fallback_release(&body)
+    }
+
+    pub fn fallback_latest_url(&self) -> &'static str {
+        FALLBACK_LATEST_URL
     }
 
     fn parse_strategy_content(
@@ -97,9 +124,6 @@ impl FlowsealProvider {
 }
 
 impl CoreProvider for FlowsealProvider {
-    fn id(&self) -> &'static str {
-        "flowseal"
-    }
     fn paths(&self) -> &CorePaths {
         &self.paths
     }
@@ -117,12 +141,6 @@ impl CoreProvider for FlowsealProvider {
             "https://github.com/Flowseal/zapret-discord-youtube/releases/download/{version}/{}",
             self.archive_name(version)
         )
-    }
-    fn fallback_metadata_url(&self) -> &'static str {
-        FALLBACK_METADATA_URL
-    }
-    fn fallback_latest_url(&self) -> &'static str {
-        FALLBACK_LATEST_URL
     }
     fn ipset_url(&self) -> &'static str {
         IPSET_URL
@@ -177,7 +195,7 @@ impl CoreProvider for FlowsealProvider {
     }
 }
 
-pub fn parse_fallback_release(body: &serde_json::Value) -> Result<FallbackRelease, String> {
+pub fn parse_fallback_release(body: &serde_json::Value) -> Result<CoreRelease, String> {
     let release = body
         .pointer("/platform_releases/windows")
         .or_else(|| body.get("release"))
@@ -186,7 +204,7 @@ pub fn parse_fallback_release(body: &serde_json::Value) -> Result<FallbackReleas
         .get("filename")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing filename in SourceForge JSON".to_string())?;
-    Ok(FallbackRelease {
+    Ok(CoreRelease {
         version: filename
             .split('/')
             .find(|s| !s.is_empty())
@@ -197,11 +215,13 @@ pub fn parse_fallback_release(body: &serde_json::Value) -> Result<FallbackReleas
             .and_then(|v| v.as_str())
             .ok_or_else(|| "Missing url in SourceForge JSON".to_string())?
             .to_owned(),
-        md5sum: release
-            .get("md5sum")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| "Missing md5sum in SourceForge JSON".to_string())?
-            .to_owned(),
+        checksum: Some(Checksum::Md5(
+            release
+                .get("md5sum")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "Missing md5sum in SourceForge JSON".to_string())?
+                .to_owned(),
+        )),
     })
 }
 
@@ -249,6 +269,20 @@ mod tests {
             .release_download_url("1.2")
             .ends_with("/1.2/zapret-discord-youtube-1.2.zip"));
     }
+    #[test]
+    fn parses_sourceforge_release_with_md5() {
+        let body = serde_json::json!({
+            "platform_releases": { "windows": {
+                "filename": "/v1/archive.zip",
+                "url": "https://example.invalid/archive.zip",
+                "md5sum": "abcdef"
+            }}
+        });
+        let release = parse_fallback_release(&body).expect("fallback release");
+        assert_eq!(release.version, "v1");
+        assert_eq!(release.checksum, Some(Checksum::Md5("abcdef".to_string())));
+    }
+
     #[test]
     fn parses_local_version() {
         assert_eq!(

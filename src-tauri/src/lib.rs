@@ -33,8 +33,7 @@ use tauri_plugin_notification::NotificationExt;
 
 mod core;
 mod providers;
-use core::CoreProvider;
-use providers::{parse_fallback_release, FlowsealProvider};
+use core::{Checksum, CoreManager, CoreRelease};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const GITHUB_USER_AGENT: &str = "zapret-ui-updater";
@@ -354,7 +353,7 @@ async fn fetch_expected_sha256(version: &str, asset_name: &str) -> Result<String
         return Err(format!("Invalid upstream version tag: {}", version));
     }
 
-    let url = FlowsealProvider::new(find_binaries_dir()).release_api_url(version);
+    let url = core_manager().provider().release_api_url(version);
     let client = reqwest::Client::builder()
         .user_agent(GITHUB_USER_AGENT)
         .build()
@@ -406,27 +405,8 @@ async fn fetch_expected_sha256(version: &str, asset_name: &str) -> Result<String
     Ok(hex.to_ascii_lowercase())
 }
 
-pub type SfReleaseInfo = core::FallbackRelease;
-
-pub async fn fetch_sf_release_info(client: &reqwest::Client) -> Result<SfReleaseInfo, String> {
-    let provider = FlowsealProvider::new(find_binaries_dir());
-    let response = client
-        .get(provider.fallback_metadata_url())
-        .header("Cache-Control", "no-cache")
-        .send()
-        .await
-        .map_err(|e| format!("Failed to send SourceForge request: {}", e))?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "SourceForge returned status: {}",
-            response.status()
-        ));
-    }
-    let body: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse SourceForge JSON: {}", e))?;
-    parse_fallback_release(&body)
+pub async fn fetch_fallback_release_info(client: &reqwest::Client) -> Result<CoreRelease, String> {
+    core_manager().fetch_fallback_release(client).await
 }
 
 /// Computes the MD5 digest of a file as a lowercase hex string.
@@ -541,6 +521,14 @@ fn find_binaries_dir() -> PathBuf {
     PathBuf::from("binaries")
 }
 
+fn core_manager_at(root: impl Into<PathBuf>) -> CoreManager {
+    CoreManager::new(root)
+}
+
+fn core_manager() -> CoreManager {
+    core_manager_at(find_binaries_dir())
+}
+
 fn is_admin() -> bool {
     // net session — самый быстрый и надежный способ проверки прав администратора на Windows
     Command::new(system32_tool("net.exe"))
@@ -590,7 +578,7 @@ fn elevate_if_needed() {
 }
 
 fn get_local_version() -> String {
-    FlowsealProvider::new(find_binaries_dir()).local_version()
+    core_manager().provider().local_version()
 }
 
 #[tauri::command]
@@ -624,7 +612,7 @@ async fn get_remote_core_version(
     let client = client_builder.build().map_err(|e| e.to_string())?;
 
     let response_res = client
-        .get(FlowsealProvider::new(find_binaries_dir()).version_url())
+        .get(core_manager().provider().version_url())
         .send()
         .await;
 
@@ -639,7 +627,7 @@ async fn get_remote_core_version(
                     }
                 }
             }
-            if let Ok(info) = fetch_sf_release_info(&client).await {
+            if let Ok(info) = fetch_fallback_release_info(&client).await {
                 return Ok(info.version);
             }
             Err(format!(
@@ -648,7 +636,7 @@ async fn get_remote_core_version(
             ))
         }
         Err(e) => {
-            if let Ok(info) = fetch_sf_release_info(&client).await {
+            if let Ok(info) = fetch_fallback_release_info(&client).await {
                 return Ok(info.version);
             }
             Err(format!(
@@ -671,7 +659,7 @@ fn get_ui_version_cmd() -> String {
 
 #[tauri::command]
 fn ensure_binaries_present() -> bool {
-    FlowsealProvider::new(find_binaries_dir()).is_installed()
+    core_manager().provider().is_installed()
 }
 
 fn parse_bat_args(strategy: &str) -> Result<String, String> {
@@ -679,7 +667,9 @@ fn parse_bat_args(strategy: &str) -> Result<String, String> {
         return Err(format!("Invalid strategy name: {}", strategy));
     }
     let filters = get_filters_status();
-    FlowsealProvider::new(find_binaries_dir()).parse_strategy(strategy, &filters.game_filter)
+    core_manager()
+        .provider()
+        .parse_strategy(strategy, &filters.game_filter)
 }
 
 /// Splits a command-line arguments string into separate arguments, respecting double quotes
@@ -878,7 +868,7 @@ fn check_status_full() -> Result<String, String> {
 /// Список стратегий — имена .bat файлов из binaries/ (без service.bat).
 #[tauri::command]
 fn get_strategies() -> Result<Vec<String>, String> {
-    FlowsealProvider::new(find_binaries_dir()).strategies()
+    core_manager().provider().strategies()
 }
 
 /// Compare strings using natural sort (numbers compared numerically)
@@ -1282,7 +1272,7 @@ fn start_zapret(
         // the registry. That way the service points at the *real* executable
         // under `binaries/bin/`, not at a symlink that could later be
         // redirected to an attacker-controlled binary.
-        let bin_path_raw = FlowsealProvider::new(&dir).winws_executable();
+        let bin_path_raw = core_manager_at(&dir).provider().winws_executable();
         let bin_path = std::fs::canonicalize(&bin_path_raw)
             .map(strip_verbatim_prefix)
             .map_err(|e| format!("Failed to resolve {}: {}", bin_path_raw.display(), e))?;
@@ -1364,7 +1354,7 @@ try {{
             }
         }
     } else {
-        let bin_path = FlowsealProvider::new(&dir).winws_executable();
+        let bin_path = core_manager_at(&dir).provider().winws_executable();
         if !bin_path.exists() {
             return Err("winws.exe not found".to_string());
         }
@@ -1658,8 +1648,8 @@ fn import_backup_file() -> Result<bool, String> {
 #[tauri::command]
 async fn update_ipset_list() -> Result<String, String> {
     let dir = find_binaries_dir();
-    let provider = FlowsealProvider::new(&dir);
-    debug_assert_eq!(provider.id(), "flowseal");
+    let manager = core_manager_at(&dir);
+    let provider = manager.provider();
     let list_file = provider.paths().lists_dir().join("ipset-all.txt");
     let url = provider.ipset_url();
 
@@ -1804,9 +1794,10 @@ async fn download_and_install_update(
         .map_err(|e| format!("Failed to build http client: {}", e))?;
 
     // Fetch version from GitHub with fallback to SourceForge
-    let provider = FlowsealProvider::new(&dir);
+    let manager = core_manager_at(&dir);
+    let provider = manager.provider();
     let mut fetched_from_sf = false;
-    let mut sf_info: Option<SfReleaseInfo> = None;
+    let mut sf_info: Option<CoreRelease> = None;
 
     let latest_version = match client
         .get(provider.version_url())
@@ -1821,7 +1812,7 @@ async fn download_and_install_update(
                     trimmed
                 } else {
                     fetched_from_sf = true;
-                    let info = fetch_sf_release_info(&client).await?;
+                    let info = fetch_fallback_release_info(&client).await?;
                     let version = info.version.clone();
                     sf_info = Some(info);
                     version
@@ -1829,7 +1820,7 @@ async fn download_and_install_update(
             }
             Err(_) => {
                 fetched_from_sf = true;
-                let info = fetch_sf_release_info(&client).await?;
+                let info = fetch_fallback_release_info(&client).await?;
                 let version = info.version.clone();
                 sf_info = Some(info);
                 version
@@ -1837,7 +1828,7 @@ async fn download_and_install_update(
         },
         _ => {
             fetched_from_sf = true;
-            let info = fetch_sf_release_info(&client).await?;
+            let info = fetch_fallback_release_info(&client).await?;
             let version = info.version.clone();
             sf_info = Some(info);
             version
@@ -1887,7 +1878,7 @@ async fn download_and_install_update(
         // Ensure we have SF info loaded
         let info = match sf_info {
             Some(i) => i,
-            None => fetch_sf_release_info(&client).await?,
+            None => fetch_fallback_release_info(&client).await?,
         };
 
         // Try downloading from the direct SourceForge URL
@@ -1899,7 +1890,7 @@ async fn download_and_install_update(
             }
             _ => {
                 // Also try downloading from the generic latest URL user requested as fallback
-                let generic_url = provider.fallback_latest_url();
+                let generic_url = manager.fallback_latest_url();
                 match client.get(generic_url).send().await {
                     Ok(resp) if resp.status().is_success() => {
                         response = Some(resp);
@@ -1959,12 +1950,20 @@ async fn download_and_install_update(
     // Verify integrity of downloaded archive
     if downloaded_from_sf {
         if let Some(info) = sf_info {
+            let expected_md5 = match info.checksum {
+                Some(Checksum::Md5(value)) => value,
+                _ => {
+                    return Err(
+                        "Downloaded from SourceForge but MD5 metadata is missing".to_string()
+                    )
+                }
+            };
             let actual_md5 = md5_file(&zip_path)?;
-            if actual_md5 != info.md5sum.to_ascii_lowercase() {
+            if actual_md5 != expected_md5.to_ascii_lowercase() {
                 let _ = std::fs::remove_file(&zip_path);
                 return Err(format!(
                     "Checksum mismatch (MD5) for SourceForge download: expected {}, got {}",
-                    info.md5sum, actual_md5
+                    expected_md5, actual_md5
                 ));
             }
         } else {
@@ -1972,7 +1971,12 @@ async fn download_and_install_update(
         }
     } else {
         let asset_name = provider.archive_name(&latest_version);
-        let expected_sha256 = fetch_expected_sha256(&latest_version, &asset_name).await?;
+        let expected_checksum =
+            Checksum::Sha256(fetch_expected_sha256(&latest_version, &asset_name).await?);
+        let expected_sha256 = match expected_checksum {
+            Checksum::Sha256(value) => value,
+            Checksum::Md5(_) => unreachable!("GitHub releases require SHA-256"),
+        };
         let actual_sha256 = sha256_file(&zip_path)?;
         if actual_sha256 != expected_sha256 {
             let _ = std::fs::remove_file(&zip_path);
@@ -2806,7 +2810,11 @@ fn cancel_tests(state: State<'_, AppState>) {
             .output();
     }
     // Remove temp script if it still exists
-    let temp_script = find_binaries_dir().join("utils").join("test_zapret_ui.ps1");
+    let temp_script = core_manager()
+        .provider()
+        .paths()
+        .utils_dir()
+        .join("test_zapret_ui.ps1");
     let _ = std::fs::remove_file(&temp_script);
 }
 
@@ -2818,7 +2826,8 @@ async fn run_tests(
     test_mode: String,
 ) -> Result<Vec<TestResult>, String> {
     let dir = find_binaries_dir();
-    let ps_script = FlowsealProvider::new(&dir).test_script();
+    let manager = core_manager_at(&dir);
+    let ps_script = manager.provider().test_script();
 
     if !ps_script.exists() {
         return Err(
@@ -2854,7 +2863,11 @@ async fn run_tests(
             "    # UI Mode - using all configs",
         );
 
-    let temp_script = utils_dir.join("test_zapret_ui.ps1");
+    let temp_script = manager
+        .provider()
+        .paths()
+        .utils_dir()
+        .join("test_zapret_ui.ps1");
     std::fs::write(&temp_script, modified_content)
         .map_err(|e| format!("Failed to write temp script: {}", e))?;
 
