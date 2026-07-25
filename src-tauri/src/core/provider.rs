@@ -17,7 +17,7 @@ pub struct CoreRelease {
 }
 
 /// Boundary between Tauri/core orchestration and an upstream core distribution.
-pub trait CoreProvider {
+pub trait CoreProvider: Send + Sync {
     fn paths(&self) -> &CorePaths;
     fn version_url(&self) -> &'static str;
     fn release_api_url(&self, version: &str) -> String;
