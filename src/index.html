@@ -36,7 +36,7 @@
         .restart-banner {
             position: fixed;
             bottom: 1.5rem;
-            left: 6.5rem;
+            left: 5.5rem;
             right: 1.5rem;
             background: rgba(18, 22, 38, 0.7);
             backdrop-filter: blur(20px);
@@ -79,14 +79,154 @@
         .toggle-thumb { transition: transform 0.2s; }
         .toggle-btn.is-on .toggle-thumb { transform: translateX(24px); }
         .toggle-btn.is-off .toggle-thumb { transform: translateX(0px); }
+
+        .nav-active {
+            background: rgba(186, 158, 255, 0.14) !important;
+            color: #ba9eff !important;
+        }
+        .nav-inactive {
+            color: rgba(223, 228, 254, 0.35) !important;
+        }
+        .nav-inactive:hover {
+            color: rgba(186, 158, 255, 0.75) !important;
+            background: rgba(186, 158, 255, 0.07) !important;
+        }
+        #nav-indicator {
+            position: absolute;
+            left: 0;
+            width: 3px;
+            border-radius: 0 3px 3px 0;
+            background: #ba9eff;
+            box-shadow: 0 0 8px #ba9eff99;
+            transition: top 0.25s cubic-bezier(0.4,0,0.2,1), height 0.25s cubic-bezier(0.4,0,0.2,1), opacity 0.2s;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        @keyframes secFadeOut {
+            from { opacity: 1; transform: translateY(0px); }
+            to   { opacity: 0; transform: translateY(6px); }
+        }
+        @keyframes secFadeIn {
+            from { opacity: 0; transform: translateY(-6px); }
+            to   { opacity: 1; transform: translateY(0px); }
+        }
+        .section-exit {
+            animation: secFadeOut 0.12s ease forwards;
+            pointer-events: none;
+        }
+        .section-enter {
+            animation: secFadeIn 0.16s ease forwards;
+        }
+
+        /* Neon Lamp Divider styles */
+        .status-lamp {
+            width: 96px;
+            height: 4px;
+            border-radius: 99px;
+            margin: 0 auto 20px auto;
+            transition: background 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .status-lamp.is-off {
+            background: rgba(223, 228, 254, 0.08) !important;
+            box-shadow: 0 0 0px transparent !important;
+            opacity: 0.35 !important;
+            transition: background 1.5s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 1.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 1.5s ease !important;
+        }
+
+        .status-lamp.is-on {
+            opacity: 1 !important;
+            animation: neon-spark 0.6s ease-out forwards, neon-glow 28s infinite 0.6s;
+            transition: none !important;
+        }
+
+        @keyframes neon-spark {
+            0% { opacity: 0.1; background: rgba(223, 228, 254, 0.08); box-shadow: none; }
+            10% { opacity: 0.8; background: linear-gradient(90deg, transparent, #ba9eff, transparent); box-shadow: 0 0 15px rgba(186, 158, 255, 0.6); }
+            15% { opacity: 0.2; background: rgba(223, 228, 254, 0.08); box-shadow: none; }
+            25% { opacity: 0.9; background: linear-gradient(90deg, transparent, #53ddfc, transparent); box-shadow: 0 0 25px rgba(83, 221, 252, 0.7); }
+            30% { opacity: 0.3; background: rgba(223, 228, 254, 0.08); box-shadow: none; }
+            45% { opacity: 0.7; background: linear-gradient(90deg, transparent, #ba9eff, transparent); box-shadow: 0 0 15px rgba(186, 158, 255, 0.5); }
+            50% { opacity: 0.2; background: rgba(223, 228, 254, 0.08); box-shadow: none; }
+            65% { opacity: 0.95; background: linear-gradient(90deg, transparent, #53ddfc, #ba9eff, transparent); box-shadow: 0 0 35px rgba(186, 158, 255, 0.8), 0 0 20px rgba(83, 221, 252, 0.5); }
+            70% { opacity: 0.5; background: rgba(223, 228, 254, 0.08); box-shadow: none; }
+            85% { opacity: 1; background: linear-gradient(90deg, transparent, #ba9eff, transparent); box-shadow: 0 0 35px rgba(186, 158, 255, 0.9); }
+            100% { opacity: 1; background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #a27aff 70%, transparent 100%); box-shadow: 0 0 20px rgba(186, 158, 255, 0.8), 0 0 35px rgba(162, 122, 255, 0.4); }
+        }
+
+        @keyframes neon-glow {
+            /* Steady Purple state */
+            0%, 25%, 50%, 70%, 100% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 18px rgba(186, 158, 255, 0.65), 0 0 28px rgba(132, 85, 239, 0.35);
+                opacity: 1;
+            }
+            12%, 37%, 62% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 26px rgba(186, 158, 255, 0.9), 0 0 40px rgba(162, 122, 255, 0.45);
+                opacity: 1;
+            }
+
+            /* 40%: single realistic quick neon double-flicker */
+            40% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 6px rgba(186, 158, 255, 0.25), 0 0 10px rgba(132, 85, 239, 0.1);
+                opacity: 0.55;
+            }
+            40.4% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 22px rgba(186, 158, 255, 0.8);
+                opacity: 0.95;
+            }
+            40.8% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 8px rgba(186, 158, 255, 0.35);
+                opacity: 0.65;
+            }
+            41.5% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 18px rgba(186, 158, 255, 0.65);
+                opacity: 1;
+            }
+
+            /* 75% to 88%: Slow rare drift to cyan/blue and back */
+            75% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 18px rgba(186, 158, 255, 0.65);
+                opacity: 1;
+            }
+            82% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 15%, #53ddfc 80%, transparent 100%);
+                box-shadow: 0 0 24px rgba(186, 158, 255, 0.65), 0 0 35px rgba(83, 221, 252, 0.5);
+                opacity: 1;
+            }
+            88% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 18px rgba(186, 158, 255, 0.65);
+                opacity: 1;
+            }
+            
+            /* 90%: a quick micro-flicker while returning to purple */
+            90% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 5px rgba(186, 158, 255, 0.2);
+                opacity: 0.5;
+            }
+            90.4% {
+                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
+                box-shadow: 0 0 18px rgba(186, 158, 255, 0.65);
+                opacity: 1;
+            }
+        }
     </style>
 </head>
 
 <body class="bg-background text-on-background font-body selection:bg-primary/30 antialiased overflow-hidden">
 
     <!-- Custom title bar -->
-    <div id="titlebar" class="fixed top-0 left-0 right-0 flex items-stretch z-[9999] border-b border-outline-variant/10"
-        style="background:#0a1020;">
+    <div id="titlebar" class="fixed top-0 left-0 right-0 flex items-stretch z-[9999]"
+        style="background:#070d1f;">
         <div data-tauri-drag-region class="flex-1 flex items-center px-4 gap-2">
             <span class="material-symbols-outlined text-primary" style="font-size:16px;">blur_on</span>
             <span class="font-headline text-xs font-bold uppercase tracking-widest text-primary/60">ZAPRET_</span>
@@ -116,43 +256,54 @@
     </div>
 
     <aside
-        class="fixed top-[30px] bottom-0 left-0 w-20 bg-[#0c1326] flex flex-col py-10 items-center gap-8 z-50 border-r border-outline-variant/10">
-        <div class="text-[#ba9eff] font-black text-xl mb-4">
-            <span class="material-symbols-outlined" style="font-variation-settings: 'opsz' 40;">blur_on</span>
+        class="fixed top-[30px] bottom-3 left-2 w-[72px] flex flex-col py-5 items-center z-50 border border-outline-variant/10 rounded-xl shadow-2xl overflow-hidden"
+        style="background: #0a0e1c;">
+        <!-- Sliding active indicator bar -->
+        <div id="nav-indicator"></div>
+        <div class="text-[#ba9eff] font-black mt-3 mb-5">
+            <span class="material-symbols-outlined" style="font-variation-settings: 'opsz' 40; font-size:28px;">blur_on</span>
         </div>
-        <nav class="flex flex-col gap-6 w-full items-center">
+        <nav class="flex flex-col gap-4 w-full items-center flex-1">
             <a href="#"
-                class="w-full flex justify-center py-3 border-r-2 border-[#ba9eff] bg-gradient-to-r from-[#ba9eff]/10 to-transparent text-[#ba9eff]"
+                class="w-12 h-12 flex items-center justify-center rounded-xl transition-all duration-200 cursor-pointer nav-active"
                 data-i18n="nav_home" data-i18n-attr="title" title="Home">
                 <span class="material-symbols-outlined">home</span>
             </a>
             <a href="#" id="nav-sites"
-                class="w-full flex justify-center py-3 text-[#dfe4fe]/40 hover:text-[#ba9eff] hover:bg-[#171f36] transition-colors duration-200"
+                class="w-12 h-12 flex items-center justify-center rounded-xl transition-all duration-200 cursor-pointer nav-inactive"
                 data-i18n="nav_sites" data-i18n-attr="title" title="Site Lists">
                 <span class="material-symbols-outlined">language</span>
             </a>
             <a href="#" id="nav-ips"
-                class="w-full flex justify-center py-3 text-[#dfe4fe]/40 hover:text-[#ba9eff] hover:bg-[#171f36] transition-colors duration-200"
+                class="w-12 h-12 flex items-center justify-center rounded-xl transition-all duration-200 cursor-pointer nav-inactive"
                 data-i18n="nav_ips" data-i18n-attr="title" title="IP Settings">
                 <span class="material-symbols-outlined">settings_input_component</span>
             </a>
             <a href="#" id="nav-diagnostics"
-                class="w-full flex justify-center py-3 text-[#dfe4fe]/40 hover:text-[#ba9eff] hover:bg-[#171f36] transition-colors duration-200"
+                class="w-12 h-12 flex items-center justify-center rounded-xl transition-all duration-200 cursor-pointer nav-inactive"
                 data-i18n="nav_diagnostics" data-i18n-attr="title" title="Diagnostics">
                 <span class="material-symbols-outlined">stethoscope</span>
             </a>
         </nav>
+        <!-- Settings at bottom -->
+        <div class="pb-3">
+            <a href="#" id="nav-settings"
+                class="w-12 h-12 flex items-center justify-center rounded-xl transition-all duration-200 cursor-pointer nav-inactive"
+                data-i18n="settings" data-i18n-attr="title" title="Settings">
+                <span class="material-symbols-outlined">settings</span>
+            </a>
+        </div>
     </aside>
 
     <header
-        class="fixed top-[30px] right-0 left-20 flex justify-between items-center px-10 h-20 z-40 bg-transparent backdrop-blur-3xl">
+        class="fixed top-[42px] right-3 left-[88px] flex justify-between items-center px-6 h-16 z-40 rounded-3xl" style="background: rgba(10, 14, 28, 0.75); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);">
         <div class="flex flex-col">
             <span class="text-[#ba9eff] font-headline text-lg font-bold uppercase tracking-widest">ZAPRET_</span>
             <span id="header-status"
                 class="text-[10px] text-error-dim font-bold uppercase tracking-[0.2em] opacity-80"><span data-i18n="status_label">Status</span>:
                 <span data-i18n="status_disconnected">Disconnected</span></span>
         </div>
-        <div class="flex items-center gap-6">
+        <div class="flex items-center gap-4">
             <div class="flex flex-col items-end">
                 <span class="text-[9px] text-primary/40 uppercase tracking-widest font-bold" data-i18n="ui_version">UI VERSION</span>
                 <span id="ui-version-display" class="text-[11px] text-primary font-bold"></span>
@@ -161,53 +312,14 @@
                 <span class="text-[9px] text-secondary/40 uppercase tracking-widest font-bold" data-i18n="core_version">ZAPRET CORE</span>
                 <span id="version-display" class="text-[11px] text-secondary font-bold">vNONE</span>
             </div>
-            <button id="check-updates-btn"
-                class="flex items-center gap-2 px-4 py-2 bg-surface-container-high border border-outline-variant/30 rounded-xl text-on-surface-variant hover:text-primary hover:border-primary/50 transition-colors text-xs font-bold uppercase tracking-wider">
-                <span class="material-symbols-outlined text-sm">update</span>
-                <span data-i18n="check_updates">Check Updates</span>
+            <button id="check-updates-btn" data-i18n="check_updates" data-i18n-attr="title" title="Check Updates"
+                class="flex items-center justify-center w-10 h-10 bg-surface-container-high/50 border border-outline-variant/20 rounded-xl text-primary/70 hover:text-primary transition-all">
+                <span class="material-symbols-outlined text-base">update</span>
             </button>
-            <button id="lang-switcher" class="flex items-center gap-2 px-3 py-2 bg-surface-container-high/50 border border-outline-variant/20 rounded-xl text-primary/70 hover:text-primary transition-all text-[11px] font-bold uppercase tracking-wider">
-                <span class="material-symbols-outlined text-sm">translate</span>
-                <span id="lang-text">RU</span>
-            </button>
-            <div class="relative">
-                <button id="settings-btn" data-i18n="settings" data-i18n-attr="title" title="Settings"
-                    class="flex items-center justify-center w-10 h-10 bg-surface-container-high/50 border border-outline-variant/20 rounded-xl text-primary/70 hover:text-primary transition-all">
-                    <span class="material-symbols-outlined text-base">settings</span>
-                </button>
-                <div id="settings-popover" class="hidden absolute right-0 top-12 z-[1000] rounded-2xl border border-primary/20 overflow-hidden shadow-2xl p-4 w-80" style="background:#0d1225;">
-                    <h4 class="font-headline text-[10px] font-bold uppercase tracking-[0.2em] text-primary/70 mb-3" data-i18n="settings">Settings</h4>
-                    <label class="flex items-start justify-between gap-3 py-2 cursor-pointer">
-                        <div class="flex-1">
-                            <div class="text-sm text-on-surface font-headline" data-i18n="autostart_label">Launch on Windows startup</div>
-                            <div class="text-[10px] text-on-surface-variant mt-0.5" data-i18n="autostart_hint">Start minimized to tray</div>
-                        </div>
-                        <button id="autostart-toggle" type="button" class="toggle-btn is-off flex-shrink-0 relative w-12 h-6 rounded-full transition-colors">
-                            <span class="toggle-thumb absolute top-0.5 left-0.5 w-5 h-5 bg-primary rounded-full shadow"></span>
-                        </button>
-                    </label>
-                    <div class="border-t border-outline-variant/10 my-3"></div>
-                    <div class="text-xs text-on-surface-variant/70 mb-2" data-i18n="close_pref_label">When the close button is clicked:</div>
-                    <div class="flex flex-col gap-1">
-                        <label class="flex items-center gap-2 text-xs text-on-surface cursor-pointer px-2 py-1.5 rounded hover:bg-primary/10">
-                            <input type="radio" name="close-pref" value="ask" class="border-outline-variant/30 bg-surface-container-highest text-primary focus:ring-primary focus:ring-offset-background h-4 w-4">
-                            <span data-i18n="close_pref_ask">Ask every time</span>
-                        </label>
-                        <label class="flex items-center gap-2 text-xs text-on-surface cursor-pointer px-2 py-1.5 rounded hover:bg-primary/10">
-                            <input type="radio" name="close-pref" value="tray" class="border-outline-variant/30 bg-surface-container-highest text-primary focus:ring-primary focus:ring-offset-background h-4 w-4">
-                            <span data-i18n="close_pref_tray">Minimize to tray</span>
-                        </label>
-                        <label class="flex items-center gap-2 text-xs text-on-surface cursor-pointer px-2 py-1.5 rounded hover:bg-primary/10">
-                            <input type="radio" name="close-pref" value="exit" class="border-outline-variant/30 bg-surface-container-highest text-primary focus:ring-primary focus:ring-offset-background h-4 w-4">
-                            <span data-i18n="close_pref_exit">Exit application</span>
-                        </label>
-                    </div>
-                </div>
-            </div>
         </div>
     </header>
 
-    <main id="sections-host" class="ml-20 pt-20 h-screen overflow-hidden bg-surface" style="margin-top:30px;">
+    <main id="sections-host" class="ml-[80px] pt-20 h-screen overflow-hidden bg-surface" style="margin-top:30px;">
         <!-- Section fragments are injected here by src/components/index.js -->
     </main>
 

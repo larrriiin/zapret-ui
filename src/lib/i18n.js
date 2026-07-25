@@ -47,6 +47,10 @@ export function updatePageTranslations() {
   });
   const langBtn = $('lang-text');
   if (langBtn) langBtn.textContent = currentLang.toUpperCase();
+  const langRadios = document.querySelectorAll('input[name="lang-pref"]');
+  langRadios.forEach(radio => {
+    radio.checked = (radio.value === currentLang);
+  });
 }
 
 export function onLangChange(fn) {
@@ -54,14 +58,19 @@ export function onLangChange(fn) {
   return () => changeListeners.delete(fn);
 }
 
-export function toggleLanguage() {
-  currentLang = currentLang === 'ru' ? 'en' : 'ru';
+export function setLanguage(lang) {
+  if (lang !== 'ru' && lang !== 'en') return;
+  currentLang = lang;
   localStorage.setItem(LANG_KEY, currentLang);
   updatePageTranslations();
   for (const fn of changeListeners) {
     try { fn(currentLang); } catch (err) { console.error('i18n listener failed:', err); }
   }
   syncTrayLocalization();
+}
+
+export function toggleLanguage() {
+  setLanguage(currentLang === 'ru' ? 'en' : 'ru');
 }
 
 export async function syncTrayLocalization() {

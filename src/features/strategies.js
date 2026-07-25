@@ -18,6 +18,7 @@ export function setStrategyValue(value, label) {
   _strategyValue = value;
   const lbl = $('strategy-label');
   if (lbl) {
+    lbl.removeAttribute('data-i18n');
     lbl.textContent = label;
     lbl.classList.remove('text-on-surface/60');
     lbl.classList.add('text-on-surface');

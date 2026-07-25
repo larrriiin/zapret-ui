@@ -1,10 +1,12 @@
 [Русский](#russian) | [English](#english)
 
+Проект сделан на основе проекта Flowseal - https://github.com/Flowseal/zapret-discord-youtube
+
 <a name="russian"></a>
 ## Описание (RU)
 **Zapret UI** — это современный графический интерфейс для утилиты `zapret`, предназначенной для обхода систем анализа трафика (DPI). Приложение упрощает настройку и управление службой, позволяя легко переключать стратегии, редактировать списки доменов и следить за состоянием сервиса.
 
-<img width="1086" height="741" alt="image" src="https://github.com/user-attachments/assets/d529bf11-b531-4b5d-87c2-eec62edafd19" />
+<img width="1102" height="979" alt="Без имени" src="https://github.com/user-attachments/assets/b7bcd009-2083-4c84-935c-8fc92640a2b3" />
 
 ### Основные возможности
 - **Управление службой**: Запуск zapret как полноценного Windows-сервиса или в режиме временного процесса.
@@ -34,6 +36,9 @@ npm run set-version 2026.6.1
 <a name="english"></a>
 ## Description (EN)
 **Zapret UI** is a modern graphical interface for the `zapret` utility, designed to bypass Deep Packet Inspection (DPI) systems. This application simplifies configuration and service management, allowing you to easily switch strategies, manage domain lists, and monitor the service status.
+
+<img width="1092" height="971" alt="image" src="https://github.com/user-attachments/assets/f5010408-d713-4c58-9363-50e7dc6d1058" />
+
 
 ### Key Features
 - **Service Management**: Run zapret as a full Windows service or as a temporary process.

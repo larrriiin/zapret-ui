@@ -10,12 +10,13 @@
                 <p class="text-xs text-on-surface-variant mt-1" data-i18n="diagnostics_desc">Check system configuration and potential issues</p>
             </div>
             <div class="flex items-center gap-2">
-                <button id="diagnostics-copy-btn" class="hidden px-4 py-2 border border-outline-variant/30 rounded-xl text-[10px] font-bold uppercase tracking-widest text-on-surface-variant hover:text-secondary hover:border-secondary/50 transition-colors flex items-center gap-1.5">
+                <button id="diagnostics-copy-btn" class="hidden h-[34px] px-4 border border-outline-variant/30 rounded-xl text-[10px] font-bold uppercase tracking-widest text-on-surface-variant hover:text-secondary hover:border-secondary/50 transition-colors flex items-center justify-center gap-1.5">
                     <span class="material-symbols-outlined text-sm">content_copy</span>
                     <span id="diagnostics-copy-label" data-i18n="copy_report">Copy Report</span>
                 </button>
-                <button id="diagnostics-show-all-btn" class="hidden px-4 py-2 border border-outline-variant/30 rounded-xl text-[10px] font-bold uppercase tracking-widest text-on-surface-variant hover:text-secondary hover:border-secondary/50 transition-colors" data-i18n="show_all_checks">
-                    Show All Checks
+                <button id="diagnostics-show-all-btn" class="hidden h-[34px] px-4 border border-outline-variant/30 rounded-xl text-[10px] font-bold uppercase tracking-widest text-on-surface-variant hover:text-secondary hover:border-secondary/50 transition-colors flex items-center justify-center gap-1.5">
+                    <span class="material-symbols-outlined text-sm">visibility</span>
+                    <span id="diagnostics-show-all-label" data-i18n="show_all_checks">Show All Checks</span>
                 </button>
             </div>
         </div>
@@ -90,6 +91,27 @@
 
         <!-- Summary Results -->
         <div id="tests-results" class="hidden mt-4 space-y-2 w-full"></div>
+    </div>
+
+    <!-- Site Checker Section -->
+    <div class="glass-panel rounded-2xl border border-primary/10 p-6 w-full mt-8">
+        <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-primary mb-2" data-i18n="site_checker_title">Targeted Site Checker</h3>
+        <p class="text-xs text-on-surface-variant mb-4" data-i18n="site_checker_desc">Test if a specific website is accessible and check its connection status</p>
+        
+        <div class="flex gap-2 mb-4">
+            <input id="site-checker-input" type="text" data-i18n="site_checker_placeholder" data-i18n-attr="placeholder" placeholder="Enter domain (e.g. google.com)" autocomplete="off" spellcheck="false"
+                class="flex-1 bg-surface-container-high/50 border border-outline-variant/20 rounded-xl px-4 py-3 text-sm text-on-surface placeholder-on-surface-variant/50 focus:outline-none focus:border-primary/50" />
+            <button id="run-site-check-btn"
+                class="px-6 py-3 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-all duration-300 flex items-center justify-center gap-2">
+                <span class="material-symbols-outlined text-sm">troubleshoot</span>
+                <span data-i18n="site_checker_run">Check Site</span>
+            </button>
+        </div>
+
+        <!-- Checker Status & Results -->
+        <div id="site-checker-results" class="hidden space-y-4 w-full">
+            <!-- Results populated here -->
+        </div>
     </div>
     </div>
 </div>

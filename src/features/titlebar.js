@@ -4,6 +4,7 @@ const CLOSE_PREF_KEY = 'zapret.closePref'; // 'ask' | 'tray' | 'exit'
 const getClosePref = () => localStorage.getItem(CLOSE_PREF_KEY) || 'ask';
 const setClosePref = (v) => localStorage.setItem(CLOSE_PREF_KEY, v);
 
+
 export function initTitlebar() {
   try {
     const win = getCurrentWindow();
@@ -132,6 +133,7 @@ export function initTitlebar() {
       });
     }
     syncAutostartUI();
+
   } catch (e) {
     console.warn('Title bar controls unavailable:', e);
   }

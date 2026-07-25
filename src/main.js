@@ -1,7 +1,7 @@
 import './styles.css';
 import { mountComponents } from './components/index.js';
 import { $, invoke } from './lib/core.js';
-import { initI18n, toggleLanguage, onLangChange, syncTrayLocalization } from './lib/i18n.js';
+import { initI18n, toggleLanguage, setLanguage, onLangChange, syncTrayLocalization } from './lib/i18n.js';
 import { state } from './lib/state.js';
 import {
   updateRestartBanner,
@@ -16,6 +16,7 @@ import { initTitlebar } from './features/titlebar.js';
 import { initNavigation, showSection } from './features/navigation.js';
 import { initConnectButtons } from './features/connect.js';
 import { initFilterButtons, pollFilters } from './features/filters.js';
+import { initFakeSelectors, pollFakes } from './features/fakes.js';
 import {
   initStrategyDropdown,
   loadStrategies,
@@ -34,6 +35,7 @@ import { initStatusCheck } from './features/status-check.js';
 // Mount HTML fragments synchronously so `[data-i18n]` elements are already in
 // the DOM when Tailwind's CDN JIT observer and i18n engine run over them.
 mountComponents();
+
 
 window.addEventListener('DOMContentLoaded', async () => {
   initI18n();
@@ -55,16 +57,19 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   await pollStatus();
   await pollFilters();
+  await pollFakes();
   syncTrayLocalization();
 
   setInterval(async () => {
     await pollStatus();
     await pollFilters();
+    await pollFakes();
   }, 2000);
 
   initNavigation();
   initConnectButtons();
   initFilterButtons();
+  initFakeSelectors();
   initUserLists();
   initInfoModals();
   initUpdates();
@@ -74,7 +79,11 @@ window.addEventListener('DOMContentLoaded', async () => {
   initStatusCheck();
 
   // Global restart-related buttons (live in top-level modals/banner).
-  $('lang-switcher')?.addEventListener('click', toggleLanguage);
+  document.querySelectorAll('input[name="lang-pref"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      if (e.target.checked) setLanguage(e.target.value);
+    });
+  });
 
   $('restart-later')?.addEventListener('click', () => {
     hideRestartModal();
@@ -113,6 +122,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   onLangChange(() => {
     pollStatus();
     pollFilters();
+    pollFakes();
     renderStrategyList();
     refreshOpenInfoModal();
   });

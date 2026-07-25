@@ -3,6 +3,8 @@ import { state } from '../lib/state.js';
 import { showRestartModal } from '../lib/restart.js';
 import { loadUserLists } from './user-lists.js';
 
+const ALL_SECTIONS = ['section-home', 'section-sites', 'section-ips', 'section-diagnostics', 'section-settings'];
+
 export function showSection(sectionId) {
   if (state.pendingRestart && !state.restartGuardDismissed && sectionId !== state.currentSectionId) {
     state.pendingNavId = sectionId;
@@ -11,24 +13,60 @@ export function showSection(sectionId) {
   }
   if (sectionId === state.currentSectionId) return;
 
-  state.currentSectionId = sectionId;
-
-  ['section-home', 'section-sites', 'section-ips', 'section-diagnostics'].forEach((id) => {
-    $(id)?.classList.add('hidden');
+  // Update nav immediately (feels responsive)
+  document.querySelectorAll('aside a').forEach((a) => {
+    a.classList.remove('nav-active');
+    a.classList.add('nav-inactive');
   });
-  const section = $(`section-${sectionId}`);
-  if (section) section.classList.remove('hidden');
-
-  document.querySelectorAll('aside nav a').forEach((a) => {
-    a.classList.remove('border-r-2', 'border-[#ba9eff]', 'bg-gradient-to-r', 'from-[#ba9eff]/10', 'to-transparent', 'text-[#ba9eff]');
-    a.classList.add('text-[#dfe4fe]/40');
-  });
-
   const activeNav = sectionId === 'home' ? document.querySelector('aside nav a:first-child') : $(`nav-${sectionId}`);
   if (activeNav) {
-    activeNav.classList.remove('text-[#dfe4fe]/40');
-    activeNav.classList.add('border-r-2', 'border-[#ba9eff]', 'bg-gradient-to-r', 'from-[#ba9eff]/10', 'to-transparent', 'text-[#ba9eff]');
+    activeNav.classList.remove('nav-inactive');
+    activeNav.classList.add('nav-active');
+    updateNavIndicator(activeNav);
   }
+
+  const prevId = state.currentSectionId;
+  state.currentSectionId = sectionId;
+
+  const prevSection = prevId ? $(`section-${prevId}`) : null;
+  const nextSection = $(`section-${sectionId}`);
+
+  if (prevSection && !prevSection.classList.contains('hidden')) {
+    // Fade out current, then swap
+    prevSection.classList.add('section-exit');
+    setTimeout(() => {
+      prevSection.classList.add('hidden');
+      prevSection.classList.remove('section-exit');
+      if (nextSection) showWithAnim(nextSection);
+    }, 120); // matches secFadeOut duration
+  } else {
+    // No previous visible section — just show immediately
+    ALL_SECTIONS.forEach((id) => $(id)?.classList.add('hidden'));
+    if (nextSection) showWithAnim(nextSection);
+  }
+}
+
+/** Show a section with the enter animation, then remove the class so
+ *  CSS transform from 'forwards' fill mode doesn't break fixed-position children. */
+function showWithAnim(el) {
+  el.classList.remove('hidden');
+  el.classList.remove('section-enter');
+  void el.offsetWidth; // force reflow so animation restarts cleanly
+  el.classList.add('section-enter');
+  el.addEventListener('animationend', () => {
+    el.classList.remove('section-enter'); // removes transform:translateY(0) from forwards fill
+  }, { once: true });
+}
+
+function updateNavIndicator(activeEl) {
+  const indicator = $('nav-indicator');
+  const aside = document.querySelector('aside');
+  if (!indicator || !activeEl || !aside) return;
+  const asideRect = aside.getBoundingClientRect();
+  const elRect = activeEl.getBoundingClientRect();
+  indicator.style.top = (elRect.top - asideRect.top) + 'px';
+  indicator.style.height = elRect.height + 'px';
+  indicator.style.opacity = '1';
 }
 
 export function initNavigation() {
@@ -49,5 +87,15 @@ export function initNavigation() {
   $('nav-diagnostics')?.addEventListener('click', (e) => {
     e.preventDefault();
     showSection('diagnostics');
+  });
+  $('nav-settings')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    showSection('settings');
+  });
+
+  // Set indicator to initial active item after layout
+  requestAnimationFrame(() => {
+    const firstNav = document.querySelector('aside nav a:first-child');
+    if (firstNav) updateNavIndicator(firstNav);
   });
 }

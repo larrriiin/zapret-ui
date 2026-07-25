@@ -10,6 +10,7 @@ function getInfoData() {
     include: { title: t('include_info_title'), content: t('include_info_content') },
     exclude: { title: t('exclude_info_title'), content: t('exclude_info_content') },
     ip_exclude: { title: t('ip_exclude_info_title'), content: t('ip_exclude_info_content') },
+    fakes: { title: t('fakes_info_title'), content: t('fakes_info_content') },
   };
 }
 
@@ -41,6 +42,7 @@ export function initInfoModals() {
   $('include-info-btn')?.addEventListener('click', () => showInfo('include'));
   $('exclude-info-btn')?.addEventListener('click', () => showInfo('exclude'));
   $('ip-exclude-info-btn')?.addEventListener('click', () => showInfo('ip_exclude'));
+  $('fakes-info-btn')?.addEventListener('click', () => showInfo('fakes'));
 
   infoClose?.addEventListener('click', () => {
     infoModal?.classList.add('hidden');

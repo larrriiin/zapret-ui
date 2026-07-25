@@ -14,6 +14,14 @@ export function updateStatusUI(status) {
       header.innerHTML = `<span class="text-primary"><span data-i18n="status_label">${t('status_label')}</span>:</span> <span class="text-secondary">${label}</span>`;
     }
 
+    const lamp = $('status-lamp-divider');
+    if (lamp) {
+      lamp.classList.remove('is-off');
+      if (!lamp.classList.contains('is-on')) {
+        lamp.classList.add('is-on');
+      }
+    }
+
     const hero = $('hero-status');
     if (hero) {
       hero.textContent = t('status_connected');
@@ -39,6 +47,14 @@ export function updateStatusUI(status) {
     const header = $('header-status');
     if (header) {
       header.innerHTML = `<span class="text-primary"><span data-i18n="status_label">${t('status_label')}</span>:</span> <span class="text-error-dim" data-i18n="status_disconnected">${t('status_disconnected')}</span>`;
+    }
+ 
+    const lamp = $('status-lamp-divider');
+    if (lamp) {
+      lamp.classList.remove('is-on');
+      if (!lamp.classList.contains('is-off')) {
+        lamp.classList.add('is-off');
+      }
     }
 
     const hero = $('hero-status');

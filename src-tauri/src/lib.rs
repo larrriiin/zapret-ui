@@ -51,6 +51,7 @@ struct AppState {
     notification_shown: AtomicBool,
     last_strategy: Mutex<Option<String>>,
     translations: Mutex<Option<TrayTranslations>>,
+    temp_process_child: Mutex<Option<std::process::Child>>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Clone)]
@@ -416,6 +417,90 @@ async fn fetch_expected_sha256(version: &str, asset_name: &str) -> Result<String
     Ok(hex.to_ascii_lowercase())
 }
 
+#[derive(Clone, Debug)]
+pub struct SfReleaseInfo {
+    pub version: String,
+    pub download_url: String,
+    pub md5sum: String,
+}
+
+pub async fn fetch_sf_release_info(client: &reqwest::Client) -> Result<SfReleaseInfo, String> {
+    let sf_url = "https://sourceforge.net/projects/zapret-discord-youtube.mirror/best_release.json";
+    let response = client
+        .get(sf_url)
+        .header("Cache-Control", "no-cache")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send SourceForge request: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("SourceForge returned status: {}", response.status()));
+    }
+    
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse SourceForge JSON: {}", e))?;
+
+    // Try to get from platform_releases.windows, otherwise release
+    let windows_release = body.get("platform_releases")
+        .and_then(|pr| pr.get("windows"));
+
+    let release_obj = windows_release.unwrap_or_else(|| {
+        body.get("release").unwrap_or(&serde_json::Value::Null)
+    });
+
+    if release_obj.is_null() {
+        return Err("No release information found in SourceForge JSON".to_string());
+    }
+
+    let filename = release_obj.get("filename")
+        .and_then(|f| f.as_str())
+        .ok_or_else(|| "Missing filename in SourceForge JSON".to_string())?;
+
+    let download_url = release_obj.get("url")
+        .and_then(|u| u.as_str())
+        .ok_or_else(|| "Missing url in SourceForge JSON".to_string())?;
+
+    let md5sum = release_obj.get("md5sum")
+        .and_then(|m| m.as_str())
+        .ok_or_else(|| "Missing md5sum in SourceForge JSON".to_string())?;
+
+    let parts: Vec<&str> = filename.split('/').filter(|s| !s.is_empty()).collect();
+    let version = if let Some(first_part) = parts.first() {
+        first_part.to_string()
+    } else {
+        return Err("Failed to parse version from SourceForge filename".to_string());
+    };
+
+    Ok(SfReleaseInfo {
+        version,
+        download_url: download_url.to_string(),
+        md5sum: md5sum.to_string(),
+    })
+}
+
+/// Computes the MD5 digest of a file as a lowercase hex string.
+pub fn md5_file(path: &std::path::Path) -> Result<String, String> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
+    let mut context = md5::Context::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+        if n == 0 {
+            break;
+        }
+        context.consume(&buf[..n]);
+    }
+    let digest = context.compute();
+    Ok(format!("{:x}", digest))
+}
+
 /// On Windows, `std::fs::canonicalize` returns the verbatim/extended-length
 /// form (e.g. `\\?\C:\foo\bar`). That form is fine for Rust's file APIs but
 /// breaks `cmd.exe` and downstream `.bat` scripts, which refuse to use it as
@@ -584,6 +669,11 @@ fn get_local_version() -> String {
 }
 
 #[tauri::command]
+fn get_update_proxy() -> Option<String> {
+    option_env!("ZAPRET_UPDATE_PROXY").map(|s| s.to_string())
+}
+
+#[tauri::command]
 fn get_local_version_cmd() -> String {
     get_local_version()
 }
@@ -606,14 +696,35 @@ async fn get_remote_core_version(
     }
 
     let client = client_builder.build().map_err(|e| e.to_string())?;
-    let response = client
+    
+    let response_res = client
         .get("https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt")
         .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    
-    let text = response.text().await.map_err(|e| e.to_string())?;
-    Ok(text.trim().to_string())
+        .await;
+
+    match response_res {
+        Ok(resp) => {
+            let status = resp.status();
+            if status.is_success() {
+                if let Ok(text) = resp.text().await {
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() && !trimmed.contains("Not Found") {
+                        return Ok(trimmed.to_string());
+                    }
+                }
+            }
+            if let Ok(info) = fetch_sf_release_info(&client).await {
+                return Ok(info.version);
+            }
+            Err(format!("GitHub returned status {} and SourceForge fallback failed", status))
+        }
+        Err(e) => {
+            if let Ok(info) = fetch_sf_release_info(&client).await {
+                return Ok(info.version);
+            }
+            Err(format!("Failed to connect to GitHub ({}) and SourceForge fallback failed", e))
+        }
+    }
 }
 
 fn get_ui_version() -> String {
@@ -716,6 +827,29 @@ fn parse_bat_args(strategy: &str) -> Result<String, String> {
     }
 
     Ok(final_args.trim().to_string())
+}
+
+/// Splits a command-line arguments string into separate arguments, respecting double quotes
+fn split_arguments(s: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    for c in s.chars() {
+        if c == '"' {
+            in_quotes = !in_quotes;
+        } else if c.is_whitespace() && !in_quotes {
+            if !current.is_empty() {
+                args.push(current.clone());
+                current.clear();
+            }
+        } else {
+            current.push(c);
+        }
+    }
+    if !current.is_empty() {
+        args.push(current);
+    }
+    args
 }
 
 /// Проверяет, запущен ли winws.exe через tasklist.
@@ -1132,9 +1266,140 @@ fn set_ipset_filter(mode: String) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct FakeFileItem {
+    pub name: String,
+    pub filename: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct FakesInfo {
+    pub current_discord_fake: String,
+    pub current_game_fake: String,
+    pub available_fakes: Vec<FakeFileItem>,
+}
+
+/// Возвращает информацию о доступных фейках и текущих активных фейках
+#[tauri::command]
+fn get_fakes_info() -> Result<FakesInfo, String> {
+    let bin_dir = find_binaries_dir().join("bin");
+    if !bin_dir.exists() {
+        return Err("bin folder not found".to_string());
+    }
+
+    let discord_active_path = bin_dir.join("ACTIVE_DISCORD_UDP.bin");
+    let game_active_path = bin_dir.join("ACTIVE_GAME_UDP.bin");
+
+    let discord_hash = if discord_active_path.exists() {
+        sha256_file(&discord_active_path).ok()
+    } else {
+        None
+    };
+
+    let game_hash = if game_active_path.exists() {
+        sha256_file(&game_active_path).ok()
+    } else {
+        None
+    };
+
+    let mut available_fakes = Vec::new();
+    let mut fake_hashes: Vec<(String, String)> = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(&bin_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("bin") {
+                if let Some(file_name_str) = path.file_name().and_then(|s| s.to_str()) {
+                    if file_name_str.starts_with("ACTIVE_") {
+                        continue;
+                    }
+                    let base_name = path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if base_name.is_empty() {
+                        continue;
+                    }
+                    let hash = sha256_file(&path).unwrap_or_default();
+                    fake_hashes.push((base_name.clone(), hash));
+                    available_fakes.push(FakeFileItem {
+                        name: base_name,
+                        filename: file_name_str.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    available_fakes.sort_by(|a, b| natural_sort_compare(&a.name, &b.name));
+    fake_hashes.sort_by(|a, b| natural_sort_compare(&a.0, &b.0));
+
+    let mut current_discord_fake = "quic_initial_steamcommunity_com".to_string();
+    if let Some(ref d_hash) = discord_hash {
+        for (name, hash) in &fake_hashes {
+            if hash.eq_ignore_ascii_case(d_hash) {
+                current_discord_fake = name.clone();
+            }
+        }
+    }
+
+    // Determine current GameFilter fake
+    let mut current_game_fake = "quic_initial_dbankcloud_ru".to_string();
+    if let Some(ref g_hash) = game_hash {
+        for (name, hash) in &fake_hashes {
+            if hash.eq_ignore_ascii_case(g_hash) {
+                current_game_fake = name.clone();
+            }
+        }
+    }
+
+    Ok(FakesInfo {
+        current_discord_fake,
+        current_game_fake,
+        available_fakes,
+    })
+}
+
+/// Заменяет активный фейк (discord или game) на указанный файл-фейк
+#[tauri::command]
+fn set_active_fake(fake_type: String, fake_name: String) -> Result<(), String> {
+    let bin_dir = find_binaries_dir().join("bin");
+    if !bin_dir.exists() {
+        return Err("bin folder not found".to_string());
+    }
+
+    let target_bin = match fake_type.as_str() {
+        "discord" => "ACTIVE_DISCORD_UDP.bin",
+        "game" => "ACTIVE_GAME_UDP.bin",
+        _ => return Err("Invalid fake type".to_string()),
+    };
+
+    if fake_name.contains('/') || fake_name.contains('\\') || fake_name.contains("..") {
+        return Err("Invalid fake file name".to_string());
+    }
+
+    let source_path = bin_dir.join(format!("{}.bin", fake_name));
+    if !source_path.exists() {
+        return Err(format!("Fake file '{}.bin' not found", fake_name));
+    }
+
+    let target_bin_path = bin_dir.join(target_bin);
+
+    if target_bin_path.exists() {
+        let _ = std::fs::remove_file(&target_bin_path);
+    }
+
+    std::fs::copy(&source_path, &target_bin_path)
+        .map_err(|e| format!("Failed to replace active fake: {}", e))?;
+
+    Ok(())
+}
+
 /// Запускает стратегию по имени .bat файла.
 #[tauri::command]
 fn start_zapret(
+    _app: tauri::AppHandle,
     strategy: String,
     mode: String,
     state: State<'_, AppState>,
@@ -1276,18 +1541,26 @@ try {{
             }
         }
     } else {
-        let bat_str = bat_path
-            .to_str()
-            .ok_or("Невалидный путь к bat-файлу")?
-            .to_string();
+        let bin_path = dir.join("bin").join("winws.exe");
+        if !bin_path.exists() {
+            return Err("winws.exe not found".to_string());
+        }
 
-        let mut cmd = Command::new("cmd");
-        cmd.args(["/c", &bat_str]);
+        let args_str = parse_bat_args(&strategy)?;
+        let args = split_arguments(&args_str);
+
+        let mut cmd = Command::new(&bin_path);
+        cmd.args(&args);
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::null());
         #[cfg(windows)]
         cmd.creation_flags(CREATE_NO_WINDOW);
 
-        cmd.spawn()
-            .map_err(|e| format!("Не удалось запустить стратегию: {}", e))?;
+        let child = cmd
+            .spawn()
+            .map_err(|e| format!("Не удалось запустить winws.exe напрямую: {}", e))?;
+
+        *state.temp_process_child.lock_unpoisoned() = Some(child);
     }
 
     *state.active_strategy.lock_unpoisoned() = Some(strategy.clone());
@@ -1295,14 +1568,7 @@ try {{
     Ok("Connected".into())
 }
 
-/// Полностью останавливает zapret.
-/// Требует прав администратора — запрашивает их через PowerShell -Verb RunAs.
-#[tauri::command]
-fn stop_zapret(state: State<'_, AppState>) {
-    // Скрипт остановки передаётся elevated-повершеллу через -EncodedCommand
-    // (см. start_zapret — та же TOCTOU-защита). Никакого промежуточного
-    // `.bat` в `%TEMP%` больше не пишем: подменить payload между write и
-    // elevated-exec под нашим UID больше нельзя.
+fn stop_zapret_internal() -> Result<(), String> {
     let ps_script = r#"$ErrorActionPreference = 'Continue'
 $sys = "$env:SystemRoot\System32"
 try { Stop-Service -Name zapret -Force -ErrorAction SilentlyContinue } catch {}
@@ -1318,7 +1584,7 @@ foreach ($svc in @('WinDivert','WinDivert14')) {
 }
 "#;
     let encoded = encode_powershell_command(ps_script);
-    let _ = Command::new(powershell_path())
+    let status = Command::new(powershell_path())
         .args([
             "-NoProfile",
             "-WindowStyle",
@@ -1328,9 +1594,42 @@ foreach ($svc in @('WinDivert','WinDivert14')) {
         ])
         .env("ZAPRET_PS_PAYLOAD", &encoded)
         .creation_flags(CREATE_NO_WINDOW)
-        .output();
+        .status();
 
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(format!("PowerShell process exited with status: {}", s)),
+        Err(e) => Err(format!("Failed to start PowerShell: {}", e)),
+    }
+}
+
+/// Полностью останавливает zapret.
+/// Требует прав администратора — запрашивает их через PowerShell -Verb RunAs.
+#[tauri::command]
+fn stop_zapret(state: State<'_, AppState>) {
+    {
+        let mut child_lock = state.temp_process_child.lock_unpoisoned();
+        if let Some(mut child) = child_lock.take() {
+            let _ = child.kill();
+        }
+    }
+    let _ = stop_zapret_internal();
     *state.active_strategy.lock_unpoisoned() = None;
+}
+
+fn stop_zapret_on_exit(state: State<'_, AppState>) {
+    {
+        let mut child_lock = state.temp_process_child.lock_unpoisoned();
+        if let Some(mut child) = child_lock.take() {
+            let _ = child.kill();
+            let _ = Command::new(system32_tool("taskkill.exe"))
+                .arg("/F")
+                .arg("/IM")
+                .arg("winws.exe")
+                .creation_flags(CREATE_NO_WINDOW)
+                .output();
+        }
+    }
 }
 
 // ─── User Lists Management ────────────────────────────────────────────────────
@@ -1636,6 +1935,9 @@ async fn download_and_install_update(
     use_proxy: Option<bool>,
     custom_proxy: Option<String>,
 ) -> Result<String, String> {
+    // Stop the zapret service and processes to release file locks before update
+    let _ = stop_zapret_internal();
+
     let filters_status = get_filters_status();
     let dir = find_binaries_dir();
     let temp_dir = std::env::temp_dir().join("zapret_update");
@@ -1676,23 +1978,45 @@ async fn download_and_install_update(
     }
     let client = client_builder.build().map_err(|e| format!("Failed to build http client: {}", e))?;
 
-    // Fetch version
-    let latest_version = client
-        .get(GITHUB_VERSION_URL)
-        .header("Cache-Control", "no-cache")
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch version: {}", e))?
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read version: {}", e))?
-        .trim()
-        .to_string();
+    // Fetch version from GitHub with fallback to SourceForge
+    let mut fetched_from_sf = false;
+    let mut sf_info: Option<SfReleaseInfo> = None;
+
+    let latest_version = match client.get(GITHUB_VERSION_URL).header("Cache-Control", "no-cache").send().await {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.text().await {
+                Ok(text) => {
+                    let trimmed = text.trim().to_string();
+                    if !trimmed.is_empty() && !trimmed.contains("Not Found") {
+                        trimmed
+                    } else {
+                        fetched_from_sf = true;
+                        let info = fetch_sf_release_info(&client).await?;
+                        let version = info.version.clone();
+                        sf_info = Some(info);
+                        version
+                    }
+                }
+                Err(_) => {
+                    fetched_from_sf = true;
+                    let info = fetch_sf_release_info(&client).await?;
+                    let version = info.version.clone();
+                    sf_info = Some(info);
+                    version
+                }
+            }
+        }
+        _ => {
+            fetched_from_sf = true;
+            let info = fetch_sf_release_info(&client).await?;
+            let version = info.version.clone();
+            sf_info = Some(info);
+            version
+        }
+    };
 
     window.emit("download-progress", 10).ok();
 
-    // Download update
-    let download_url = format!("https://github.com/Flowseal/zapret-discord-youtube/releases/download/{}/zapret-discord-youtube-{}.zip", latest_version, latest_version);
     let zip_path = temp_dir.join("update.zip");
 
     use std::sync::{
@@ -1716,19 +2040,57 @@ async fn download_and_install_update(
         }
     });
 
-    let response = client
-        .get(&download_url)
-        .send()
-        .await
-        .map_err(|e| {
-            done_flag.store(true, Ordering::Relaxed);
-            format!("Download failed: {}", e)
-        })?;
+    // 1. Try downloading from GitHub
+    let mut response = None;
+    let mut downloaded_from_sf = false;
 
-    if !response.status().is_success() {
-        done_flag.store(true, Ordering::Relaxed);
-        return Err(format!("Download failed with status: {}", response.status()));
+    if !fetched_from_sf {
+        let github_url = format!("https://github.com/Flowseal/zapret-discord-youtube/releases/download/{}/zapret-discord-youtube-{}.zip", latest_version, latest_version);
+        if let Ok(resp) = client.get(&github_url).send().await {
+            if resp.status().is_success() {
+                response = Some(resp);
+            }
+        }
     }
+
+    // 2. If GitHub failed or wasn't tried, try SourceForge
+    if response.is_none() {
+        // Ensure we have SF info loaded
+        let info = match sf_info {
+            Some(i) => i,
+            None => fetch_sf_release_info(&client).await?,
+        };
+
+        // Try downloading from the direct SourceForge URL
+        match client.get(&info.download_url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                response = Some(resp);
+                downloaded_from_sf = true;
+                sf_info = Some(info);
+            }
+            _ => {
+                // Also try downloading from the generic latest URL user requested as fallback
+                let generic_url = "https://sourceforge.net/projects/zapret-discord-youtube.mirror/files/latest/download";
+                match client.get(generic_url).send().await {
+                    Ok(resp) if resp.status().is_success() => {
+                        response = Some(resp);
+                        downloaded_from_sf = true;
+                        sf_info = Some(info);
+                    }
+                    Ok(resp) => {
+                        done_flag.store(true, Ordering::Relaxed);
+                        return Err(format!("SourceForge download failed with status: {}", resp.status()));
+                    }
+                    Err(e) => {
+                        done_flag.store(true, Ordering::Relaxed);
+                        return Err(format!("Failed to download from both GitHub and SourceForge. SF error: {}", e));
+                    }
+                }
+            }
+        }
+    }
+
+    let response = response.unwrap();
 
     use futures_util::StreamExt;
     let mut file = std::fs::File::create(&zip_path).map_err(|e| {
@@ -1759,20 +2121,31 @@ async fn download_and_install_update(
         return Err("Download failed: output file not found".to_string());
     }
 
-    // Verify the downloaded archive against the SHA-256 digest published by
-    // GitHub for this release asset. If verification fails we delete the file
-    // and abort — we must never extract an archive whose integrity is in
-    // question, because its contents are executed as part of the bypass
-    // toolchain with elevated privileges.
-    let asset_name = format!("zapret-discord-youtube-{}.zip", latest_version);
-    let expected_sha256 = fetch_expected_sha256(&latest_version, &asset_name).await?;
-    let actual_sha256 = sha256_file(&zip_path)?;
-    if actual_sha256 != expected_sha256 {
-        let _ = std::fs::remove_file(&zip_path);
-        return Err(format!(
-            "Checksum mismatch for {}: expected {}, got {}",
-            asset_name, expected_sha256, actual_sha256
-        ));
+    // Verify integrity of downloaded archive
+    if downloaded_from_sf {
+        if let Some(info) = sf_info {
+            let actual_md5 = md5_file(&zip_path)?;
+            if actual_md5 != info.md5sum.to_ascii_lowercase() {
+                let _ = std::fs::remove_file(&zip_path);
+                return Err(format!(
+                    "Checksum mismatch (MD5) for SourceForge download: expected {}, got {}",
+                    info.md5sum, actual_md5
+                ));
+            }
+        } else {
+            return Err("Downloaded from SourceForge but release metadata is missing".to_string());
+        }
+    } else {
+        let asset_name = format!("zapret-discord-youtube-{}.zip", latest_version);
+        let expected_sha256 = fetch_expected_sha256(&latest_version, &asset_name).await?;
+        let actual_sha256 = sha256_file(&zip_path)?;
+        if actual_sha256 != expected_sha256 {
+            let _ = std::fs::remove_file(&zip_path);
+            return Err(format!(
+                "Checksum mismatch (SHA-256) for {}: expected {}, got {}",
+                asset_name, expected_sha256, actual_sha256
+            ));
+        }
     }
 
     // Extraction
@@ -1826,18 +2199,23 @@ fn copy_dir_contents(src: &std::path::Path, dst: &std::path::Path) -> Result<(),
         let dest_path = dst.join(&file_name);
 
         if path.is_dir() {
-            let _ = std::fs::create_dir_all(&dest_path);
-            let _ = copy_dir_contents(&path, &dest_path);
+            std::fs::create_dir_all(&dest_path).map_err(|e| format!("Failed to create directory {:?}: {}", dest_path, e))?;
+            copy_dir_contents(&path, &dest_path)?;
         } else {
-            if std::fs::copy(&path, &dest_path).is_err() {
+            if let Err(e) = std::fs::copy(&path, &dest_path) {
                 // If it fails (likely due to lock), try to rename the locked destination file first
                 let mut old_path = dest_path.clone();
                 let new_name = format!("{}.old", file_name.to_str().unwrap_or("locked"));
                 old_path.set_file_name(new_name);
-                let _ = std::fs::rename(&dest_path, &old_path); // ignore rename errors
+                
+                if std::fs::rename(&dest_path, &old_path).is_err() {
+                    return Err(format!("Failed to copy file {:?} to {:?}: {}", path, dest_path, e));
+                }
 
-                // Attempt copy again
-                let _ = std::fs::copy(&path, &dest_path);
+                // Attempt copy again after rename
+                std::fs::copy(&path, &dest_path).map_err(|e2| {
+                    format!("Failed to copy file {:?} to {:?} after renaming: {}", path, dest_path, e2)
+                })?;
             }
         }
     }
@@ -2303,6 +2681,87 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     Ok(DiagnosticsResult {
         checks,
         vpn_services,
+    })
+}
+
+#[derive(serde::Serialize)]
+struct SiteCheckResult {
+    domain: String,
+    dns_resolved_ips: Vec<String>,
+    dns_status: String,
+    dns_message: String,
+    http_status: String,
+    http_code: Option<u16>,
+    http_message: String,
+    ping_ms: Option<u32>,
+    is_zapret_running: bool,
+}
+
+#[tauri::command]
+async fn check_site(domain: String, state: State<'_, AppState>) -> Result<SiteCheckResult, String> {
+    let domain_clean = domain
+        .trim()
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .to_string();
+
+    if domain_clean.is_empty() {
+        return Err("Empty domain".to_string());
+    }
+
+    let status = get_zapret_status(state);
+    let zapret_running = status.running;
+
+    // 1. DNS Resolution
+    let dns_result = tokio::net::lookup_host(format!("{}:443", domain_clean)).await;
+    let mut ips = Vec::new();
+    let (dns_status, dns_message) = match dns_result {
+        Ok(addrs) => {
+            for addr in addrs {
+                let socket_addr: std::net::SocketAddr = addr;
+                let ip_str = socket_addr.ip().to_string();
+                if !ips.contains(&ip_str) {
+                    ips.push(ip_str);
+                }
+            }
+            if ips.is_empty() {
+                ("error".to_string(), "No IP addresses resolved".to_string())
+            } else {
+                ("ok".to_string(), format!("Resolved {} IPs", ips.len()))
+            }
+        }
+        Err(e) => ("error".to_string(), format!("DNS resolution failed: {}", e)),
+    };
+
+    // 2. TCP connection test (Ping)
+    let mut ping_ms = None;
+    if !ips.is_empty() {
+        let ip = &ips[0];
+        if let Ok(socket_addr) = format!("{}:443", ip).parse::<std::net::SocketAddr>() {
+            let start = std::time::Instant::now();
+            let connect_timeout = std::time::Duration::from_secs(3);
+            if let Ok(Ok(_)) = tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(socket_addr)).await {
+                ping_ms = Some(start.elapsed().as_millis() as u32);
+            }
+        }
+    }
+
+    // 3. HTTPS GET test (moved to frontend JS for accurate browser SNI/TLS/proxy compatibility)
+    let (http_status, http_code, http_message) = ("".to_string(), None, "".to_string());
+
+    Ok(SiteCheckResult {
+        domain: domain_clean,
+        dns_resolved_ips: ips,
+        dns_status,
+        dns_message,
+        http_status,
+        http_code,
+        http_message,
+        ping_ms,
+        is_zapret_running: zapret_running,
     })
 }
 
@@ -2864,9 +3323,11 @@ fn refresh_tray_menu(app: &tauri::AppHandle) {
 }
 
 #[tauri::command]
-fn exit_app(app: tauri::AppHandle) {
+fn exit_app(app: tauri::AppHandle, state: State<'_, AppState>) {
+    stop_zapret_on_exit(state);
     app.exit(0);
 }
+
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
@@ -2910,6 +3371,7 @@ pub fn run() {
             notification_shown: AtomicBool::new(false),
             last_strategy: Mutex::new(None),
             translations: Mutex::new(None),
+            temp_process_child: Mutex::new(None),
         })
         .setup(|app| {
             let is_autostart = std::env::args().any(|a| a == "--autostart");
@@ -2971,6 +3433,8 @@ pub fn run() {
                 .on_menu_event(move |app, event| {
                     match event.id.as_ref() {
                         "quit" => {
+                            let state = app.state::<AppState>();
+                            stop_zapret_on_exit(state);
                             app.exit(0);
                         }
                         "show" => {
@@ -2997,7 +3461,7 @@ pub fn run() {
                                     .or(status.strategy)
                                     .or_else(|| available.first().cloned());
                                 if let Some(s) = strategy {
-                                    let _ = start_zapret(s, "service".to_string(), state);
+                                    let _ = start_zapret(app.clone(), s, "service".to_string(), state);
                                 }
                             }
                             refresh_tray_menu(app);
@@ -3006,7 +3470,7 @@ pub fn run() {
                             let strategy = &id[6..];
                             let state = app.state::<AppState>();
                             let _ =
-                                start_zapret(strategy.to_string(), "service".to_string(), state);
+                                start_zapret(app.clone(), strategy.to_string(), "service".to_string(), state);
                             refresh_tray_menu(app);
                         }
                         _ => {}
@@ -3108,10 +3572,13 @@ pub fn run() {
             get_strategies,
             get_local_version_cmd,
             get_ui_version_cmd,
+            get_update_proxy,
             get_zapret_status,
             get_filters_status,
             set_game_filter,
             set_ipset_filter,
+            get_fakes_info,
+            set_active_fake,
             start_zapret,
             stop_zapret,
             read_user_list,
@@ -3136,6 +3603,7 @@ pub fn run() {
             load_test_results,
             update_tray_translations,
             exit_app,
+            check_site,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
