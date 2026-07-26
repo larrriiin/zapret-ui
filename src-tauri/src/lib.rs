@@ -33,10 +33,31 @@ use tauri_plugin_notification::NotificationExt;
 
 mod core;
 mod providers;
-use core::{Checksum, CoreManager, CoreRelease};
+use core::{Checksum, CoreInstallation, CoreInstallationState, CoreManager, CoreRelease};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const GITHUB_USER_AGENT: &str = "zapret-ui-updater";
+static CORE_OPERATION_ACTIVE: AtomicBool = AtomicBool::new(false);
+static EXIT_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+struct CoreOperationGuard;
+
+impl CoreOperationGuard {
+    fn acquire() -> Result<Self, String> {
+        CORE_OPERATION_ACTIVE
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| {
+                "Another core update or rollback operation is already in progress".to_string()
+            })?;
+        Ok(Self)
+    }
+}
+
+impl Drop for CoreOperationGuard {
+    fn drop(&mut self) {
+        CORE_OPERATION_ACTIVE.store(false, Ordering::Release);
+    }
+}
 
 struct AppState {
     active_strategy: Mutex<Option<String>>,
@@ -74,6 +95,23 @@ struct ZapretStatus {
     running: bool,
     strategy: Option<String>,
     mode: Option<String>,
+}
+
+fn restart_context(
+    status: ZapretStatus,
+    operation: &str,
+) -> Result<Option<(String, String)>, String> {
+    if !status.running {
+        return Ok(None);
+    }
+    Ok(Some((
+        status.strategy.ok_or_else(|| {
+            format!("Cannot {operation} while zapret is running: active strategy is unknown")
+        })?,
+        status.mode.ok_or_else(|| {
+            format!("Cannot {operation} while zapret is running: launch mode is unknown")
+        })?,
+    )))
 }
 
 #[derive(serde::Serialize)]
@@ -1743,37 +1781,34 @@ fn is_ip_or_cidr(s: &str) -> bool {
 
 #[tauri::command]
 async fn download_and_install_update(
+    app: tauri::AppHandle,
     window: tauri::Window,
     use_proxy: Option<bool>,
     custom_proxy: Option<String>,
+    state: State<'_, AppState>,
 ) -> Result<String, String> {
-    // Stop the zapret service and processes to release file locks before update
-    let _ = stop_zapret_internal();
-
-    let filters_status = get_filters_status();
+    let _operation_guard = CoreOperationGuard::acquire()?;
     let dir = find_binaries_dir();
-    let temp_dir = std::env::temp_dir().join("zapret_update");
+    let installation = CoreInstallation::new(&dir)?;
+    let manager = core_manager_at(&dir);
+    installation.prepare(manager.provider())?;
+    let temp_parent = std::env::temp_dir();
+    let temp_dir = temp_parent.join(format!(
+        ".zapret-ui-core-download-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| format!("System clock error: {e}"))?
+            .as_nanos()
+    ));
 
     // Create temp directory
-    let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
-
-    // Backup user files
-    let lists_dir = dir.join("lists");
-    let backup_dir = temp_dir.join("backup");
-    std::fs::create_dir_all(&backup_dir).ok();
-
-    if lists_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&lists_dir) {
-            for entry in entries.flatten() {
-                if let Some(name) = entry.file_name().to_str() {
-                    if name.contains("user") {
-                        let _ = std::fs::copy(entry.path(), backup_dir.join(name));
-                    }
-                }
-            }
-        }
-    }
+    let _download_cleanup = OwnedDirectoryCleanup::new(
+        temp_dir.clone(),
+        temp_parent.canonicalize().map_err(|e| e.to_string())?,
+        ".zapret-ui-core-download-",
+    );
 
     window.emit("download-progress", 5).ok();
 
@@ -1794,7 +1829,6 @@ async fn download_and_install_update(
         .map_err(|e| format!("Failed to build http client: {}", e))?;
 
     // Fetch version from GitHub with fallback to SourceForge
-    let manager = core_manager_at(&dir);
     let provider = manager.provider();
     let mut fetched_from_sf = false;
     let mut sf_info: Option<CoreRelease> = None;
@@ -1947,7 +1981,9 @@ async fn download_and_install_update(
         return Err("Download failed: output file not found".to_string());
     }
 
-    // Verify integrity of downloaded archive
+    // Verify integrity of downloaded archive before extraction.
+    let verified_checksum;
+    let source_url;
     if downloaded_from_sf {
         if let Some(info) = sf_info {
             let expected_md5 = match info.checksum {
@@ -1966,6 +2002,8 @@ async fn download_and_install_update(
                     expected_md5, actual_md5
                 ));
             }
+            verified_checksum = Checksum::Md5(expected_md5);
+            source_url = Some(info.download_url);
         } else {
             return Err("Downloaded from SourceForge but release metadata is missing".to_string());
         }
@@ -1985,18 +2023,32 @@ async fn download_and_install_update(
                 asset_name, expected_sha256, actual_sha256
             ));
         }
+        verified_checksum = Checksum::Sha256(expected_sha256);
+        source_url = Some(provider.release_download_url(&latest_version));
     }
 
     // Extraction
     window.emit("download-progress", 92).ok();
-    let extract_dir = temp_dir.join("extracted");
-    let _ = std::fs::create_dir_all(&extract_dir);
+    let staging = installation.create_staging()?;
+    let _staging_cleanup = OwnedDirectoryCleanup::new(
+        staging.clone(),
+        staging
+            .parent()
+            .ok_or_else(|| "Staging has no parent".to_string())?
+            .to_path_buf(),
+        ".binaries-staging-",
+    );
+    let extract_dir = staging.join("package");
+    std::fs::create_dir(&extract_dir).map_err(|e| format!("Failed to prepare staging: {e}"))?;
 
     // Extract natively via the `zip` crate instead of calling
     // `Expand-Archive`. Every entry name is validated against `..`, absolute
     // paths, and drive-letter prefixes before it is written, preventing
     // zip-slip from placing files outside `extract_dir`.
-    extract_zip_safely(&zip_path, &extract_dir)?;
+    if let Err(error) = extract_zip_safely(&zip_path, &extract_dir) {
+        installation.remove_owned_staging(&staging)?;
+        return Err(error);
+    }
 
     window.emit("download-progress", 95).ok();
 
@@ -2008,25 +2060,258 @@ async fn download_and_install_update(
         }
     }
 
-    copy_dir_contents(&extracted_folder, &dir)?;
+    if let Err(error) = copy_dir_contents(&extracted_folder, &staging) {
+        installation.remove_owned_staging(&staging)?;
+        return Err(error);
+    }
+    std::fs::remove_dir_all(&extract_dir)
+        .map_err(|e| format!("Cannot remove staging package directory: {e}"))?;
+    if let Err(error) = installation.validate_and_manifest(
+        &staging,
+        &latest_version,
+        source_url,
+        Some(verified_checksum),
+        core_manager_at(&staging).provider(),
+    ) {
+        installation.remove_owned_staging(&staging)?;
+        return Err(error);
+    }
+    installation.preserve_user_files(&dir, &staging)?;
 
-    // Restore
-    let new_lists_dir = dir.join("lists");
-    let _ = std::fs::create_dir_all(&new_lists_dir);
-    if let Ok(entries) = std::fs::read_dir(&backup_dir) {
-        for entry in entries.flatten() {
-            let _ = std::fs::copy(entry.path(), new_lists_dir.join(entry.file_name()));
+    // Capture the exact runtime state only after the candidate is ready, just
+    // before stopping anything managed by the application.
+    let restart = restart_context(get_zapret_status(state.clone()), "update")?;
+    let filters_status = get_filters_status();
+    if restart.is_some() {
+        if let Err(error) = stop_zapret_internal() {
+            installation.remove_owned_staging(&staging)?;
+            return Err(format!("Cannot stop zapret before activation: {error}"));
         }
     }
 
-    // Restore settings after update
-    let _ = set_game_filter(filters_status.game_filter);
-    let _ = set_ipset_filter(filters_status.ipset);
+    let operation = (|| {
+        installation.activate(&staging, manager.provider())?;
+        if let Err(error) = set_game_filter(filters_status.game_filter)
+            .and_then(|_| set_ipset_filter(filters_status.ipset))
+        {
+            installation
+                .rollback(
+                    manager.provider(),
+                    core_manager_at(dir.with_file_name("binaries.previous")).provider(),
+                )
+                .map_err(|rollback| {
+                    format!(
+                        "Cannot restore filter settings ({error}); automatic rollback failed: {rollback}"
+                    )
+                })?;
+            return Err(format!(
+                "Cannot restore filter settings ({error}); automatic rollback completed"
+            ));
+        }
+        Ok(())
+    })();
 
-    let _ = std::fs::remove_dir_all(&temp_dir);
-    window.emit("download-progress", 100).ok();
+    let restart_result = restart.map(|(strategy, mode)| {
+        start_zapret(app, strategy, mode, state)
+            .map(|_| ())
+            .map_err(|e| format!("Cannot restart zapret after core update: {e}"))
+    });
+    match (operation, restart_result) {
+        (Err(error), Some(Err(restart_error))) => Err(format!("{error}; {restart_error}")),
+        (Err(error), _) => Err(error),
+        (Ok(()), Some(Err(restart_error))) => {
+            window.emit("download-progress", 100).ok();
+            Ok(format!("Update successful. Warning: {restart_error}"))
+        }
+        (Ok(()), _) => {
+            window.emit("download-progress", 100).ok();
+            Ok("Update successful".to_string())
+        }
+    }
+}
 
-    Ok("Update successful".to_string())
+struct OwnedDirectoryCleanup {
+    path: PathBuf,
+    expected_parent: PathBuf,
+    prefix: &'static str,
+}
+
+impl OwnedDirectoryCleanup {
+    fn new(path: PathBuf, expected_parent: PathBuf, prefix: &'static str) -> Self {
+        Self {
+            path,
+            expected_parent,
+            prefix,
+        }
+    }
+}
+
+impl Drop for OwnedDirectoryCleanup {
+    fn drop(&mut self) {
+        if !self.path.exists() {
+            return;
+        }
+        let actual_parent = self
+            .path
+            .parent()
+            .and_then(|parent| parent.canonicalize().ok());
+        let expected_parent = self.expected_parent.canonicalize().ok();
+        let owned = actual_parent == expected_parent
+            && self
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(self.prefix));
+        let safe_type = std::fs::symlink_metadata(&self.path)
+            .map(|metadata| !metadata.file_type().is_symlink())
+            .unwrap_or(false);
+        if owned && safe_type {
+            if let Err(error) = std::fs::remove_dir_all(&self.path) {
+                eprintln!(
+                    "Cannot clean owned temporary directory {}: {error}",
+                    self.path.display()
+                );
+            }
+        } else {
+            eprintln!(
+                "Refusing to clean unverified temporary directory {}",
+                self.path.display()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod temporary_cleanup_tests {
+    use super::{restart_context, CoreOperationGuard, OwnedDirectoryCleanup, ZapretStatus};
+
+    #[test]
+    fn restart_context_preserves_service_and_temporary_modes() {
+        for mode in ["service", "temporary"] {
+            let context = restart_context(
+                ZapretStatus {
+                    running: true,
+                    strategy: Some("ALT12".to_string()),
+                    mode: Some(mode.to_string()),
+                },
+                "update",
+            )
+            .unwrap();
+            assert_eq!(context, Some(("ALT12".to_string(), mode.to_string())));
+        }
+        assert_eq!(
+            restart_context(
+                ZapretStatus {
+                    running: false,
+                    strategy: None,
+                    mode: None,
+                },
+                "update",
+            )
+            .unwrap(),
+            None
+        );
+        assert!(restart_context(
+            ZapretStatus {
+                running: true,
+                strategy: None,
+                mode: Some("service".to_string()),
+            },
+            "update",
+        )
+        .unwrap_err()
+        .contains("active strategy is unknown"));
+    }
+
+    #[test]
+    fn core_operation_guard_rejects_overlap_and_resets_on_drop() {
+        let guard = CoreOperationGuard::acquire().unwrap();
+        assert!(CoreOperationGuard::acquire()
+            .err()
+            .unwrap()
+            .contains("already in progress"));
+        drop(guard);
+        assert!(CoreOperationGuard::acquire().is_ok());
+    }
+
+    #[test]
+    fn owned_temporary_directory_is_cleaned_during_error_unwind() {
+        let temp_parent = std::env::temp_dir();
+        let expected_parent = temp_parent.canonicalize().unwrap();
+        for prefix in [".zapret-ui-core-download-", ".binaries-staging-"] {
+            let path = temp_parent.join(format!("{prefix}test-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir(&path).unwrap();
+            let result: Result<(), &str> = (|| {
+                let _cleanup =
+                    OwnedDirectoryCleanup::new(path.clone(), expected_parent.clone(), prefix);
+                Err("simulated failure")
+            })();
+            assert!(result.is_err());
+            assert!(!path.exists());
+        }
+    }
+}
+
+#[tauri::command]
+fn get_core_installation_state() -> Result<CoreInstallationState, String> {
+    let dir = find_binaries_dir();
+    let installation = CoreInstallation::new(&dir)?;
+    installation.prepare(core_manager_at(dir).provider())?;
+    Ok(installation.state())
+}
+
+#[tauri::command]
+fn rollback_core_update(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<CoreInstallationState, String> {
+    let _operation_guard = CoreOperationGuard::acquire()?;
+    let dir = find_binaries_dir();
+    let previous_dir = dir.with_file_name("binaries.previous");
+    let installation = CoreInstallation::new(&dir)?;
+    let active_manager = core_manager_at(&dir);
+    installation.prepare(active_manager.provider())?;
+    let filters = get_filters_status();
+    let restart = restart_context(get_zapret_status(state.clone()), "rollback")?;
+    if restart.is_some() {
+        stop_zapret_internal().map_err(|e| format!("Cannot stop zapret before rollback: {e}"))?;
+    }
+
+    let operation = (|| {
+        let result = installation.rollback(
+            active_manager.provider(),
+            core_manager_at(&previous_dir).provider(),
+        )?;
+        if let Err(error) =
+            set_game_filter(filters.game_filter).and_then(|_| set_ipset_filter(filters.ipset))
+        {
+            installation
+                .rollback(
+                    active_manager.provider(),
+                    core_manager_at(&previous_dir).provider(),
+                )
+                .map_err(|restore| {
+                    format!(
+                        "Cannot restore settings after rollback ({error}); cannot undo rollback: {restore}"
+                    )
+                })?;
+            return Err(format!(
+                "Cannot restore settings after rollback ({error}); original core restored"
+            ));
+        }
+        Ok(result)
+    })();
+
+    let restart_result = restart.map(|(strategy, mode)| {
+        start_zapret(app, strategy, mode, state)
+            .map_err(|e| format!("Cannot restart zapret after rollback attempt: {e}"))
+    });
+    match (operation, restart_result) {
+        (Ok(_), Some(Err(error))) => Err(error),
+        (Err(error), Some(Err(restart))) => Err(format!("{error}; {restart}")),
+        (result, _) => result,
+    }
 }
 
 /// Recursively copies directory contents
@@ -3177,8 +3462,21 @@ fn refresh_tray_menu(app: &tauri::AppHandle) {
 }
 
 #[tauri::command]
-fn exit_app(app: tauri::AppHandle, state: State<'_, AppState>) {
-    stop_zapret_on_exit(state);
+fn exit_app(app: tauri::AppHandle) {
+    graceful_exit(&app);
+}
+
+fn graceful_exit(app: &tauri::AppHandle) {
+    if EXIT_IN_PROGRESS.swap(true, Ordering::AcqRel) {
+        return;
+    }
+
+    stop_zapret_on_exit(app.state::<AppState>());
+    if let Some(window) = app.get_webview_window("main") {
+        if let Err(error) = window.destroy() {
+            eprintln!("Failed to destroy main WebView window during shutdown: {error}");
+        }
+    }
     app.exit(0);
 }
 
@@ -3285,9 +3583,7 @@ pub fn run() {
                 .on_menu_event(move |app, event| {
                     match event.id.as_ref() {
                         "quit" => {
-                            let state = app.state::<AppState>();
-                            stop_zapret_on_exit(state);
-                            app.exit(0);
+                            graceful_exit(app);
                         }
                         "show" => {
                             if let Some(window) = app.get_webview_window("main") {
@@ -3448,6 +3744,8 @@ pub fn run() {
             update_ipset_list,
             get_remote_core_version,
             download_and_install_update,
+            get_core_installation_state,
+            rollback_core_update,
             run_diagnostics,
             clear_discord_cache,
             check_admin_privileges,

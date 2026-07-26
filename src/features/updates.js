@@ -30,9 +30,10 @@ async function downloadAndInstallCoreUpdate(useProxy = false, customProxy = null
   try {
     const modalTitle = document.querySelector('#update-modal h3');
     if (modalTitle) modalTitle.textContent = t('downloading_installing');
-    await invoke('download_and_install_update', { useProxy, customProxy });
-    if (modalTitle) modalTitle.textContent = t('update_installed_restarting');
-    setTimeout(() => location.reload(), 1500);
+    const result = await invoke('download_and_install_update', { useProxy, customProxy });
+    if (modalTitle) modalTitle.textContent = result;
+    setTimeout(() => location.reload(), 3000);
+    return result;
   } catch (err) {
     console.error('Core update failed:', err);
     showProxyFallbackModal(err, 
@@ -185,7 +186,10 @@ function showDualUpdateModal(data, manual = false) {
 
   modal.querySelector('#modal-close-btn')?.addEventListener('click', () => modal.remove());
   modal.querySelector('#modal-update-ui-btn')?.addEventListener('click', (e) => downloadAndInstallUIUpdate(e, currentUpdateObject));
-  modal.querySelector('#modal-update-core-btn')?.addEventListener('click', () => downloadAndInstallCoreUpdate().catch(console.error));
+  modal.querySelector('#modal-update-core-btn')?.addEventListener('click', (event) => {
+    event.currentTarget.disabled = true;
+    downloadAndInstallCoreUpdate().catch(console.error);
+  });
 }
 
 async function checkUIUpdateWithFallback() {
@@ -285,21 +289,7 @@ function initLegacyUpdateNowButton() {
     statusEl.className = 'mt-4 text-sm text-secondary';
     updateNowBtn.disabled = true;
 
-    let zapretWasRunning = false;
-    let zapretStrategy = null;
-    let zapretMode = 'service';
-
     try {
-      statusEl.textContent = t('checking_service_status');
-      const status = await invoke('get_zapret_status');
-      if (status.running) {
-        zapretWasRunning = true;
-        zapretStrategy = status.strategy;
-        zapretMode = status.mode || 'service';
-        statusEl.textContent = t('stopping_before_update');
-        await invoke('stop_zapret');
-      }
-
       const progressContainer = $('update-status-container');
       const progressText = $('update-progress-text');
       const progressBar = $('update-progress-bar');
@@ -321,19 +311,8 @@ function initLegacyUpdateNowButton() {
       if (progressText) progressText.textContent = '100%';
       statusEl.className = 'text-xs text-secondary font-mono mb-3 text-center';
 
-      if (zapretWasRunning && zapretStrategy) {
-        statusEl.textContent = t('update_installed_restarting');
-        try {
-          await invoke('start_zapret', { strategy: zapretStrategy, mode: zapretMode });
-          await pollStatus();
-          statusEl.textContent = result + ' Zapret restarted successfully.';
-        } catch (restartErr) {
-          statusEl.textContent = result + ' Warning: failed to restart: ' + restartErr;
-          statusEl.className = 'text-xs text-primary font-mono mb-3 text-center';
-        }
-      } else {
-        statusEl.textContent = result;
-      }
+      statusEl.textContent = result;
+      await pollStatus();
 
       await refreshCoreVersion();
 
@@ -343,9 +322,6 @@ function initLegacyUpdateNowButton() {
     } catch (err) {
       statusEl.textContent = 'Error: ' + err;
       statusEl.className = 'mt-4 text-sm text-error-dim';
-      if (zapretWasRunning && zapretStrategy) {
-        try { await invoke('start_zapret', { strategy: zapretStrategy, mode: zapretMode }); await pollStatus(); } catch {}
-      }
       updateNowBtn.disabled = false;
 
       showProxyFallbackModal(err, 
@@ -357,6 +333,45 @@ function initLegacyUpdateNowButton() {
   });
 }
 
+async function refreshRollbackState() {
+  const current = $('core-current-install-version');
+  const previous = $('core-previous-install-version');
+  const previousRow = $('core-previous-version-row');
+  const button = $('core-rollback-btn');
+  if (!current || !previous || !button) return;
+  try {
+    const installation = await invoke('get_core_installation_state');
+    current.textContent = installation.currentVersion || '—';
+    previous.textContent = installation.previousVersion || '—';
+    previousRow?.classList.toggle('hidden', !installation.previousVersion);
+    button.classList.toggle('hidden', !installation.rollbackAvailable);
+    button.disabled = !installation.rollbackAvailable;
+    button.textContent = t('core_rollback_button', { version: installation.previousVersion || '' });
+  } catch (err) {
+    console.error('Cannot read core installation state:', err);
+    button.disabled = true;
+  }
+}
+
+function initCoreRollback() {
+  const button = $('core-rollback-btn');
+  button?.addEventListener('click', async () => {
+    const version = $('core-previous-install-version')?.textContent || '';
+    if (!window.confirm(t('core_rollback_confirm', { version }))) return;
+    button.disabled = true;
+    try {
+      await invoke('rollback_core_update');
+      await refreshRollbackState();
+      await refreshCoreVersion();
+      alert(t('core_rollback_success'));
+    } catch (err) {
+      alert(`${t('core_rollback_title')}: ${err}`);
+      await refreshRollbackState();
+    }
+  });
+  refreshRollbackState();
+}
+
 export function initUpdates() {
   const checkUpdatesBtn = $('check-updates-btn');
   if (checkUpdatesBtn) checkUpdatesBtn.addEventListener('click', () => checkForUpdates(true));
@@ -364,4 +379,5 @@ export function initUpdates() {
 
   initIPSetUpdateButton();
   initLegacyUpdateNowButton();
+  initCoreRollback();
 }
