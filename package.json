@@ -1,7 +1,7 @@
 {
   "name": "zapret-ui",
   "private": true,
-  "version": "26.7.5",
+  "version": "26.7.6",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "check-versions": "node scripts/check-versions.mjs",
-    "set-version": "node scripts/set-version.mjs"
+    "set-version": "node scripts/set-version.mjs",
+    "promote-core-stable": "node scripts/promote-core-stable.mjs"
   },
   "devDependencies": {
     "@tailwindcss/forms": "^0.5.11",
@@ -20,7 +21,7 @@
     "tailwindcss": "^4.3.3",
     "vite": "^8.1.5"
   },
-  "dependencies": {
+  "optionalDependencies": {
     "@tailwindcss/oxide-win32-x64-msvc": "^4.3.3"
   }
 }

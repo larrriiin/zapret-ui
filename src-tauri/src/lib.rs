@@ -31,12 +31,36 @@ use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri_plugin_notification::NotificationExt;
 
+mod core;
+mod providers;
+use core::{
+    compare_versions, resolve_stable, Checksum, CoreInstallation, CoreInstallationState,
+    CoreManager, CoreUpdateStatus,
+};
+
 const CREATE_NO_WINDOW: u32 = 0x08000000;
-const GITHUB_VERSION_URL: &str =
-    "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt";
-const GITHUB_RELEASE_API: &str =
-    "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/tags";
 const GITHUB_USER_AGENT: &str = "zapret-ui-updater";
+static CORE_OPERATION_ACTIVE: AtomicBool = AtomicBool::new(false);
+static EXIT_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+struct CoreOperationGuard;
+
+impl CoreOperationGuard {
+    fn acquire() -> Result<Self, String> {
+        CORE_OPERATION_ACTIVE
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| {
+                "Another core update or rollback operation is already in progress".to_string()
+            })?;
+        Ok(Self)
+    }
+}
+
+impl Drop for CoreOperationGuard {
+    fn drop(&mut self) {
+        CORE_OPERATION_ACTIVE.store(false, Ordering::Release);
+    }
+}
 
 struct AppState {
     active_strategy: Mutex<Option<String>>,
@@ -76,6 +100,23 @@ struct ZapretStatus {
     mode: Option<String>,
 }
 
+fn restart_context(
+    status: ZapretStatus,
+    operation: &str,
+) -> Result<Option<(String, String)>, String> {
+    if !status.running {
+        return Ok(None);
+    }
+    Ok(Some((
+        status.strategy.ok_or_else(|| {
+            format!("Cannot {operation} while zapret is running: active strategy is unknown")
+        })?,
+        status.mode.ok_or_else(|| {
+            format!("Cannot {operation} while zapret is running: launch mode is unknown")
+        })?,
+    )))
+}
+
 #[derive(serde::Serialize)]
 struct FiltersStatus {
     /// "disabled" | "all" | "tcp" | "udp"
@@ -104,11 +145,7 @@ fn is_safe_strategy_name(name: &str) -> bool {
     if name.is_empty() || name.len() > 128 {
         return false;
     }
-    if name.contains("..")
-        || name.contains('/')
-        || name.contains('\\')
-        || name.contains(':')
-    {
+    if name.contains("..") || name.contains('/') || name.contains('\\') || name.contains(':') {
         return false;
     }
     if name.starts_with('.')
@@ -120,10 +157,7 @@ fn is_safe_strategy_name(name: &str) -> bool {
     }
     name.chars().all(|c| {
         c.is_ascii_alphanumeric()
-            || matches!(
-                c,
-                ' ' | '(' | ')' | '[' | ']' | '.' | '_' | '-' | '+' | ','
-            )
+            || matches!(c, ' ' | '(' | ')' | '[' | ']' | '.' | '_' | '-' | '+' | ',')
     })
 }
 
@@ -168,8 +202,7 @@ fn powershell_path() -> PathBuf {
     {
         let system_root =
             std::env::var("SystemRoot").unwrap_or_else(|_| String::from(r"C:\Windows"));
-        PathBuf::from(system_root)
-            .join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
+        PathBuf::from(system_root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
     }
     #[cfg(not(windows))]
     {
@@ -228,10 +261,7 @@ fn resolve_list_path(filename: &str) -> Result<PathBuf, String> {
             .map_err(|e| format!("Failed to resolve {}: {}", file_path.display(), e))?;
         let canonical_file = strip_verbatim_prefix(canonical_file);
         if !canonical_file.starts_with(&canonical_parent) {
-            return Err(format!(
-                "List file {} escapes its directory",
-                filename
-            ));
+            return Err(format!("List file {} escapes its directory", filename));
         }
         Ok(canonical_file)
     } else {
@@ -287,9 +317,8 @@ fn extract_zip_safely(zip_path: &std::path::Path, dest: &std::path::Path) -> Res
         let out_path = canonical_dest.join(&rel);
 
         if entry.is_dir() {
-            std::fs::create_dir_all(&out_path).map_err(|e| {
-                format!("Failed to create dir {}: {}", out_path.display(), e)
-            })?;
+            std::fs::create_dir_all(&out_path)
+                .map_err(|e| format!("Failed to create dir {}: {}", out_path.display(), e))?;
             continue;
         }
         if let Some(parent) = out_path.parent() {
@@ -356,151 +385,6 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 /// Fetches the expected SHA-256 digest of the given release asset from the
 /// GitHub Releases API. Returns a lowercase hex string on success.
-async fn fetch_expected_sha256(version: &str, asset_name: &str) -> Result<String, String> {
-    if version.is_empty()
-        || !version
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'))
-    {
-        return Err(format!("Invalid upstream version tag: {}", version));
-    }
-
-    let url = format!("{}/{}", GITHUB_RELEASE_API, version);
-    let client = reqwest::Client::builder()
-        .user_agent(GITHUB_USER_AGENT)
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    let resp = client
-        .get(&url)
-        .header("Accept", "application/vnd.github+json")
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch release metadata: {}", e))?;
-
-    if !resp.status().is_success() {
-        return Err(format!(
-            "GitHub API returned status {} for {}",
-            resp.status(),
-            url
-        ));
-    }
-
-    let body: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse release metadata: {}", e))?;
-
-    let assets = body
-        .get("assets")
-        .and_then(|a| a.as_array())
-        .ok_or_else(|| "Release metadata is missing assets".to_string())?;
-
-    let asset = assets
-        .iter()
-        .find(|a| a.get("name").and_then(|n| n.as_str()) == Some(asset_name))
-        .ok_or_else(|| format!("Asset {} not found in release {}", asset_name, version))?;
-
-    let digest = asset
-        .get("digest")
-        .and_then(|d| d.as_str())
-        .ok_or_else(|| format!("Asset {} has no digest field", asset_name))?;
-
-    let hex = digest
-        .strip_prefix("sha256:")
-        .ok_or_else(|| format!("Unsupported digest format: {}", digest))?;
-
-    if hex.len() != 64 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(format!("Malformed sha256 digest: {}", digest));
-    }
-
-    Ok(hex.to_ascii_lowercase())
-}
-
-#[derive(Clone, Debug)]
-pub struct SfReleaseInfo {
-    pub version: String,
-    pub download_url: String,
-    pub md5sum: String,
-}
-
-pub async fn fetch_sf_release_info(client: &reqwest::Client) -> Result<SfReleaseInfo, String> {
-    let sf_url = "https://sourceforge.net/projects/zapret-discord-youtube.mirror/best_release.json";
-    let response = client
-        .get(sf_url)
-        .header("Cache-Control", "no-cache")
-        .send()
-        .await
-        .map_err(|e| format!("Failed to send SourceForge request: {}", e))?;
-    
-    if !response.status().is_success() {
-        return Err(format!("SourceForge returned status: {}", response.status()));
-    }
-    
-    let body: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse SourceForge JSON: {}", e))?;
-
-    // Try to get from platform_releases.windows, otherwise release
-    let windows_release = body.get("platform_releases")
-        .and_then(|pr| pr.get("windows"));
-
-    let release_obj = windows_release.unwrap_or_else(|| {
-        body.get("release").unwrap_or(&serde_json::Value::Null)
-    });
-
-    if release_obj.is_null() {
-        return Err("No release information found in SourceForge JSON".to_string());
-    }
-
-    let filename = release_obj.get("filename")
-        .and_then(|f| f.as_str())
-        .ok_or_else(|| "Missing filename in SourceForge JSON".to_string())?;
-
-    let download_url = release_obj.get("url")
-        .and_then(|u| u.as_str())
-        .ok_or_else(|| "Missing url in SourceForge JSON".to_string())?;
-
-    let md5sum = release_obj.get("md5sum")
-        .and_then(|m| m.as_str())
-        .ok_or_else(|| "Missing md5sum in SourceForge JSON".to_string())?;
-
-    let parts: Vec<&str> = filename.split('/').filter(|s| !s.is_empty()).collect();
-    let version = if let Some(first_part) = parts.first() {
-        first_part.to_string()
-    } else {
-        return Err("Failed to parse version from SourceForge filename".to_string());
-    };
-
-    Ok(SfReleaseInfo {
-        version,
-        download_url: download_url.to_string(),
-        md5sum: md5sum.to_string(),
-    })
-}
-
-/// Computes the MD5 digest of a file as a lowercase hex string.
-pub fn md5_file(path: &std::path::Path) -> Result<String, String> {
-    use std::io::Read;
-
-    let mut file = std::fs::File::open(path)
-        .map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
-    let mut context = md5::Context::new();
-    let mut buf = [0u8; 64 * 1024];
-    loop {
-        let n = file
-            .read(&mut buf)
-            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-        if n == 0 {
-            break;
-        }
-        context.consume(&buf[..n]);
-    }
-    let digest = context.compute();
-    Ok(format!("{:x}", digest))
-}
-
 /// On Windows, `std::fs::canonicalize` returns the verbatim/extended-length
 /// form (e.g. `\\?\C:\foo\bar`). That form is fine for Rust's file APIs but
 /// breaks `cmd.exe` and downstream `.bat` scripts, which refuse to use it as
@@ -592,6 +476,14 @@ fn find_binaries_dir() -> PathBuf {
     PathBuf::from("binaries")
 }
 
+fn core_manager_at(root: impl Into<PathBuf>) -> CoreManager {
+    CoreManager::new(root)
+}
+
+fn core_manager() -> CoreManager {
+    core_manager_at(find_binaries_dir())
+}
+
 fn is_admin() -> bool {
     // net session — самый быстрый и надежный способ проверки прав администратора на Windows
     Command::new(system32_tool("net.exe"))
@@ -641,31 +533,7 @@ fn elevate_if_needed() {
 }
 
 fn get_local_version() -> String {
-    let dir = find_binaries_dir();
-    let service_bat = dir.join("service.bat");
-    
-    if !service_bat.exists() {
-        return format!("Err: Not Found at {:?}", service_bat);
-    }
-
-    match std::fs::read_to_string(&service_bat) {
-        Ok(content) => {
-            for line in content.lines() {
-                let lowercase = line.to_lowercase();
-                if lowercase.contains("local_version=") {
-                    let parts: Vec<&str> = line.splitn(2, '=').collect();
-                    if parts.len() > 1 {
-                        let version = parts[1].trim().trim_matches('"');
-                        if !version.is_empty() {
-                            return version.to_string();
-                        }
-                    }
-                }
-            }
-            "Err: No Version String Found".to_string()
-        }
-        Err(e) => format!("Err: Read Failed ({})", e),
-    }
+    core_manager().provider().local_version()
 }
 
 #[tauri::command]
@@ -684,10 +552,11 @@ async fn get_remote_core_version(
     custom_proxy: Option<String>,
 ) -> Result<String, String> {
     let mut client_builder = reqwest::Client::builder();
-    
+
     let use_proxy = use_proxy.unwrap_or(false);
     if use_proxy {
-        let proxy_url = custom_proxy.or_else(|| option_env!("ZAPRET_UPDATE_PROXY").map(|s| s.to_string()));
+        let proxy_url =
+            custom_proxy.or_else(|| option_env!("ZAPRET_UPDATE_PROXY").map(|s| s.to_string()));
         if let Some(proxy_url) = proxy_url {
             if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
                 client_builder = client_builder.proxy(proxy);
@@ -696,35 +565,52 @@ async fn get_remote_core_version(
     }
 
     let client = client_builder.build().map_err(|e| e.to_string())?;
-    
-    let response_res = client
-        .get("https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt")
-        .send()
-        .await;
 
-    match response_res {
-        Ok(resp) => {
-            let status = resp.status();
-            if status.is_success() {
-                if let Ok(text) = resp.text().await {
-                    let trimmed = text.trim();
-                    if !trimmed.is_empty() && !trimmed.contains("Not Found") {
-                        return Ok(trimmed.to_string());
-                    }
-                }
-            }
-            if let Ok(info) = fetch_sf_release_info(&client).await {
-                return Ok(info.version);
-            }
-            Err(format!("GitHub returned status {} and SourceForge fallback failed", status))
-        }
-        Err(e) => {
-            if let Ok(info) = fetch_sf_release_info(&client).await {
-                return Ok(info.version);
-            }
-            Err(format!("Failed to connect to GitHub ({}) and SourceForge fallback failed", e))
-        }
-    }
+    Ok(resolve_stable(
+        &client,
+        core_manager().provider().provider_name(),
+        GITHUB_USER_AGENT,
+    )
+    .await?
+    .version)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CoreUpdateInfo {
+    provider: String,
+    channel: String,
+    current_version: Option<String>,
+    stable_version: String,
+    status: CoreUpdateStatus,
+    update_available: bool,
+}
+
+#[tauri::command]
+async fn get_core_update_info(
+    use_proxy: Option<bool>,
+    custom_proxy: Option<String>,
+) -> Result<CoreUpdateInfo, String> {
+    let stable = get_remote_core_version(use_proxy, custom_proxy).await?;
+    let manager = core_manager();
+    let provider = manager.provider();
+    let current = provider.is_installed().then(|| provider.local_version());
+    let status = current
+        .as_deref()
+        .map_or(CoreUpdateStatus::NotInstalled, |local| {
+            compare_versions(local, &stable)
+        });
+    Ok(CoreUpdateInfo {
+        provider: provider.provider_name().into(),
+        channel: "stable".into(),
+        current_version: current,
+        stable_version: stable,
+        status,
+        update_available: matches!(
+            status,
+            CoreUpdateStatus::NotInstalled | CoreUpdateStatus::UpdateAvailable
+        ),
+    })
 }
 
 fn get_ui_version() -> String {
@@ -739,94 +625,17 @@ fn get_ui_version_cmd() -> String {
 
 #[tauri::command]
 fn ensure_binaries_present() -> bool {
-    let bin_dir = find_binaries_dir();
-    // In production, binaries is a folder inside resources.
-    // In dev, it's next to src-tauri.
-    // find_binaries_dir already handles this.
-    bin_dir.exists() && bin_dir.join("service.bat").exists()
+    core_manager().provider().is_installed()
 }
 
 fn parse_bat_args(strategy: &str) -> Result<String, String> {
     if !is_safe_strategy_name(strategy) {
         return Err(format!("Invalid strategy name: {}", strategy));
     }
-    let dir = find_binaries_dir();
-    let bat_path = dir.join(format!("{}.bat", strategy));
-    let content = std::fs::read_to_string(&bat_path)
-        .map_err(|e| format!("Не удалось прочитать {}.bat: {}", strategy, e))?;
-
-    // Читаем текущие значения фильтров для подстановки
     let filters = get_filters_status();
-    let game_filter_mode = filters.game_filter;
-
-    // Для disabled используем "12" (порт не используется)
-    let (gf, gftcp, gfudp) = match game_filter_mode.as_str() {
-        "all" => ("1024-65535", "1024-65535", "1024-65535"),
-        "tcp" => ("1024-65535", "1024-65535", "12"),
-        "udp" => ("1024-65535", "12", "1024-65535"),
-        _ => ("12", "12", "12"),
-    };
-
-    let bin_path = dir.join("bin").to_str().unwrap_or("").to_string() + "\\";
-    let lists_path = dir.join("lists").to_str().unwrap_or("").to_string() + "\\";
-    let root_path = dir.to_str().unwrap_or("").to_string() + "\\";
-
-    // Ищем строку с запуском winws.exe и собираем все строки продолжения (^)
-    let lines: Vec<&str> = content.lines().collect();
-    let mut found_idx: Option<usize> = None;
-    for (i, line) in lines.iter().enumerate() {
-        if line.to_lowercase().contains("winws.exe") {
-            found_idx = Some(i);
-            break;
-        }
-    }
-
-    let found_idx =
-        found_idx.ok_or_else(|| format!("Не найдена строка с winws.exe в {}.bat", strategy))?;
-
-    // Собираем полную команду: первая строка + все строки-продолжения (^)
-    let mut full_command = String::new();
-    for raw in lines.iter().skip(found_idx) {
-        let line = raw.trim();
-        if let Some(rest) = line.strip_suffix('^') {
-            full_command.push_str(rest);
-            full_command.push(' ');
-        } else {
-            full_command.push_str(line);
-            break;
-        }
-    }
-
-    // Извлекаем аргументы после winws.exe
-    let cmd_lower = full_command.to_lowercase();
-    let mut args = String::new();
-    if let Some(pos) = cmd_lower.find("winws.exe\"") {
-        args = full_command[pos + "winws.exe\"".len()..].to_string();
-    } else if let Some(pos) = cmd_lower.find("winws.exe ") {
-        args = full_command[pos + "winws.exe ".len()..].to_string();
-    }
-
-    // Подстановка переменных (эмуляция service.bat)
-    args = args.replace("%GameFilter%", gf);
-    args = args.replace("%GameFilterTCP%", gftcp);
-    args = args.replace("%GameFilterUDP%", gfudp);
-    args = args.replace("%BIN%", &bin_path);
-    args = args.replace("%LISTS%", &lists_path);
-
-    // Замена @ на абсолютный путь к корню binaries. Аргументы возвращаются
-    // без бэт-экранирования кавычек; экранирование для конкретного способа
-    // запуска (bat / sc / PowerShell) делается на вызывающей стороне.
-    let mut final_args = String::new();
-    for word in args.split_whitespace() {
-        let mut w = word.to_string();
-        if w.starts_with("\"@") {
-            w = format!("\"{}{}", root_path, &w[2..]);
-        }
-        final_args.push_str(&w);
-        final_args.push(' ');
-    }
-
-    Ok(final_args.trim().to_string())
+    core_manager()
+        .provider()
+        .parse_strategy(strategy, &filters.game_filter)
 }
 
 /// Splits a command-line arguments string into separate arguments, respecting double quotes
@@ -1025,31 +834,7 @@ fn check_status_full() -> Result<String, String> {
 /// Список стратегий — имена .bat файлов из binaries/ (без service.bat).
 #[tauri::command]
 fn get_strategies() -> Result<Vec<String>, String> {
-    let dir = find_binaries_dir();
-    let entries = std::fs::read_dir(&dir)
-        .map_err(|e| format!("Failed to read binaries ({:?}): {}", dir, e))?;
-
-    let mut list: Vec<String> = entries
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .and_then(|x| x.to_str())
-                .map(|x| x.eq_ignore_ascii_case("bat"))
-                .unwrap_or(false)
-        })
-        .filter_map(|e| {
-            e.path()
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_string())
-        })
-        .filter(|name| name != "service")
-        .collect();
-
-    // Natural sort (Windows-style) so ALT2 comes before ALT11
-    list.sort_by(|a, b| natural_sort_compare(a, b));
-    Ok(list)
+    core_manager().provider().strategies()
 }
 
 /// Compare strings using natural sort (numbers compared numerically)
@@ -1453,16 +1238,10 @@ fn start_zapret(
         // the registry. That way the service points at the *real* executable
         // under `binaries/bin/`, not at a symlink that could later be
         // redirected to an attacker-controlled binary.
-        let bin_path_raw = dir.join("bin").join("winws.exe");
+        let bin_path_raw = core_manager_at(&dir).provider().winws_executable();
         let bin_path = std::fs::canonicalize(&bin_path_raw)
             .map(strip_verbatim_prefix)
-            .map_err(|e| {
-                format!(
-                    "Failed to resolve {}: {}",
-                    bin_path_raw.display(),
-                    e
-                )
-            })?;
+            .map_err(|e| format!("Failed to resolve {}: {}", bin_path_raw.display(), e))?;
         if !bin_path.starts_with(&dir) {
             return Err(format!(
                 "winws.exe resolves outside binaries dir: {}",
@@ -1541,7 +1320,7 @@ try {{
             }
         }
     } else {
-        let bin_path = dir.join("bin").join("winws.exe");
+        let bin_path = core_manager_at(&dir).provider().winws_executable();
         if !bin_path.exists() {
             return Err("winws.exe not found".to_string());
         }
@@ -1759,8 +1538,7 @@ fn save_user_list_to_file(filename: String) -> Result<bool, String> {
         .save_file();
 
     if let Some(path) = file_path {
-        std::fs::write(&path, content)
-            .map_err(|e| format!("Не удалось сохранить файл: {}", e))?;
+        std::fs::write(&path, content).map_err(|e| format!("Не удалось сохранить файл: {}", e))?;
         Ok(true)
     } else {
         Ok(false)
@@ -1836,8 +1614,10 @@ fn import_backup_file() -> Result<bool, String> {
 #[tauri::command]
 async fn update_ipset_list() -> Result<String, String> {
     let dir = find_binaries_dir();
-    let list_file = dir.join("lists").join("ipset-all.txt");
-    let url = "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/.service/ipset-service.txt";
+    let manager = core_manager_at(&dir);
+    let provider = manager.provider();
+    let list_file = provider.paths().lists_dir().join("ipset-all.txt");
+    let url = provider.ipset_url();
 
     // Check if curl exists in System32
     let curl_path = std::path::Path::new(r"C:\Windows\System32\curl.exe");
@@ -1927,41 +1707,36 @@ fn is_ip_or_cidr(s: &str) -> bool {
     }
 }
 
-
-
 #[tauri::command]
 async fn download_and_install_update(
+    app: tauri::AppHandle,
     window: tauri::Window,
     use_proxy: Option<bool>,
     custom_proxy: Option<String>,
+    state: State<'_, AppState>,
 ) -> Result<String, String> {
-    // Stop the zapret service and processes to release file locks before update
-    let _ = stop_zapret_internal();
-
-    let filters_status = get_filters_status();
+    let _operation_guard = CoreOperationGuard::acquire()?;
     let dir = find_binaries_dir();
-    let temp_dir = std::env::temp_dir().join("zapret_update");
+    let installation = CoreInstallation::new(&dir)?;
+    let manager = core_manager_at(&dir);
+    installation.prepare(manager.provider())?;
+    let temp_parent = std::env::temp_dir();
+    let temp_dir = temp_parent.join(format!(
+        ".zapret-ui-core-download-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| format!("System clock error: {e}"))?
+            .as_nanos()
+    ));
 
     // Create temp directory
-    let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
-
-    // Backup user files
-    let lists_dir = dir.join("lists");
-    let backup_dir = temp_dir.join("backup");
-    std::fs::create_dir_all(&backup_dir).ok();
-
-    if lists_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&lists_dir) {
-            for entry in entries.flatten() {
-                if let Some(name) = entry.file_name().to_str() {
-                    if name.contains("user") {
-                        let _ = std::fs::copy(entry.path(), backup_dir.join(name));
-                    }
-                }
-            }
-        }
-    }
+    let _download_cleanup = OwnedDirectoryCleanup::new(
+        temp_dir.clone(),
+        temp_parent.canonicalize().map_err(|e| e.to_string())?,
+        ".zapret-ui-core-download-",
+    );
 
     window.emit("download-progress", 5).ok();
 
@@ -1969,195 +1744,105 @@ async fn download_and_install_update(
     let mut client_builder = reqwest::Client::builder();
     let use_proxy = use_proxy.unwrap_or(false);
     if use_proxy {
-        let proxy_url = custom_proxy.or_else(|| option_env!("ZAPRET_UPDATE_PROXY").map(|s| s.to_string()));
+        let proxy_url =
+            custom_proxy.or_else(|| option_env!("ZAPRET_UPDATE_PROXY").map(|s| s.to_string()));
         if let Some(proxy_url) = proxy_url {
             if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
                 client_builder = client_builder.proxy(proxy);
             }
         }
     }
-    let client = client_builder.build().map_err(|e| format!("Failed to build http client: {}", e))?;
+    let client = client_builder
+        .build()
+        .map_err(|e| format!("Failed to build http client: {}", e))?;
 
-    // Fetch version from GitHub with fallback to SourceForge
-    let mut fetched_from_sf = false;
-    let mut sf_info: Option<SfReleaseInfo> = None;
-
-    let latest_version = match client.get(GITHUB_VERSION_URL).header("Cache-Control", "no-cache").send().await {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.text().await {
-                Ok(text) => {
-                    let trimmed = text.trim().to_string();
-                    if !trimmed.is_empty() && !trimmed.contains("Not Found") {
-                        trimmed
-                    } else {
-                        fetched_from_sf = true;
-                        let info = fetch_sf_release_info(&client).await?;
-                        let version = info.version.clone();
-                        sf_info = Some(info);
-                        version
+    // Resolve the managed channel once; the same immutable release metadata is
+    // then used for every mirror attempt in this operation.
+    let provider = manager.provider();
+    let release = resolve_stable(&client, provider.provider_name(), GITHUB_USER_AGENT).await?;
+    let latest_version = release.version.clone();
+    if provider.is_installed() {
+        match compare_versions(&provider.local_version(), &latest_version) {
+            CoreUpdateStatus::Ahead | CoreUpdateStatus::Unknown => {
+                return Err(
+                    "The installed core cannot be safely updated to this stable release".into(),
+                )
+            }
+            CoreUpdateStatus::UpToDate => return Ok("Core is already up to date".into()),
+            _ => {}
+        }
+    }
+    window.emit("download-progress", 10).ok();
+    let zip_path = temp_dir.join("update.zip");
+    use futures_util::StreamExt;
+    let mut selected = None;
+    for artifact in &release.artifacts {
+        let _ = std::fs::remove_file(&zip_path);
+        let response = match client.get(&artifact.url).send().await {
+            Ok(response) if response.status().is_success() => response,
+            _ => continue,
+        };
+        let mut file = std::fs::File::create(&zip_path)
+            .map_err(|e| format!("Failed to create update archive: {e}"))?;
+        let mut stream = response.bytes_stream();
+        let mut failed = false;
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(bytes) => {
+                    use std::io::Write;
+                    if file.write_all(&bytes).is_err() {
+                        failed = true;
+                        break;
                     }
                 }
                 Err(_) => {
-                    fetched_from_sf = true;
-                    let info = fetch_sf_release_info(&client).await?;
-                    let version = info.version.clone();
-                    sf_info = Some(info);
-                    version
+                    failed = true;
+                    break;
                 }
             }
         }
-        _ => {
-            fetched_from_sf = true;
-            let info = fetch_sf_release_info(&client).await?;
-            let version = info.version.clone();
-            sf_info = Some(info);
-            version
+        drop(file);
+        if failed {
+            continue;
         }
-    };
-
-    window.emit("download-progress", 10).ok();
-
-    let zip_path = temp_dir.join("update.zip");
-
-    use std::sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    };
-    let done_flag = Arc::new(AtomicBool::new(false));
-    let done_flag_thread = done_flag.clone();
-    let window_clone = window.clone();
-    std::thread::spawn(move || {
-        let steps: &[u16] = &[15, 20, 28, 35, 42, 50, 58, 65, 72, 78, 83, 88];
-        for pct in steps {
-            if done_flag_thread.load(Ordering::Relaxed) {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_secs(3));
-            if done_flag_thread.load(Ordering::Relaxed) {
-                break;
-            }
-            window_clone.emit("download-progress", *pct).ok();
-        }
-    });
-
-    // 1. Try downloading from GitHub
-    let mut response = None;
-    let mut downloaded_from_sf = false;
-
-    if !fetched_from_sf {
-        let github_url = format!("https://github.com/Flowseal/zapret-discord-youtube/releases/download/{}/zapret-discord-youtube-{}.zip", latest_version, latest_version);
-        if let Ok(resp) = client.get(&github_url).send().await {
-            if resp.status().is_success() {
-                response = Some(resp);
-            }
-        }
-    }
-
-    // 2. If GitHub failed or wasn't tried, try SourceForge
-    if response.is_none() {
-        // Ensure we have SF info loaded
-        let info = match sf_info {
-            Some(i) => i,
-            None => fetch_sf_release_info(&client).await?,
+        let actual = sha256_file(&zip_path)?;
+        let expected = match &artifact.checksum {
+            Checksum::Sha256(value) => value,
+            Checksum::Md5(_) => continue,
         };
-
-        // Try downloading from the direct SourceForge URL
-        match client.get(&info.download_url).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                response = Some(resp);
-                downloaded_from_sf = true;
-                sf_info = Some(info);
-            }
-            _ => {
-                // Also try downloading from the generic latest URL user requested as fallback
-                let generic_url = "https://sourceforge.net/projects/zapret-discord-youtube.mirror/files/latest/download";
-                match client.get(generic_url).send().await {
-                    Ok(resp) if resp.status().is_success() => {
-                        response = Some(resp);
-                        downloaded_from_sf = true;
-                        sf_info = Some(info);
-                    }
-                    Ok(resp) => {
-                        done_flag.store(true, Ordering::Relaxed);
-                        return Err(format!("SourceForge download failed with status: {}", resp.status()));
-                    }
-                    Err(e) => {
-                        done_flag.store(true, Ordering::Relaxed);
-                        return Err(format!("Failed to download from both GitHub and SourceForge. SF error: {}", e));
-                    }
-                }
-            }
+        if actual == *expected {
+            selected = Some((artifact.url.clone(), Checksum::Sha256(actual)));
+            break;
         }
+        let _ = std::fs::remove_file(&zip_path);
+        eprintln!("Core artifact checksum mismatch: {}", artifact.url);
     }
-
-    let response = response.unwrap();
-
-    use futures_util::StreamExt;
-    let mut file = std::fs::File::create(&zip_path).map_err(|e| {
-        done_flag.store(true, Ordering::Relaxed);
-        format!("Failed to create update zip file: {}", e)
-    })?;
-
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        match chunk {
-            Ok(bytes) => {
-                use std::io::Write;
-                if let Err(e) = file.write_all(&bytes) {
-                    done_flag.store(true, Ordering::Relaxed);
-                    return Err(format!("Failed to write to zip file: {}", e));
-                }
-            }
-            Err(e) => {
-                done_flag.store(true, Ordering::Relaxed);
-                return Err(format!("Error while downloading: {}", e));
-            }
-        }
-    }
-
-    done_flag.store(true, Ordering::Relaxed);
-
-    if !zip_path.exists() {
-        return Err("Download failed: output file not found".to_string());
-    }
-
-    // Verify integrity of downloaded archive
-    if downloaded_from_sf {
-        if let Some(info) = sf_info {
-            let actual_md5 = md5_file(&zip_path)?;
-            if actual_md5 != info.md5sum.to_ascii_lowercase() {
-                let _ = std::fs::remove_file(&zip_path);
-                return Err(format!(
-                    "Checksum mismatch (MD5) for SourceForge download: expected {}, got {}",
-                    info.md5sum, actual_md5
-                ));
-            }
-        } else {
-            return Err("Downloaded from SourceForge but release metadata is missing".to_string());
-        }
-    } else {
-        let asset_name = format!("zapret-discord-youtube-{}.zip", latest_version);
-        let expected_sha256 = fetch_expected_sha256(&latest_version, &asset_name).await?;
-        let actual_sha256 = sha256_file(&zip_path)?;
-        if actual_sha256 != expected_sha256 {
-            let _ = std::fs::remove_file(&zip_path);
-            return Err(format!(
-                "Checksum mismatch (SHA-256) for {}: expected {}, got {}",
-                asset_name, expected_sha256, actual_sha256
-            ));
-        }
-    }
+    let (source_url, verified_checksum) = selected
+        .map(|(url, checksum)| (Some(url), checksum))
+        .ok_or_else(|| "No stable core artifact could be downloaded and verified".to_string())?;
 
     // Extraction
     window.emit("download-progress", 92).ok();
-    let extract_dir = temp_dir.join("extracted");
-    let _ = std::fs::create_dir_all(&extract_dir);
+    let staging = installation.create_staging()?;
+    let _staging_cleanup = OwnedDirectoryCleanup::new(
+        staging.clone(),
+        staging
+            .parent()
+            .ok_or_else(|| "Staging has no parent".to_string())?
+            .to_path_buf(),
+        ".binaries-staging-",
+    );
+    let extract_dir = staging.join("package");
+    std::fs::create_dir(&extract_dir).map_err(|e| format!("Failed to prepare staging: {e}"))?;
 
     // Extract natively via the `zip` crate instead of calling
     // `Expand-Archive`. Every entry name is validated against `..`, absolute
     // paths, and drive-letter prefixes before it is written, preventing
     // zip-slip from placing files outside `extract_dir`.
-    extract_zip_safely(&zip_path, &extract_dir)?;
+    if let Err(error) = extract_zip_safely(&zip_path, &extract_dir) {
+        installation.remove_owned_staging(&staging)?;
+        return Err(error);
+    }
 
     window.emit("download-progress", 95).ok();
 
@@ -2169,25 +1854,261 @@ async fn download_and_install_update(
         }
     }
 
-    copy_dir_contents(&extracted_folder, &dir)?;
+    if let Err(error) = copy_dir_contents(&extracted_folder, &staging) {
+        installation.remove_owned_staging(&staging)?;
+        return Err(error);
+    }
+    std::fs::remove_dir_all(&extract_dir)
+        .map_err(|e| format!("Cannot remove staging package directory: {e}"))?;
+    if let Err(error) = installation.validate_and_manifest(
+        &staging,
+        &latest_version,
+        source_url,
+        Some(verified_checksum),
+        core_manager_at(&staging).provider(),
+    ) {
+        installation.remove_owned_staging(&staging)?;
+        return Err(error);
+    }
+    let mut installed_manifest = core::CoreManifest::read(&staging)?;
+    installed_manifest.channel = Some(release.channel.clone());
+    installed_manifest.write_atomic(&staging)?;
+    installation.preserve_user_files(&dir, &staging)?;
 
-    // Restore
-    let new_lists_dir = dir.join("lists");
-    let _ = std::fs::create_dir_all(&new_lists_dir);
-    if let Ok(entries) = std::fs::read_dir(&backup_dir) {
-        for entry in entries.flatten() {
-            let _ = std::fs::copy(entry.path(), new_lists_dir.join(entry.file_name()));
+    // Capture the exact runtime state only after the candidate is ready, just
+    // before stopping anything managed by the application.
+    let restart = restart_context(get_zapret_status(state.clone()), "update")?;
+    let filters_status = get_filters_status();
+    if restart.is_some() {
+        if let Err(error) = stop_zapret_internal() {
+            installation.remove_owned_staging(&staging)?;
+            return Err(format!("Cannot stop zapret before activation: {error}"));
         }
     }
 
-    // Restore settings after update
-    let _ = set_game_filter(filters_status.game_filter);
-    let _ = set_ipset_filter(filters_status.ipset);
+    let operation = (|| {
+        installation.activate(&staging, manager.provider())?;
+        if let Err(error) = set_game_filter(filters_status.game_filter)
+            .and_then(|_| set_ipset_filter(filters_status.ipset))
+        {
+            installation
+                .rollback(
+                    manager.provider(),
+                    core_manager_at(dir.with_file_name("binaries.previous")).provider(),
+                )
+                .map_err(|rollback| {
+                    format!(
+                        "Cannot restore filter settings ({error}); automatic rollback failed: {rollback}"
+                    )
+                })?;
+            return Err(format!(
+                "Cannot restore filter settings ({error}); automatic rollback completed"
+            ));
+        }
+        Ok(())
+    })();
 
-    let _ = std::fs::remove_dir_all(&temp_dir);
-    window.emit("download-progress", 100).ok();
+    let restart_result = restart.map(|(strategy, mode)| {
+        start_zapret(app, strategy, mode, state)
+            .map(|_| ())
+            .map_err(|e| format!("Cannot restart zapret after core update: {e}"))
+    });
+    match (operation, restart_result) {
+        (Err(error), Some(Err(restart_error))) => Err(format!("{error}; {restart_error}")),
+        (Err(error), _) => Err(error),
+        (Ok(()), Some(Err(restart_error))) => {
+            window.emit("download-progress", 100).ok();
+            Ok(format!("Update successful. Warning: {restart_error}"))
+        }
+        (Ok(()), _) => {
+            window.emit("download-progress", 100).ok();
+            Ok("Update successful".to_string())
+        }
+    }
+}
 
-    Ok("Update successful".to_string())
+struct OwnedDirectoryCleanup {
+    path: PathBuf,
+    expected_parent: PathBuf,
+    prefix: &'static str,
+}
+
+impl OwnedDirectoryCleanup {
+    fn new(path: PathBuf, expected_parent: PathBuf, prefix: &'static str) -> Self {
+        Self {
+            path,
+            expected_parent,
+            prefix,
+        }
+    }
+}
+
+impl Drop for OwnedDirectoryCleanup {
+    fn drop(&mut self) {
+        if !self.path.exists() {
+            return;
+        }
+        let actual_parent = self
+            .path
+            .parent()
+            .and_then(|parent| parent.canonicalize().ok());
+        let expected_parent = self.expected_parent.canonicalize().ok();
+        let owned = actual_parent == expected_parent
+            && self
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(self.prefix));
+        let safe_type = std::fs::symlink_metadata(&self.path)
+            .map(|metadata| !metadata.file_type().is_symlink())
+            .unwrap_or(false);
+        if owned && safe_type {
+            if let Err(error) = std::fs::remove_dir_all(&self.path) {
+                eprintln!(
+                    "Cannot clean owned temporary directory {}: {error}",
+                    self.path.display()
+                );
+            }
+        } else {
+            eprintln!(
+                "Refusing to clean unverified temporary directory {}",
+                self.path.display()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod temporary_cleanup_tests {
+    use super::{restart_context, CoreOperationGuard, OwnedDirectoryCleanup, ZapretStatus};
+
+    #[test]
+    fn restart_context_preserves_service_and_temporary_modes() {
+        for mode in ["service", "temporary"] {
+            let context = restart_context(
+                ZapretStatus {
+                    running: true,
+                    strategy: Some("ALT12".to_string()),
+                    mode: Some(mode.to_string()),
+                },
+                "update",
+            )
+            .unwrap();
+            assert_eq!(context, Some(("ALT12".to_string(), mode.to_string())));
+        }
+        assert_eq!(
+            restart_context(
+                ZapretStatus {
+                    running: false,
+                    strategy: None,
+                    mode: None,
+                },
+                "update",
+            )
+            .unwrap(),
+            None
+        );
+        assert!(restart_context(
+            ZapretStatus {
+                running: true,
+                strategy: None,
+                mode: Some("service".to_string()),
+            },
+            "update",
+        )
+        .unwrap_err()
+        .contains("active strategy is unknown"));
+    }
+
+    #[test]
+    fn core_operation_guard_rejects_overlap_and_resets_on_drop() {
+        let guard = CoreOperationGuard::acquire().unwrap();
+        assert!(CoreOperationGuard::acquire()
+            .err()
+            .unwrap()
+            .contains("already in progress"));
+        drop(guard);
+        assert!(CoreOperationGuard::acquire().is_ok());
+    }
+
+    #[test]
+    fn owned_temporary_directory_is_cleaned_during_error_unwind() {
+        let temp_parent = std::env::temp_dir();
+        let expected_parent = temp_parent.canonicalize().unwrap();
+        for prefix in [".zapret-ui-core-download-", ".binaries-staging-"] {
+            let path = temp_parent.join(format!("{prefix}test-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir(&path).unwrap();
+            let result: Result<(), &str> = {
+                let _cleanup =
+                    OwnedDirectoryCleanup::new(path.clone(), expected_parent.clone(), prefix);
+                Err("simulated failure")
+            };
+            assert!(result.is_err());
+            assert!(!path.exists());
+        }
+    }
+}
+
+#[tauri::command]
+fn get_core_installation_state() -> Result<CoreInstallationState, String> {
+    let dir = find_binaries_dir();
+    let installation = CoreInstallation::new(&dir)?;
+    installation.prepare(core_manager_at(dir).provider())?;
+    Ok(installation.state())
+}
+
+#[tauri::command]
+fn rollback_core_update(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<CoreInstallationState, String> {
+    let _operation_guard = CoreOperationGuard::acquire()?;
+    let dir = find_binaries_dir();
+    let previous_dir = dir.with_file_name("binaries.previous");
+    let installation = CoreInstallation::new(&dir)?;
+    let active_manager = core_manager_at(&dir);
+    installation.prepare(active_manager.provider())?;
+    let filters = get_filters_status();
+    let restart = restart_context(get_zapret_status(state.clone()), "rollback")?;
+    if restart.is_some() {
+        stop_zapret_internal().map_err(|e| format!("Cannot stop zapret before rollback: {e}"))?;
+    }
+
+    let operation = (|| {
+        let result = installation.rollback(
+            active_manager.provider(),
+            core_manager_at(&previous_dir).provider(),
+        )?;
+        if let Err(error) =
+            set_game_filter(filters.game_filter).and_then(|_| set_ipset_filter(filters.ipset))
+        {
+            installation
+                .rollback(
+                    active_manager.provider(),
+                    core_manager_at(&previous_dir).provider(),
+                )
+                .map_err(|restore| {
+                    format!(
+                        "Cannot restore settings after rollback ({error}); cannot undo rollback: {restore}"
+                    )
+                })?;
+            return Err(format!(
+                "Cannot restore settings after rollback ({error}); original core restored"
+            ));
+        }
+        Ok(result)
+    })();
+
+    let restart_result = restart.map(|(strategy, mode)| {
+        start_zapret(app, strategy, mode, state)
+            .map_err(|e| format!("Cannot restart zapret after rollback attempt: {e}"))
+    });
+    match (operation, restart_result) {
+        (Ok(_), Some(Err(error))) => Err(error),
+        (Err(error), Some(Err(restart))) => Err(format!("{error}; {restart}")),
+        (result, _) => result,
+    }
 }
 
 /// Recursively copies directory contents
@@ -2199,7 +2120,8 @@ fn copy_dir_contents(src: &std::path::Path, dst: &std::path::Path) -> Result<(),
         let dest_path = dst.join(&file_name);
 
         if path.is_dir() {
-            std::fs::create_dir_all(&dest_path).map_err(|e| format!("Failed to create directory {:?}: {}", dest_path, e))?;
+            std::fs::create_dir_all(&dest_path)
+                .map_err(|e| format!("Failed to create directory {:?}: {}", dest_path, e))?;
             copy_dir_contents(&path, &dest_path)?;
         } else {
             if let Err(e) = std::fs::copy(&path, &dest_path) {
@@ -2207,14 +2129,20 @@ fn copy_dir_contents(src: &std::path::Path, dst: &std::path::Path) -> Result<(),
                 let mut old_path = dest_path.clone();
                 let new_name = format!("{}.old", file_name.to_str().unwrap_or("locked"));
                 old_path.set_file_name(new_name);
-                
+
                 if std::fs::rename(&dest_path, &old_path).is_err() {
-                    return Err(format!("Failed to copy file {:?} to {:?}: {}", path, dest_path, e));
+                    return Err(format!(
+                        "Failed to copy file {:?} to {:?}: {}",
+                        path, dest_path, e
+                    ));
                 }
 
                 // Attempt copy again after rename
                 std::fs::copy(&path, &dest_path).map_err(|e2| {
-                    format!("Failed to copy file {:?} to {:?} after renaming: {}", path, dest_path, e2)
+                    format!(
+                        "Failed to copy file {:?} to {:?} after renaming: {}",
+                        path, dest_path, e2
+                    )
                 })?;
             }
         }
@@ -2743,7 +2671,10 @@ async fn check_site(domain: String, state: State<'_, AppState>) -> Result<SiteCh
         if let Ok(socket_addr) = format!("{}:443", ip).parse::<std::net::SocketAddr>() {
             let start = std::time::Instant::now();
             let connect_timeout = std::time::Duration::from_secs(3);
-            if let Ok(Ok(_)) = tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(socket_addr)).await {
+            if let Ok(Ok(_)) =
+                tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(socket_addr))
+                    .await
+            {
                 ping_ms = Some(start.elapsed().as_millis() as u32);
             }
         }
@@ -2926,8 +2857,7 @@ fn test_results_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .path()
         .app_data_dir()
         .map_err(|e| format!("Failed to resolve app data dir: {}", e))?;
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("Failed to create app data dir: {}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create app data dir: {}", e))?;
     Ok(dir.join("test_results.json"))
 }
 
@@ -2936,8 +2866,7 @@ fn save_test_results(app: tauri::AppHandle, payload: SavedTestResults) -> Result
     let path = test_results_path(&app)?;
     let json = serde_json::to_string_pretty(&payload)
         .map_err(|e| format!("Failed to serialize test results: {}", e))?;
-    std::fs::write(&path, json)
-        .map_err(|e| format!("Failed to write test results: {}", e))?;
+    std::fs::write(&path, json).map_err(|e| format!("Failed to write test results: {}", e))?;
     Ok(())
 }
 
@@ -2963,7 +2892,11 @@ fn cancel_tests(state: State<'_, AppState>) {
             .output();
     }
     // Remove temp script if it still exists
-    let temp_script = find_binaries_dir().join("utils").join("test_zapret_ui.ps1");
+    let temp_script = core_manager()
+        .provider()
+        .paths()
+        .utils_dir()
+        .join("test_zapret_ui.ps1");
     let _ = std::fs::remove_file(&temp_script);
 }
 
@@ -2975,8 +2908,8 @@ async fn run_tests(
     test_mode: String,
 ) -> Result<Vec<TestResult>, String> {
     let dir = find_binaries_dir();
-    let utils_dir = dir.join("utils");
-    let ps_script = utils_dir.join("test zapret.ps1");
+    let manager = core_manager_at(&dir);
+    let ps_script = manager.provider().test_script();
 
     if !ps_script.exists() {
         return Err(
@@ -3012,7 +2945,11 @@ async fn run_tests(
             "    # UI Mode - using all configs",
         );
 
-    let temp_script = utils_dir.join("test_zapret_ui.ps1");
+    let temp_script = manager
+        .provider()
+        .paths()
+        .utils_dir()
+        .join("test_zapret_ui.ps1");
     std::fs::write(&temp_script, modified_content)
         .map_err(|e| format!("Failed to write temp script: {}", e))?;
 
@@ -3146,10 +3083,7 @@ async fn run_tests(
 
         // Structured event: "Best config: X"
         if let Some(rest) = line.strip_prefix("Best config:") {
-            let _ = app.emit(
-                "test-best",
-                serde_json::json!({ "config": rest.trim() }),
-            );
+            let _ = app.emit("test-best", serde_json::json!({ "config": rest.trim() }));
         }
 
         let _ = app.emit(
@@ -3237,7 +3171,9 @@ async fn run_tests(
 /// единицы измерения (например `AvgPing: 45 ms` → 45) и запятые в конце
 /// (`Ping OK: 5,` → 5).
 fn extract_number(text: &str, prefix: &str) -> i32 {
-    let Some(pos) = text.find(prefix) else { return 0 };
+    let Some(pos) = text.find(prefix) else {
+        return 0;
+    };
     let after = &text[pos + prefix.len()..];
     let mut started = false;
     let mut digits = String::new();
@@ -3323,11 +3259,23 @@ fn refresh_tray_menu(app: &tauri::AppHandle) {
 }
 
 #[tauri::command]
-fn exit_app(app: tauri::AppHandle, state: State<'_, AppState>) {
-    stop_zapret_on_exit(state);
-    app.exit(0);
+fn exit_app(app: tauri::AppHandle) {
+    graceful_exit(&app);
 }
 
+fn graceful_exit(app: &tauri::AppHandle) {
+    if EXIT_IN_PROGRESS.swap(true, Ordering::AcqRel) {
+        return;
+    }
+
+    stop_zapret_on_exit(app.state::<AppState>());
+    if let Some(window) = app.get_webview_window("main") {
+        if let Err(error) = window.destroy() {
+            eprintln!("Failed to destroy main WebView window during shutdown: {error}");
+        }
+    }
+    app.exit(0);
+}
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
@@ -3345,18 +3293,17 @@ pub fn run() {
             Some(vec!["--autostart"]),
         ))
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            let _ = app.get_webview_window("main")
-                .map(|w| {
-                    let _ = w.show();
-                    let _ = w.unminimize();
-                    let _ = w.set_focus();
+            let _ = app.get_webview_window("main").map(|w| {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
 
-                    let state = app.state::<AppState>();
-                    let tray_opt = state.tray_handle.lock_unpoisoned().clone();
-                    if let Some(tray) = tray_opt {
-                        let _ = tray.set_visible(false);
-                    }
-                });
+                let state = app.state::<AppState>();
+                let tray_opt = state.tray_handle.lock_unpoisoned().clone();
+                if let Some(tray) = tray_opt {
+                    let _ = tray.set_visible(false);
+                }
+            });
         }))
         .manage(AppState {
             active_strategy: Mutex::new(None),
@@ -3433,9 +3380,7 @@ pub fn run() {
                 .on_menu_event(move |app, event| {
                     match event.id.as_ref() {
                         "quit" => {
-                            let state = app.state::<AppState>();
-                            stop_zapret_on_exit(state);
-                            app.exit(0);
+                            graceful_exit(app);
                         }
                         "show" => {
                             if let Some(window) = app.get_webview_window("main") {
@@ -3461,7 +3406,8 @@ pub fn run() {
                                     .or(status.strategy)
                                     .or_else(|| available.first().cloned());
                                 if let Some(s) = strategy {
-                                    let _ = start_zapret(app.clone(), s, "service".to_string(), state);
+                                    let _ =
+                                        start_zapret(app.clone(), s, "service".to_string(), state);
                                 }
                             }
                             refresh_tray_menu(app);
@@ -3469,8 +3415,12 @@ pub fn run() {
                         id if id.starts_with("strat_") => {
                             let strategy = &id[6..];
                             let state = app.state::<AppState>();
-                            let _ =
-                                start_zapret(app.clone(), strategy.to_string(), "service".to_string(), state);
+                            let _ = start_zapret(
+                                app.clone(),
+                                strategy.to_string(),
+                                "service".to_string(),
+                                state,
+                            );
                             refresh_tray_menu(app);
                         }
                         _ => {}
@@ -3590,7 +3540,10 @@ pub fn run() {
             import_backup_file,
             update_ipset_list,
             get_remote_core_version,
+            get_core_update_info,
             download_and_install_update,
+            get_core_installation_state,
+            rollback_core_update,
             run_diagnostics,
             clear_discord_cache,
             check_admin_privileges,

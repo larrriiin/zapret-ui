@@ -30,9 +30,10 @@ async function downloadAndInstallCoreUpdate(useProxy = false, customProxy = null
   try {
     const modalTitle = document.querySelector('#update-modal h3');
     if (modalTitle) modalTitle.textContent = t('downloading_installing');
-    await invoke('download_and_install_update', { useProxy, customProxy });
-    if (modalTitle) modalTitle.textContent = t('update_installed_restarting');
-    setTimeout(() => location.reload(), 1500);
+    const result = await invoke('download_and_install_update', { useProxy, customProxy });
+    if (modalTitle) modalTitle.textContent = result;
+    setTimeout(() => location.reload(), 3000);
+    return result;
   } catch (err) {
     console.error('Core update failed:', err);
     showProxyFallbackModal(err, 
@@ -132,9 +133,19 @@ function showDualUpdateModal(data, manual = false) {
   const uiStatus = data.ui.available
     ? `<span class="px-2 py-0.5 bg-primary/20 text-primary text-[10px] font-bold rounded-full uppercase">${t('update_available_short')}</span>`
     : `<span class="text-on-surface-variant/50 text-[10px] font-bold uppercase">${t('up_to_date')}</span>`;
-  const coreStatus = data.core.available
-    ? `<span class="px-2 py-0.5 bg-secondary/20 text-secondary text-[10px] font-bold rounded-full uppercase">${t('update_available_short')}</span>`
-    : `<span class="text-on-surface-variant/50 text-[10px] font-bold uppercase">${t('up_to_date')}</span>`;
+  const coreStatusLabels = {
+    update_available: t('update_available_short'),
+    not_installed: t('core_not_installed'),
+    up_to_date: t('up_to_date'),
+    ahead: t('core_update_ahead'),
+    unknown: t('core_update_unknown'),
+  };
+  const coreStatus = `<span class="${data.core.available ? 'text-secondary' : 'text-on-surface-variant/70'} text-[10px] font-bold uppercase">${coreStatusLabels[data.core.status] || t('core_update_unknown')}</span>`;
+  const coreCurrentVersion = data.core.status === 'not_installed'
+    ? t('core_not_installed')
+    : data.core.status === 'unknown'
+      ? t('core_version_unknown')
+      : `v${data.core.current}`;
 
   modal.innerHTML = `
     <div class="bg-surface-container-high border border-outline-variant/30 rounded-3xl p-8 max-w-lg w-full shadow-2xl animate-scale-in">
@@ -161,15 +172,15 @@ function showDualUpdateModal(data, manual = false) {
 
           <div class="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
             <div class="flex flex-col items-start text-left">
-              <span class="text-[10px] font-bold text-secondary/70 uppercase tracking-wider mb-1">${t('zapret_core')}</span>
+              <span class="text-[10px] font-bold text-secondary/70 uppercase tracking-wider mb-1">${t('zapret_core')} · ${t('core_stable_channel')}</span>
               <div class="flex items-center gap-2">
-                <span class="text-sm font-bold text-on-surface">v${data.core.current}</span>
+                <span class="text-sm font-bold text-on-surface">${coreCurrentVersion}</span>
                 ${data.core.available ? `<span class="material-symbols-outlined text-xs text-on-surface-variant/40">arrow_forward</span> <span class="text-sm font-bold text-secondary">${data.core.latest === 'Error' ? 'Ошибка' : 'v' + data.core.latest}</span>` : ''}
               </div>
             </div>
             <div class="flex flex-col items-end gap-3">
               ${coreStatus}
-              ${data.core.available ? `<button id="modal-update-core-btn" class="px-4 py-2 bg-secondary/20 hover:bg-secondary/30 border border-secondary/20 rounded-xl text-[10px] font-black text-secondary uppercase transition-all active:scale-95 shadow-lg shadow-secondary/5">${t('update_now')}</button>` : ''}
+              ${(data.core.status === 'update_available' || data.core.status === 'not_installed') ? `<button id="modal-update-core-btn" class="px-4 py-2 bg-secondary/20 hover:bg-secondary/30 border border-secondary/20 rounded-xl text-[10px] font-black text-secondary uppercase transition-all active:scale-95 shadow-lg shadow-secondary/5">${t('update_now')}</button>` : ''}
             </div>
           </div>
         </div>
@@ -185,7 +196,10 @@ function showDualUpdateModal(data, manual = false) {
 
   modal.querySelector('#modal-close-btn')?.addEventListener('click', () => modal.remove());
   modal.querySelector('#modal-update-ui-btn')?.addEventListener('click', (e) => downloadAndInstallUIUpdate(e, currentUpdateObject));
-  modal.querySelector('#modal-update-core-btn')?.addEventListener('click', () => downloadAndInstallCoreUpdate().catch(console.error));
+  modal.querySelector('#modal-update-core-btn')?.addEventListener('click', (event) => {
+    event.currentTarget.disabled = true;
+    downloadAndInstallCoreUpdate().catch(console.error);
+  });
 }
 
 async function checkUIUpdateWithFallback() {
@@ -219,26 +233,25 @@ async function checkForUpdates(manual = false) {
 
   try {
     const uiLocalVersion = await invoke('get_ui_version_cmd');
-    const [uiUpdate, coreRemoteVersion, coreLocalVersion] = await Promise.all([
+    const [uiUpdate, coreInfo] = await Promise.all([
       checkUIUpdateWithFallback(),
-      invoke('get_remote_core_version', { useProxy: false, customProxy: null }).catch(async (err) => {
+      invoke('get_core_update_info', { useProxy: false, customProxy: null }).catch(async (err) => {
         try {
-          return await invoke('get_remote_core_version', { useProxy: true, customProxy: null });
+          return await invoke('get_core_update_info', { useProxy: true, customProxy: null });
         } catch {
-          return 'Error';
+          return { status: 'unknown', currentVersion: 'Unknown', stableVersion: 'Error', updateAvailable: false };
         }
       }),
-      invoke('get_local_version_cmd').catch((err) => 'Local Err: ' + err),
     ]);
 
     const hasUIUpdate = !!uiUpdate;
-    const hasCoreUpdate = coreRemoteVersion !== 'Unknown' && coreRemoteVersion !== 'Error' && coreLocalVersion !== 'Unknown' && coreRemoteVersion !== coreLocalVersion;
-    const showCoreError = manual && coreRemoteVersion === 'Error';
+    const hasCoreUpdate = coreInfo.status === 'update_available' || coreInfo.status === 'not_installed';
+    const showCoreError = manual && coreInfo.status === 'unknown';
 
     if (hasUIUpdate || hasCoreUpdate || showCoreError || manual) {
       showDualUpdateModal({
         ui: { available: hasUIUpdate, current: uiLocalVersion, latest: hasUIUpdate ? uiUpdate.version : uiLocalVersion, updateObj: uiUpdate },
-        core: { available: hasCoreUpdate || showCoreError, current: coreLocalVersion, latest: coreRemoteVersion },
+        core: { available: hasCoreUpdate, current: coreInfo.currentVersion || t('not_installed'), latest: coreInfo.stableVersion, status: coreInfo.status, error: showCoreError },
       }, manual);
     }
   } catch (err) {
@@ -285,21 +298,7 @@ function initLegacyUpdateNowButton() {
     statusEl.className = 'mt-4 text-sm text-secondary';
     updateNowBtn.disabled = true;
 
-    let zapretWasRunning = false;
-    let zapretStrategy = null;
-    let zapretMode = 'service';
-
     try {
-      statusEl.textContent = t('checking_service_status');
-      const status = await invoke('get_zapret_status');
-      if (status.running) {
-        zapretWasRunning = true;
-        zapretStrategy = status.strategy;
-        zapretMode = status.mode || 'service';
-        statusEl.textContent = t('stopping_before_update');
-        await invoke('stop_zapret');
-      }
-
       const progressContainer = $('update-status-container');
       const progressText = $('update-progress-text');
       const progressBar = $('update-progress-bar');
@@ -321,19 +320,8 @@ function initLegacyUpdateNowButton() {
       if (progressText) progressText.textContent = '100%';
       statusEl.className = 'text-xs text-secondary font-mono mb-3 text-center';
 
-      if (zapretWasRunning && zapretStrategy) {
-        statusEl.textContent = t('update_installed_restarting');
-        try {
-          await invoke('start_zapret', { strategy: zapretStrategy, mode: zapretMode });
-          await pollStatus();
-          statusEl.textContent = result + ' Zapret restarted successfully.';
-        } catch (restartErr) {
-          statusEl.textContent = result + ' Warning: failed to restart: ' + restartErr;
-          statusEl.className = 'text-xs text-primary font-mono mb-3 text-center';
-        }
-      } else {
-        statusEl.textContent = result;
-      }
+      statusEl.textContent = result;
+      await pollStatus();
 
       await refreshCoreVersion();
 
@@ -343,9 +331,6 @@ function initLegacyUpdateNowButton() {
     } catch (err) {
       statusEl.textContent = 'Error: ' + err;
       statusEl.className = 'mt-4 text-sm text-error-dim';
-      if (zapretWasRunning && zapretStrategy) {
-        try { await invoke('start_zapret', { strategy: zapretStrategy, mode: zapretMode }); await pollStatus(); } catch {}
-      }
       updateNowBtn.disabled = false;
 
       showProxyFallbackModal(err, 
@@ -357,6 +342,45 @@ function initLegacyUpdateNowButton() {
   });
 }
 
+async function refreshRollbackState() {
+  const current = $('core-current-install-version');
+  const previous = $('core-previous-install-version');
+  const previousRow = $('core-previous-version-row');
+  const button = $('core-rollback-btn');
+  if (!current || !previous || !button) return;
+  try {
+    const installation = await invoke('get_core_installation_state');
+    current.textContent = installation.currentVersion || '—';
+    previous.textContent = installation.previousVersion || '—';
+    previousRow?.classList.toggle('hidden', !installation.previousVersion);
+    button.classList.toggle('hidden', !installation.rollbackAvailable);
+    button.disabled = !installation.rollbackAvailable;
+    button.textContent = t('core_rollback_button', { version: installation.previousVersion || '' });
+  } catch (err) {
+    console.error('Cannot read core installation state:', err);
+    button.disabled = true;
+  }
+}
+
+function initCoreRollback() {
+  const button = $('core-rollback-btn');
+  button?.addEventListener('click', async () => {
+    const version = $('core-previous-install-version')?.textContent || '';
+    if (!window.confirm(t('core_rollback_confirm', { version }))) return;
+    button.disabled = true;
+    try {
+      await invoke('rollback_core_update');
+      await refreshRollbackState();
+      await refreshCoreVersion();
+      alert(t('core_rollback_success'));
+    } catch (err) {
+      alert(`${t('core_rollback_title')}: ${err}`);
+      await refreshRollbackState();
+    }
+  });
+  refreshRollbackState();
+}
+
 export function initUpdates() {
   const checkUpdatesBtn = $('check-updates-btn');
   if (checkUpdatesBtn) checkUpdatesBtn.addEventListener('click', () => checkForUpdates(true));
@@ -364,4 +388,5 @@ export function initUpdates() {
 
   initIPSetUpdateButton();
   initLegacyUpdateNowButton();
+  initCoreRollback();
 }

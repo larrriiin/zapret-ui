@@ -31,6 +31,20 @@
         </label>
     </div>
 
+    <!-- Core rollback -->
+    <div id="core-rollback-panel" class="glass-panel rounded-2xl border border-outline-variant/10 p-6 space-y-3">
+        <div class="text-sm text-on-surface font-headline font-bold" data-i18n="core_rollback_title">Core rollback</div>
+        <div class="text-[10px] text-on-surface-variant">
+            <span data-i18n="core_current_version">Current version</span>: <span id="core-current-install-version">—</span>
+        </div>
+        <div id="core-previous-version-row" class="hidden text-[10px] text-on-surface-variant">
+            <span data-i18n="core_previous_version">Previous version</span>: <span id="core-previous-install-version">—</span>
+        </div>
+        <button id="core-rollback-btn" type="button" disabled
+            class="hidden px-4 py-2 bg-secondary/20 hover:bg-secondary/30 disabled:opacity-40 border border-secondary/20 rounded-xl text-xs font-bold text-secondary transition-all">
+        </button>
+    </div>
+
     <!-- Close button behavior -->
     <div class="glass-panel rounded-2xl border border-outline-variant/10 p-6 space-y-3">
         <div class="text-sm text-on-surface font-headline font-bold" data-i18n="close_pref_label">When the close button is clicked</div>
