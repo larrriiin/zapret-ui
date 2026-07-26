@@ -592,7 +592,8 @@ async fn get_core_update_info(
     custom_proxy: Option<String>,
 ) -> Result<CoreUpdateInfo, String> {
     let stable = get_remote_core_version(use_proxy, custom_proxy).await?;
-    let provider = core_manager().provider();
+    let manager = core_manager();
+    let provider = manager.provider();
     let current = provider.is_installed().then(|| provider.local_version());
     let status = current
         .as_deref()
@@ -1805,7 +1806,11 @@ async fn download_and_install_update(
             continue;
         }
         let actual = sha256_file(&zip_path)?;
-        if actual == artifact.checksum.value {
+        let expected = match &artifact.checksum {
+            Checksum::Sha256(value) => value,
+            Checksum::Md5(_) => continue,
+        };
+        if actual == *expected {
             selected = Some((artifact.url.clone(), Checksum::Sha256(actual)));
             break;
         }

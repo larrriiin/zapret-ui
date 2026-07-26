@@ -7,18 +7,19 @@ use super::CorePaths;
 #[serde(tag = "algorithm", content = "value", rename_all = "lowercase")]
 pub enum Checksum {
     Sha256(String),
+    // Kept only to deserialize schema-v1 installation manifests created by
+    // the former SourceForge updater. Managed channel artifacts never create it.
     Md5(String),
 }
 
 /// Download information without assumptions about a provider's hosting service.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub struct CoreArtifact {
     pub url: String,
     pub checksum: Checksum,
 }
 
-#[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CoreRelease {
     pub provider: String,
     pub channel: String,
