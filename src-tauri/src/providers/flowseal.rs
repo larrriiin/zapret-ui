@@ -193,6 +193,49 @@ impl CoreProvider for FlowsealProvider {
             .map_err(|e| format!("Не удалось прочитать {strategy}.bat: {e}"))?;
         self.parse_strategy_content(&content, strategy, game_filter)
     }
+    fn validate_installation(&self) -> Result<(String, usize), String> {
+        let root = self.paths.root();
+        if !root.is_dir() {
+            return Err(format!(
+                "Unexpected archive structure: {} is not a directory",
+                root.display()
+            ));
+        }
+        for path in [
+            self.service_script(),
+            self.winws_executable(),
+            self.test_script(),
+        ] {
+            if !path.is_file() {
+                return Err(format!("Missing required file: {}", path.display()));
+            }
+        }
+        for path in [self.paths.lists_dir(), self.paths.utils_dir()] {
+            if !path.is_dir() {
+                return Err(format!("Missing required directory: {}", path.display()));
+            }
+        }
+        let windivert = self.paths.bin_dir().join("WinDivert.dll");
+        let windivert64 = self.paths.bin_dir().join("WinDivert64.sys");
+        for path in [windivert, windivert64] {
+            if !path.is_file() {
+                return Err(format!("Missing required file: {}", path.display()));
+            }
+        }
+        let strategies = self.strategies()?;
+        if strategies.is_empty() {
+            return Err("No Flowseal strategies found".to_string());
+        }
+        for strategy in &strategies {
+            self.parse_strategy(strategy, "all")
+                .map_err(|e| format!("Strategy {strategy} cannot be parsed: {e}"))?;
+        }
+        let version = self.local_version();
+        if version.starts_with("Err:") {
+            return Err(format!("Cannot determine Flowseal version: {version}"));
+        }
+        Ok((version, strategies.len()))
+    }
 }
 
 pub fn parse_fallback_release(body: &serde_json::Value) -> Result<CoreRelease, String> {

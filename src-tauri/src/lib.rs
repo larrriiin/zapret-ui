@@ -33,7 +33,7 @@ use tauri_plugin_notification::NotificationExt;
 
 mod core;
 mod providers;
-use core::{Checksum, CoreManager, CoreRelease};
+use core::{Checksum, CoreInstallation, CoreInstallationState, CoreManager, CoreRelease};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const GITHUB_USER_AGENT: &str = "zapret-ui-updater";
@@ -1747,33 +1747,22 @@ async fn download_and_install_update(
     use_proxy: Option<bool>,
     custom_proxy: Option<String>,
 ) -> Result<String, String> {
-    // Stop the zapret service and processes to release file locks before update
-    let _ = stop_zapret_internal();
-
     let filters_status = get_filters_status();
     let dir = find_binaries_dir();
-    let temp_dir = std::env::temp_dir().join("zapret_update");
+    let installation = CoreInstallation::new(&dir)?;
+    installation.prepare()?;
+    let temp_parent = std::env::temp_dir();
+    let temp_dir = temp_parent.join(format!(
+        ".zapret-ui-core-download-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| format!("System clock error: {e}"))?
+            .as_nanos()
+    ));
 
     // Create temp directory
-    let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
-
-    // Backup user files
-    let lists_dir = dir.join("lists");
-    let backup_dir = temp_dir.join("backup");
-    std::fs::create_dir_all(&backup_dir).ok();
-
-    if lists_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&lists_dir) {
-            for entry in entries.flatten() {
-                if let Some(name) = entry.file_name().to_str() {
-                    if name.contains("user") {
-                        let _ = std::fs::copy(entry.path(), backup_dir.join(name));
-                    }
-                }
-            }
-        }
-    }
 
     window.emit("download-progress", 5).ok();
 
@@ -1947,7 +1936,9 @@ async fn download_and_install_update(
         return Err("Download failed: output file not found".to_string());
     }
 
-    // Verify integrity of downloaded archive
+    // Verify integrity of downloaded archive before extraction.
+    let verified_checksum;
+    let source_url;
     if downloaded_from_sf {
         if let Some(info) = sf_info {
             let expected_md5 = match info.checksum {
@@ -1966,6 +1957,8 @@ async fn download_and_install_update(
                     expected_md5, actual_md5
                 ));
             }
+            verified_checksum = Checksum::Md5(expected_md5);
+            source_url = Some(info.download_url);
         } else {
             return Err("Downloaded from SourceForge but release metadata is missing".to_string());
         }
@@ -1985,18 +1978,24 @@ async fn download_and_install_update(
                 asset_name, expected_sha256, actual_sha256
             ));
         }
+        verified_checksum = Checksum::Sha256(expected_sha256);
+        source_url = Some(provider.release_download_url(&latest_version));
     }
 
     // Extraction
     window.emit("download-progress", 92).ok();
-    let extract_dir = temp_dir.join("extracted");
-    let _ = std::fs::create_dir_all(&extract_dir);
+    let staging = installation.create_staging()?;
+    let extract_dir = staging.join("package");
+    std::fs::create_dir(&extract_dir).map_err(|e| format!("Failed to prepare staging: {e}"))?;
 
     // Extract natively via the `zip` crate instead of calling
     // `Expand-Archive`. Every entry name is validated against `..`, absolute
     // paths, and drive-letter prefixes before it is written, preventing
     // zip-slip from placing files outside `extract_dir`.
-    extract_zip_safely(&zip_path, &extract_dir)?;
+    if let Err(error) = extract_zip_safely(&zip_path, &extract_dir) {
+        installation.remove_owned_staging(&staging)?;
+        return Err(error);
+    }
 
     window.emit("download-progress", 95).ok();
 
@@ -2008,25 +2007,100 @@ async fn download_and_install_update(
         }
     }
 
-    copy_dir_contents(&extracted_folder, &dir)?;
-
-    // Restore
-    let new_lists_dir = dir.join("lists");
-    let _ = std::fs::create_dir_all(&new_lists_dir);
-    if let Ok(entries) = std::fs::read_dir(&backup_dir) {
-        for entry in entries.flatten() {
-            let _ = std::fs::copy(entry.path(), new_lists_dir.join(entry.file_name()));
-        }
+    if let Err(error) = copy_dir_contents(&extracted_folder, &staging) {
+        installation.remove_owned_staging(&staging)?;
+        return Err(error);
     }
+    std::fs::remove_dir_all(&extract_dir)
+        .map_err(|e| format!("Cannot remove staging package directory: {e}"))?;
+    if let Err(error) = installation.validate_and_manifest(
+        &staging,
+        &latest_version,
+        source_url,
+        Some(verified_checksum),
+    ) {
+        installation.remove_owned_staging(&staging)?;
+        return Err(error);
+    }
+    installation.preserve_user_files(&dir, &staging)?;
+
+    // Stop managed processes only after the candidate is completely validated.
+    if let Err(error) = stop_zapret_internal() {
+        installation.remove_owned_staging(&staging)?;
+        return Err(format!("Cannot stop zapret before activation: {error}"));
+    }
+    installation.activate(&staging)?;
 
     // Restore settings after update
-    let _ = set_game_filter(filters_status.game_filter);
-    let _ = set_ipset_filter(filters_status.ipset);
+    if let Err(error) = set_game_filter(filters_status.game_filter)
+        .and_then(|_| set_ipset_filter(filters_status.ipset))
+    {
+        installation.rollback().map_err(|rollback| {
+            format!(
+                "Cannot restore filter settings ({error}); automatic rollback failed: {rollback}"
+            )
+        })?;
+        return Err(format!(
+            "Cannot restore filter settings ({error}); automatic rollback completed"
+        ));
+    }
 
-    let _ = std::fs::remove_dir_all(&temp_dir);
+    remove_download_temp(&temp_dir)?;
     window.emit("download-progress", 100).ok();
 
     Ok("Update successful".to_string())
+}
+
+fn remove_download_temp(path: &std::path::Path) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Download temporary directory has no parent".to_string())?;
+    let expected_parent = std::env::temp_dir()
+        .canonicalize()
+        .map_err(|e| format!("Cannot verify temporary parent: {e}"))?;
+    let actual_parent = parent
+        .canonicalize()
+        .map_err(|e| format!("Cannot verify download temporary parent: {e}"))?;
+    let owned = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with(".zapret-ui-core-download-"));
+    if actual_parent != expected_parent || !owned {
+        return Err(format!(
+            "Refusing unsafe download temporary path: {}",
+            path.display()
+        ));
+    }
+    std::fs::remove_dir_all(path).map_err(|e| format!("Cannot clean download files: {e}"))
+}
+
+#[tauri::command]
+fn get_core_installation_state() -> Result<CoreInstallationState, String> {
+    let installation = CoreInstallation::new(find_binaries_dir())?;
+    installation.prepare()?;
+    Ok(installation.state())
+}
+
+#[tauri::command]
+fn rollback_core_update() -> Result<CoreInstallationState, String> {
+    let installation = CoreInstallation::new(find_binaries_dir())?;
+    installation.prepare()?;
+    let filters = get_filters_status();
+    stop_zapret_internal().map_err(|e| format!("Cannot stop zapret before rollback: {e}"))?;
+    let state = installation.rollback()?;
+    if let Err(error) =
+        set_game_filter(filters.game_filter).and_then(|_| set_ipset_filter(filters.ipset))
+    {
+        installation.rollback().map_err(|restore| {
+            format!(
+                "Cannot restore settings after rollback ({error}); cannot undo rollback: {restore}"
+            )
+        })?;
+        return Err(format!(
+            "Cannot restore settings after rollback ({error}); original core restored"
+        ));
+    }
+    Ok(state)
 }
 
 /// Recursively copies directory contents
@@ -3448,6 +3522,8 @@ pub fn run() {
             update_ipset_list,
             get_remote_core_version,
             download_and_install_update,
+            get_core_installation_state,
+            rollback_core_update,
             run_diagnostics,
             clear_discord_cache,
             check_admin_privileges,

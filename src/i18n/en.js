@@ -1,4 +1,10 @@
 export default {
+    "core_rollback_title": "Core rollback",
+    "core_current_version": "Current version",
+    "core_previous_version": "Previous version",
+    "core_rollback_button": "Return to version {version}",
+    "core_rollback_confirm": "The current core version will be replaced with {version}. User lists and settings will be preserved.",
+    "core_rollback_success": "Core rollback completed successfully.",
     "title": "Zapret_ VPN",
     "nav_home": "Home",
     "nav_sites": "Site Lists",

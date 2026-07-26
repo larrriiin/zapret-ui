@@ -357,6 +357,45 @@ function initLegacyUpdateNowButton() {
   });
 }
 
+async function refreshRollbackState() {
+  const current = $('core-current-install-version');
+  const previous = $('core-previous-install-version');
+  const previousRow = $('core-previous-version-row');
+  const button = $('core-rollback-btn');
+  if (!current || !previous || !button) return;
+  try {
+    const installation = await invoke('get_core_installation_state');
+    current.textContent = installation.currentVersion || '—';
+    previous.textContent = installation.previousVersion || '—';
+    previousRow?.classList.toggle('hidden', !installation.previousVersion);
+    button.classList.toggle('hidden', !installation.rollbackAvailable);
+    button.disabled = !installation.rollbackAvailable;
+    button.textContent = t('core_rollback_button', { version: installation.previousVersion || '' });
+  } catch (err) {
+    console.error('Cannot read core installation state:', err);
+    button.disabled = true;
+  }
+}
+
+function initCoreRollback() {
+  const button = $('core-rollback-btn');
+  button?.addEventListener('click', async () => {
+    const version = $('core-previous-install-version')?.textContent || '';
+    if (!window.confirm(t('core_rollback_confirm', { version }))) return;
+    button.disabled = true;
+    try {
+      await invoke('rollback_core_update');
+      await refreshRollbackState();
+      await refreshCoreVersion();
+      alert(t('core_rollback_success'));
+    } catch (err) {
+      alert(`${t('core_rollback_title')}: ${err}`);
+      await refreshRollbackState();
+    }
+  });
+  refreshRollbackState();
+}
+
 export function initUpdates() {
   const checkUpdatesBtn = $('check-updates-btn');
   if (checkUpdatesBtn) checkUpdatesBtn.addEventListener('click', () => checkForUpdates(true));
@@ -364,4 +403,5 @@ export function initUpdates() {
 
   initIPSetUpdateButton();
   initLegacyUpdateNowButton();
+  initCoreRollback();
 }

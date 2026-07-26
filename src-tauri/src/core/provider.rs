@@ -1,8 +1,10 @@
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use super::CorePaths;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "algorithm", content = "value", rename_all = "lowercase")]
 pub enum Checksum {
     Sha256(String),
     Md5(String),
@@ -31,4 +33,6 @@ pub trait CoreProvider: Send + Sync {
     fn is_installed(&self) -> bool;
     fn strategies(&self) -> Result<Vec<String>, String>;
     fn parse_strategy(&self, strategy: &str, game_filter: &str) -> Result<String, String>;
+    /// Validates provider-specific on-disk structure and returns its version and strategy count.
+    fn validate_installation(&self) -> Result<(String, usize), String>;
 }

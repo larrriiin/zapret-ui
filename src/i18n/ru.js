@@ -1,4 +1,10 @@
 export default {
+    "core_rollback_title": "Откат ядра",
+    "core_current_version": "Текущая версия",
+    "core_previous_version": "Предыдущая версия",
+    "core_rollback_button": "Вернуться к версии {version}",
+    "core_rollback_confirm": "Текущая версия ядра будет заменена на {version}. Пользовательские списки и настройки будут сохранены.",
+    "core_rollback_success": "Откат ядра успешно выполнен.",
     "title": "Zapret_ VPN",
     "nav_home": "Главная",
     "nav_sites": "Списки сайтов",
