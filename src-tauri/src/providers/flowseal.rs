@@ -124,6 +124,9 @@ impl FlowsealProvider {
 }
 
 impl CoreProvider for FlowsealProvider {
+    fn provider_name(&self) -> &'static str {
+        "flowseal"
+    }
     fn paths(&self) -> &CorePaths {
         &self.paths
     }

@@ -6,12 +6,12 @@ use std::{
 };
 
 use super::{Checksum, CoreProvider};
-use crate::providers::FlowsealProvider;
 
 pub const MANIFEST_NAME: &str = ".zapret-ui-core.json";
 const SCHEMA_VERSION: u32 = 1;
 const STAGING_PREFIX: &str = ".binaries-staging-";
 const SWAP_NAME: &str = ".binaries-rollback-swap";
+const PREVIOUS_BACKUP_NAME: &str = ".binaries-previous-backup";
 const USER_FILES: [&str; 3] = [
     "list-general-user.txt",
     "list-exclude-user.txt",
@@ -34,6 +34,7 @@ pub struct CoreManifest {
 
 impl CoreManifest {
     pub fn new(
+        provider: String,
         version: String,
         source_url: Option<String>,
         checksum: Option<Checksum>,
@@ -42,7 +43,7 @@ impl CoreManifest {
     ) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
-            provider: "flowseal".into(),
+            provider,
             version,
             source_url,
             checksum,
@@ -116,6 +117,8 @@ impl CoreInstallation {
 
     pub fn recover(&self) -> Result<(), String> {
         fs::create_dir_all(&self.parent).map_err(|e| format!("Cannot prepare core parent: {e}"))?;
+        self.recover_interrupted_rollback()?;
+        self.recover_interrupted_activation()?;
         if !self.active.exists() && self.previous.exists() {
             self.assert_owned(&self.previous, "binaries.previous")?;
             fs::rename(&self.previous, &self.active)
@@ -137,12 +140,19 @@ impl CoreInstallation {
         Ok(())
     }
 
-    pub fn prepare(&self) -> Result<(), String> {
+    pub fn prepare(&self, provider: &dyn CoreProvider) -> Result<(), String> {
         self.recover()?;
         if self.active.is_dir() && !self.active.join(MANIFEST_NAME).exists() {
-            let provider = FlowsealProvider::new(&self.active);
             let (version, count) = provider.validate_installation()?;
-            CoreManifest::new(version, None, None, count, true).write_atomic(&self.active)?;
+            CoreManifest::new(
+                provider.provider_name().into(),
+                version,
+                None,
+                None,
+                count,
+                true,
+            )
+            .write_atomic(&self.active)?;
         }
         Ok(())
     }
@@ -176,17 +186,24 @@ impl CoreInstallation {
         expected_version: &str,
         source_url: Option<String>,
         checksum: Option<Checksum>,
+        provider: &dyn CoreProvider,
     ) -> Result<CoreManifest, String> {
         self.assert_staging(root)?;
         reject_symlinks(root)?;
-        let provider = FlowsealProvider::new(root);
         let (actual, count) = provider.validate_installation()?;
         if actual != expected_version {
             return Err(format!(
                 "Core version mismatch: expected {expected_version}, found {actual}"
             ));
         }
-        let manifest = CoreManifest::new(actual, source_url, checksum, count, false);
+        let manifest = CoreManifest::new(
+            provider.provider_name().into(),
+            actual,
+            source_url,
+            checksum,
+            count,
+            false,
+        );
         serde_json::to_vec(&manifest)
             .map_err(|e| format!("Cannot serialize core manifest: {e}"))?;
         manifest.write_atomic(root)?;
@@ -215,29 +232,42 @@ impl CoreInstallation {
         Ok(())
     }
 
-    pub fn activate(&self, staging: &Path) -> Result<(), String> {
+    pub fn activate(
+        &self,
+        staging: &Path,
+        active_provider: &dyn CoreProvider,
+    ) -> Result<(), String> {
         self.assert_staging(staging)?;
         CoreManifest::read(staging)?;
         if !self.active.is_dir() {
             return Err("Active core is missing".into());
         }
         self.preserve_user_files(&self.active, staging)?;
+        let previous_backup = self.parent.join(PREVIOUS_BACKUP_NAME);
+        if previous_backup.exists() {
+            return Err("Previous-core backup already exists; recovery is required".into());
+        }
         if self.previous.exists() {
             self.assert_owned(&self.previous, "binaries.previous")?;
-            fs::remove_dir_all(&self.previous)
-                .map_err(|e| format!("Cannot remove old previous core: {e}"))?;
+            fs::rename(&self.previous, &previous_backup)
+                .map_err(|e| format!("Cannot preserve old previous core: {e}"))?;
         }
-        fs::rename(&self.active, &self.previous)
-            .map_err(|e| format!("Cannot save active core: {e}"))?;
+        if let Err(error) = fs::rename(&self.active, &self.previous) {
+            self.restore_previous_backup(&previous_backup)?;
+            return Err(format!("Cannot save active core: {error}"));
+        }
         if let Err(error) = fs::rename(staging, &self.active) {
-            fs::rename(&self.previous, &self.active).map_err(|rollback| {
-                format!("Activation failed ({error}); automatic rollback also failed: {rollback}")
-            })?;
+            self.restore_failed_activation(&previous_backup)
+                .map_err(|rollback| {
+                    format!(
+                        "Activation failed ({error}); automatic rollback also failed: {rollback}"
+                    )
+                })?;
             return Err(format!(
                 "Activation failed ({error}); automatic rollback completed"
             ));
         }
-        if let Err(error) = FlowsealProvider::new(&self.active).validate_installation() {
+        if let Err(error) = active_provider.validate_installation() {
             let failed = self
                 .parent
                 .join(format!("{STAGING_PREFIX}failed-{}", std::process::id()));
@@ -251,20 +281,30 @@ impl CoreInstallation {
                     "Post-activation validation failed ({error}); automatic rollback failed: {e}"
                 )
             })?;
+            self.restore_previous_backup(&previous_backup)?;
             self.remove_owned_staging(&failed)?;
             return Err(format!(
                 "Post-activation validation failed ({error}); automatic rollback completed"
             ));
         }
+        if previous_backup.exists() {
+            self.assert_owned(&previous_backup, PREVIOUS_BACKUP_NAME)?;
+            fs::remove_dir_all(&previous_backup)
+                .map_err(|e| format!("Cannot remove committed previous-core backup: {e}"))?;
+        }
         Ok(())
     }
 
-    pub fn rollback(&self) -> Result<CoreInstallationState, String> {
+    pub fn rollback(
+        &self,
+        active_provider: &dyn CoreProvider,
+        previous_provider: &dyn CoreProvider,
+    ) -> Result<CoreInstallationState, String> {
         if !self.previous.is_dir() {
             return Err("Rollback is unavailable: previous core is missing".into());
         }
         CoreManifest::read(&self.previous)?;
-        FlowsealProvider::new(&self.previous).validate_installation()?;
+        previous_provider.validate_installation()?;
         self.preserve_user_files(&self.active, &self.previous)?;
         let swap = self.parent.join(SWAP_NAME);
         if swap.exists() {
@@ -287,8 +327,74 @@ impl CoreInstallation {
                 "Rollback swap failed: {error}; active core restored"
             ));
         }
-        FlowsealProvider::new(&self.active).validate_installation()?;
+        active_provider.validate_installation()?;
         Ok(self.state())
+    }
+
+    fn recover_interrupted_rollback(&self) -> Result<(), String> {
+        let swap = self.parent.join(SWAP_NAME);
+        if !swap.exists() {
+            return Ok(());
+        }
+        self.assert_owned(&swap, SWAP_NAME)?;
+        match (self.active.exists(), self.previous.exists()) {
+            (false, true) => {
+                fs::rename(&swap, &self.active)
+                    .map_err(|e| format!("Cannot restore active core from rollback swap: {e}"))?;
+            }
+            (true, false) => {
+                fs::rename(&swap, &self.previous)
+                    .map_err(|e| format!("Cannot complete interrupted rollback from swap: {e}"))?;
+            }
+            (false, false) => {
+                fs::rename(&swap, &self.active)
+                    .map_err(|e| format!("Cannot recover sole core from rollback swap: {e}"))?;
+            }
+            (true, true) => {
+                return Err(
+                    "Ambiguous interrupted rollback: active, previous, and swap all exist"
+                        .to_string(),
+                );
+            }
+        }
+        eprintln!("Recovered interrupted core rollback");
+        Ok(())
+    }
+
+    fn recover_interrupted_activation(&self) -> Result<(), String> {
+        let backup = self.parent.join(PREVIOUS_BACKUP_NAME);
+        if !backup.exists() {
+            return Ok(());
+        }
+        self.assert_owned(&backup, PREVIOUS_BACKUP_NAME)?;
+        match (self.active.exists(), self.previous.exists()) {
+            (true, false) => self.restore_previous_backup(&backup)?,
+            (false, true) => self.restore_failed_activation(&backup)?,
+            (true, true) => {
+                fs::remove_dir_all(&backup)
+                    .map_err(|e| format!("Cannot clean committed previous-core backup: {e}"))?;
+            }
+            (false, false) => {
+                fs::rename(&backup, &self.active)
+                    .map_err(|e| format!("Cannot recover sole previous-core backup: {e}"))?;
+            }
+        }
+        eprintln!("Recovered interrupted core activation");
+        Ok(())
+    }
+
+    fn restore_failed_activation(&self, previous_backup: &Path) -> Result<(), String> {
+        fs::rename(&self.previous, &self.active)
+            .map_err(|e| format!("Cannot restore active core: {e}"))?;
+        self.restore_previous_backup(previous_backup)
+    }
+
+    fn restore_previous_backup(&self, previous_backup: &Path) -> Result<(), String> {
+        if previous_backup.exists() {
+            fs::rename(previous_backup, &self.previous)
+                .map_err(|e| format!("Cannot restore old previous core: {e}"))?;
+        }
+        Ok(())
     }
 
     pub fn remove_owned_staging(&self, path: &Path) -> Result<(), String> {
@@ -340,6 +446,13 @@ fn reject_symlinks(root: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::CoreManager;
+
+    fn provider(root: &Path) -> &dyn CoreProvider {
+        // Managers are intentionally leaked only in tests so returned provider references
+        // remain valid for the duration of each isolated filesystem scenario.
+        Box::leak(Box::new(CoreManager::new(root))).provider()
+    }
 
     struct Temp(PathBuf);
     impl Temp {
@@ -379,7 +492,14 @@ mod tests {
     }
 
     fn manifest(version: &str) -> CoreManifest {
-        CoreManifest::new(version.into(), None, None, 1, false)
+        CoreManifest::new(
+            "fixture-provider".into(),
+            version.into(),
+            None,
+            None,
+            1,
+            false,
+        )
     }
 
     #[test]
@@ -405,7 +525,7 @@ mod tests {
         let active = temp.0.join("binaries");
         fixture(&active, "1.0.0");
         let installation = CoreInstallation::new(&active).unwrap();
-        installation.prepare().unwrap();
+        installation.prepare(provider(&active)).unwrap();
         let imported = CoreManifest::read(&active).unwrap();
         assert!(imported.imported_legacy);
         assert_eq!(imported.version, "1.0.0");
@@ -423,7 +543,7 @@ mod tests {
             fixture(&staging, "2.0.0");
             fs::remove_file(staging.join(missing)).unwrap();
             assert!(installation
-                .validate_and_manifest(&staging, "2.0.0", None, None)
+                .validate_and_manifest(&staging, "2.0.0", None, None, provider(&staging))
                 .unwrap_err()
                 .contains("Missing required"));
             installation.remove_owned_staging(&staging).unwrap();
@@ -431,7 +551,7 @@ mod tests {
         let staging = installation.create_staging().unwrap();
         fixture(&staging, "2.0.0");
         installation
-            .validate_and_manifest(&staging, "2.0.0", None, None)
+            .validate_and_manifest(&staging, "2.0.0", None, None, provider(&staging))
             .unwrap();
     }
 
@@ -445,7 +565,7 @@ mod tests {
         fixture(&staging, "2.0.0");
         fs::remove_file(staging.join("general.bat")).unwrap();
         assert!(installation
-            .validate_and_manifest(&staging, "2.0.0", None, None)
+            .validate_and_manifest(&staging, "2.0.0", None, None, provider(&staging))
             .unwrap_err()
             .contains("No Flowseal strategies"));
         installation.remove_owned_staging(&staging).unwrap();
@@ -453,14 +573,14 @@ mod tests {
         fixture(&staging, "2.0.0");
         fs::write(staging.join("general.bat"), "invalid").unwrap();
         assert!(installation
-            .validate_and_manifest(&staging, "2.0.0", None, None)
+            .validate_and_manifest(&staging, "2.0.0", None, None, provider(&staging))
             .unwrap_err()
             .contains("cannot be parsed"));
         installation.remove_owned_staging(&staging).unwrap();
         let staging = installation.create_staging().unwrap();
         fixture(&staging, "2.0.0");
         assert!(installation
-            .validate_and_manifest(&staging, "3.0.0", None, None)
+            .validate_and_manifest(&staging, "3.0.0", None, None, provider(&staging))
             .unwrap_err()
             .contains("version mismatch"));
     }
@@ -476,9 +596,9 @@ mod tests {
         let staging = installation.create_staging().unwrap();
         fixture(&staging, "2.0.0");
         installation
-            .validate_and_manifest(&staging, "2.0.0", None, None)
+            .validate_and_manifest(&staging, "2.0.0", None, None, provider(&staging))
             .unwrap();
-        installation.activate(&staging).unwrap();
+        installation.activate(&staging, provider(&active)).unwrap();
         assert_eq!(
             installation.state().current_version.as_deref(),
             Some("2.0.0")
@@ -488,7 +608,12 @@ mod tests {
             "changed-after-update",
         )
         .unwrap();
-        let state = installation.rollback().unwrap();
+        let state = installation
+            .rollback(
+                provider(&active),
+                provider(&temp.0.join("binaries.previous")),
+            )
+            .unwrap();
         assert_eq!(state.current_version.as_deref(), Some("1.0.0"));
         assert_eq!(state.previous_version.as_deref(), Some("2.0.0"));
         assert_eq!(
@@ -508,10 +633,109 @@ mod tests {
         installation.recover().unwrap();
         installation.recover().unwrap();
         assert!(active.is_dir());
-        assert!(installation.rollback().unwrap_err().contains("unavailable"));
+        assert!(installation
+            .rollback(
+                provider(&active),
+                provider(&temp.0.join("binaries.previous"))
+            )
+            .unwrap_err()
+            .contains("unavailable"));
         let outside = temp.0.join("unrelated");
         fs::create_dir(&outside).unwrap();
         assert!(installation.remove_owned_staging(&outside).is_err());
         assert!(outside.exists());
+    }
+
+    #[test]
+    fn recovers_every_interrupted_rollback_state_idempotently() {
+        for (active_exists, previous_exists) in [(false, true), (true, false), (false, false)] {
+            let temp = Temp::new();
+            let active = temp.0.join("binaries");
+            let previous = temp.0.join("binaries.previous");
+            let swap = temp.0.join(SWAP_NAME);
+            if active_exists {
+                fixture(&active, "2.0.0");
+                manifest("2.0.0").write_atomic(&active).unwrap();
+            }
+            if previous_exists {
+                fixture(&previous, "1.0.0");
+                manifest("1.0.0").write_atomic(&previous).unwrap();
+            }
+            fixture(&swap, "2.0.0");
+            manifest("2.0.0").write_atomic(&swap).unwrap();
+            let installation = CoreInstallation::new(&active).unwrap();
+            installation.recover().unwrap();
+            installation.recover().unwrap();
+            assert!(active.exists());
+            assert!(!swap.exists());
+            if active_exists && !previous_exists {
+                assert!(previous.exists());
+            }
+        }
+    }
+
+    #[test]
+    fn recovers_interrupted_activation_and_restores_old_previous() {
+        let temp = Temp::new();
+        let active = temp.0.join("binaries");
+        let previous = temp.0.join("binaries.previous");
+        let backup = temp.0.join(PREVIOUS_BACKUP_NAME);
+        fixture(&previous, "2.0.0");
+        manifest("2.0.0").write_atomic(&previous).unwrap();
+        fixture(&backup, "0.9.0");
+        manifest("0.9.0").write_atomic(&backup).unwrap();
+        let installation = CoreInstallation::new(&active).unwrap();
+        installation.recover().unwrap();
+        installation.recover().unwrap();
+        assert_eq!(CoreManifest::read(&active).unwrap().version, "2.0.0");
+        assert_eq!(CoreManifest::read(&previous).unwrap().version, "0.9.0");
+        assert!(!backup.exists());
+    }
+
+    #[test]
+    fn successful_activation_replaces_previous_only_after_commit() {
+        let temp = Temp::new();
+        let active = temp.0.join("binaries");
+        let previous = temp.0.join("binaries.previous");
+        fixture(&active, "1.0.0");
+        manifest("1.0.0").write_atomic(&active).unwrap();
+        fixture(&previous, "0.9.0");
+        manifest("0.9.0").write_atomic(&previous).unwrap();
+        let installation = CoreInstallation::new(&active).unwrap();
+        let staging = installation.create_staging().unwrap();
+        fixture(&staging, "2.0.0");
+        installation
+            .validate_and_manifest(&staging, "2.0.0", None, None, provider(&staging))
+            .unwrap();
+        installation.activate(&staging, provider(&active)).unwrap();
+        assert_eq!(CoreManifest::read(&active).unwrap().version, "2.0.0");
+        assert_eq!(CoreManifest::read(&previous).unwrap().version, "1.0.0");
+        assert!(!temp.0.join(PREVIOUS_BACKUP_NAME).exists());
+    }
+
+    #[test]
+    fn failed_activation_restores_active_and_old_previous_and_cleans_candidate() {
+        let temp = Temp::new();
+        let active = temp.0.join("binaries");
+        let previous = temp.0.join("binaries.previous");
+        fixture(&active, "1.0.0");
+        manifest("1.0.0").write_atomic(&active).unwrap();
+        fixture(&previous, "0.9.0");
+        manifest("0.9.0").write_atomic(&previous).unwrap();
+        let installation = CoreInstallation::new(&active).unwrap();
+        let staging = installation.create_staging().unwrap();
+        fixture(&staging, "2.0.0");
+        installation
+            .validate_and_manifest(&staging, "2.0.0", None, None, provider(&staging))
+            .unwrap();
+        fs::remove_file(staging.join("service.bat")).unwrap();
+        assert!(installation
+            .activate(&staging, provider(&active))
+            .unwrap_err()
+            .contains("automatic rollback completed"));
+        assert_eq!(CoreManifest::read(&active).unwrap().version, "1.0.0");
+        assert_eq!(CoreManifest::read(&previous).unwrap().version, "0.9.0");
+        assert!(!staging.exists());
+        assert!(!temp.0.join(PREVIOUS_BACKUP_NAME).exists());
     }
 }

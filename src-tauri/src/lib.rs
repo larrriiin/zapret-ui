@@ -1750,7 +1750,8 @@ async fn download_and_install_update(
     let filters_status = get_filters_status();
     let dir = find_binaries_dir();
     let installation = CoreInstallation::new(&dir)?;
-    installation.prepare()?;
+    let manager = core_manager_at(&dir);
+    installation.prepare(manager.provider())?;
     let temp_parent = std::env::temp_dir();
     let temp_dir = temp_parent.join(format!(
         ".zapret-ui-core-download-{}-{}",
@@ -1763,6 +1764,11 @@ async fn download_and_install_update(
 
     // Create temp directory
     std::fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
+    let _download_cleanup = OwnedDirectoryCleanup::new(
+        temp_dir.clone(),
+        temp_parent.canonicalize().map_err(|e| e.to_string())?,
+        ".zapret-ui-core-download-",
+    );
 
     window.emit("download-progress", 5).ok();
 
@@ -1783,7 +1789,6 @@ async fn download_and_install_update(
         .map_err(|e| format!("Failed to build http client: {}", e))?;
 
     // Fetch version from GitHub with fallback to SourceForge
-    let manager = core_manager_at(&dir);
     let provider = manager.provider();
     let mut fetched_from_sf = false;
     let mut sf_info: Option<CoreRelease> = None;
@@ -1985,6 +1990,14 @@ async fn download_and_install_update(
     // Extraction
     window.emit("download-progress", 92).ok();
     let staging = installation.create_staging()?;
+    let _staging_cleanup = OwnedDirectoryCleanup::new(
+        staging.clone(),
+        staging
+            .parent()
+            .ok_or_else(|| "Staging has no parent".to_string())?
+            .to_path_buf(),
+        ".binaries-staging-",
+    );
     let extract_dir = staging.join("package");
     std::fs::create_dir(&extract_dir).map_err(|e| format!("Failed to prepare staging: {e}"))?;
 
@@ -2018,6 +2031,7 @@ async fn download_and_install_update(
         &latest_version,
         source_url,
         Some(verified_checksum),
+        core_manager_at(&staging).provider(),
     ) {
         installation.remove_owned_staging(&staging)?;
         return Err(error);
@@ -2029,17 +2043,22 @@ async fn download_and_install_update(
         installation.remove_owned_staging(&staging)?;
         return Err(format!("Cannot stop zapret before activation: {error}"));
     }
-    installation.activate(&staging)?;
+    installation.activate(&staging, manager.provider())?;
 
     // Restore settings after update
     if let Err(error) = set_game_filter(filters_status.game_filter)
         .and_then(|_| set_ipset_filter(filters_status.ipset))
     {
-        installation.rollback().map_err(|rollback| {
-            format!(
+        installation
+            .rollback(
+                manager.provider(),
+                core_manager_at(dir.with_file_name("binaries.previous")).provider(),
+            )
+            .map_err(|rollback| {
+                format!(
                 "Cannot restore filter settings ({error}); automatic rollback failed: {rollback}"
             )
-        })?;
+            })?;
         return Err(format!(
             "Cannot restore filter settings ({error}); automatic rollback completed"
         ));
@@ -2074,33 +2093,141 @@ fn remove_download_temp(path: &std::path::Path) -> Result<(), String> {
     std::fs::remove_dir_all(path).map_err(|e| format!("Cannot clean download files: {e}"))
 }
 
+struct OwnedDirectoryCleanup {
+    path: PathBuf,
+    expected_parent: PathBuf,
+    prefix: &'static str,
+}
+
+impl OwnedDirectoryCleanup {
+    fn new(path: PathBuf, expected_parent: PathBuf, prefix: &'static str) -> Self {
+        Self {
+            path,
+            expected_parent,
+            prefix,
+        }
+    }
+}
+
+impl Drop for OwnedDirectoryCleanup {
+    fn drop(&mut self) {
+        if !self.path.exists() {
+            return;
+        }
+        let owned = self.path.parent() == Some(self.expected_parent.as_path())
+            && self
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(self.prefix));
+        let safe_type = std::fs::symlink_metadata(&self.path)
+            .map(|metadata| !metadata.file_type().is_symlink())
+            .unwrap_or(false);
+        if owned && safe_type {
+            if let Err(error) = std::fs::remove_dir_all(&self.path) {
+                eprintln!(
+                    "Cannot clean owned temporary directory {}: {error}",
+                    self.path.display()
+                );
+            }
+        } else {
+            eprintln!(
+                "Refusing to clean unverified temporary directory {}",
+                self.path.display()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod temporary_cleanup_tests {
+    use super::OwnedDirectoryCleanup;
+
+    #[test]
+    fn owned_temporary_directory_is_cleaned_during_error_unwind() {
+        let parent = std::env::temp_dir().canonicalize().unwrap();
+        for prefix in [".zapret-ui-core-download-", ".binaries-staging-"] {
+            let path = parent.join(format!("{prefix}test-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir(&path).unwrap();
+            let result: Result<(), &str> = (|| {
+                let _cleanup = OwnedDirectoryCleanup::new(path.clone(), parent.clone(), prefix);
+                Err("simulated failure")
+            })();
+            assert!(result.is_err());
+            assert!(!path.exists());
+        }
+    }
+}
+
 #[tauri::command]
 fn get_core_installation_state() -> Result<CoreInstallationState, String> {
-    let installation = CoreInstallation::new(find_binaries_dir())?;
-    installation.prepare()?;
+    let dir = find_binaries_dir();
+    let installation = CoreInstallation::new(&dir)?;
+    installation.prepare(core_manager_at(dir).provider())?;
     Ok(installation.state())
 }
 
 #[tauri::command]
-fn rollback_core_update() -> Result<CoreInstallationState, String> {
-    let installation = CoreInstallation::new(find_binaries_dir())?;
-    installation.prepare()?;
+fn rollback_core_update(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<CoreInstallationState, String> {
+    let dir = find_binaries_dir();
+    let previous_dir = dir.with_file_name("binaries.previous");
+    let installation = CoreInstallation::new(&dir)?;
+    let active_manager = core_manager_at(&dir);
+    installation.prepare(active_manager.provider())?;
     let filters = get_filters_status();
-    stop_zapret_internal().map_err(|e| format!("Cannot stop zapret before rollback: {e}"))?;
-    let state = installation.rollback()?;
-    if let Err(error) =
-        set_game_filter(filters.game_filter).and_then(|_| set_ipset_filter(filters.ipset))
-    {
-        installation.rollback().map_err(|restore| {
-            format!(
-                "Cannot restore settings after rollback ({error}); cannot undo rollback: {restore}"
-            )
-        })?;
-        return Err(format!(
-            "Cannot restore settings after rollback ({error}); original core restored"
-        ));
+    let running = get_zapret_status(state.clone());
+    let restart = if running.running {
+        Some((
+            running.strategy.ok_or_else(|| {
+                "Cannot rollback while zapret is running: active strategy is unknown".to_string()
+            })?,
+            running.mode.unwrap_or_else(|| "service".to_string()),
+        ))
+    } else {
+        None
+    };
+    if restart.is_some() {
+        stop_zapret_internal().map_err(|e| format!("Cannot stop zapret before rollback: {e}"))?;
     }
-    Ok(state)
+
+    let operation = (|| {
+        let result = installation.rollback(
+            active_manager.provider(),
+            core_manager_at(&previous_dir).provider(),
+        )?;
+        if let Err(error) =
+            set_game_filter(filters.game_filter).and_then(|_| set_ipset_filter(filters.ipset))
+        {
+            installation
+                .rollback(
+                    active_manager.provider(),
+                    core_manager_at(&previous_dir).provider(),
+                )
+                .map_err(|restore| {
+                    format!(
+                        "Cannot restore settings after rollback ({error}); cannot undo rollback: {restore}"
+                    )
+                })?;
+            return Err(format!(
+                "Cannot restore settings after rollback ({error}); original core restored"
+            ));
+        }
+        Ok(result)
+    })();
+
+    let restart_result = restart.map(|(strategy, mode)| {
+        start_zapret(app, strategy, mode, state)
+            .map_err(|e| format!("Cannot restart zapret after rollback attempt: {e}"))
+    });
+    match (operation, restart_result) {
+        (Ok(result), Some(Err(error))) => Err(error),
+        (Err(error), Some(Err(restart))) => Err(format!("{error}; {restart}")),
+        (result, _) => result,
+    }
 }
 
 /// Recursively copies directory contents
