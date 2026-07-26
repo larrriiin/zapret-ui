@@ -233,7 +233,7 @@ mod tests {
             "1.2.3"
         );
     }
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn streaming_limit_stops_oversized_body() {
         let chunks = futures_util::stream::iter([
             Ok::<_, String>(vec![0; MAX_MANIFEST_BYTES]),

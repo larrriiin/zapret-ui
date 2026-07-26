@@ -29,11 +29,15 @@ jobs:
           workspaces: "src-tauri"
           shared-key: "zapret-ui-rust-cache-clippy"
 
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test
+
       - name: cargo clippy
         working-directory: src-tauri
-        # Blocking: all pre-existing warnings have been cleaned up, so any new
-        # finding must be addressed in the PR that introduces it.
-        run: cargo clippy --no-deps -- -D warnings
+        # Blocking: check library, binaries, and test targets so test-only
+        # feature/configuration mistakes cannot bypass CI.
+        run: cargo clippy --all-targets --no-deps -- -D warnings
 
   cargo-audit:
     # cargo-audit is pure crate-metadata analysis, so we can run it on Linux
