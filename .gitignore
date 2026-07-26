@@ -25,18 +25,17 @@ version.txt
 /logo.ico
 /logo.png
 
-# Local files & Binaries.
-# Everything under binaries/ is either downloaded from the Flowseal upstream at
-# first launch (*.bat, lists/, bin/, utils/) or is user-editable runtime state
-# (*.enabled, user lists). Keep a .gitkeep so the directory exists on clone —
-# `ensure_binaries_present` creates it otherwise, but tooling that expects the
-# folder on fresh checkouts is simpler this way.
+# Local files and downloaded core installations.
 *.local
 .env
 .env.*
 *.backup
-binaries/*
-!binaries/.gitkeep
+/binaries/
+/binaries.previous/
+/.binaries-staging-*/
+/.binaries-previous-backup/
+/.binaries-rollback-swap/
+/.binaries-rollback-restore-swap/
 
 # Editor & OS
 .vscode/*
