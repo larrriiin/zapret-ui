@@ -25,6 +25,8 @@ const ACTIVE_FAKE_FILES: [&str; 2] = ["ACTIVE_DISCORD_UDP.bin", "ACTIVE_GAME_UDP
 pub struct CoreManifest {
     pub schema_version: u32,
     pub provider: String,
+    #[serde(default)]
+    pub channel: Option<String>,
     pub version: String,
     pub source_url: Option<String>,
     pub checksum: Option<Checksum>,
@@ -45,6 +47,7 @@ impl CoreManifest {
         Self {
             schema_version: SCHEMA_VERSION,
             provider,
+            channel: None,
             version,
             source_url,
             checksum,
@@ -241,8 +244,22 @@ impl CoreInstallation {
     ) -> Result<(), String> {
         self.assert_staging(staging)?;
         CoreManifest::read(staging)?;
-        if !self.active.is_dir() {
-            return Err("Active core is missing".into());
+        if !self.active.exists() {
+            if self.previous.exists() {
+                return Err("Cannot perform first activation while a previous core exists".into());
+            }
+            fs::rename(staging, &self.active)
+                .map_err(|e| format!("Cannot activate first core: {e}"))?;
+            if let Err(error) = active_provider.validate_installation() {
+                self.assert_owned(&self.active, "binaries")?;
+                fs::remove_dir_all(&self.active).map_err(|cleanup| {
+                    format!(
+                        "Post-activation validation failed ({error}); cleanup failed: {cleanup}"
+                    )
+                })?;
+                return Err(format!("Post-activation validation failed: {error}"));
+            }
+            return Ok(());
         }
         self.preserve_user_files(&self.active, staging)?;
         let previous_backup = self.parent.join(PREVIOUS_BACKUP_NAME);
@@ -791,6 +808,45 @@ mod tests {
         assert_eq!(CoreManifest::read(&active).unwrap().version, "2.0.0");
         assert_eq!(CoreManifest::read(&previous).unwrap().version, "1.0.0");
         assert!(!temp.0.join(PREVIOUS_BACKUP_NAME).exists());
+    }
+
+    #[test]
+    fn successful_first_install_has_no_rollback() {
+        let temp = Temp::new();
+        let active = temp.0.join("binaries");
+        let installation = CoreInstallation::new(&active).unwrap();
+        let staging = installation.create_staging().unwrap();
+        fixture(&staging, "2.0.0");
+        installation
+            .validate_and_manifest(&staging, "2.0.0", None, None, provider(&staging))
+            .unwrap();
+        installation.activate(&staging, provider(&active)).unwrap();
+        assert_eq!(CoreManifest::read(&active).unwrap().version, "2.0.0");
+        assert!(!installation.state().rollback_available);
+        assert!(installation
+            .rollback(provider(&active), provider(&active))
+            .is_err());
+        installation.recover().unwrap();
+        installation.recover().unwrap();
+        assert!(active.exists());
+    }
+
+    #[test]
+    fn failed_first_install_leaves_no_partial_active_core() {
+        let temp = Temp::new();
+        let active = temp.0.join("binaries");
+        let installation = CoreInstallation::new(&active).unwrap();
+        let staging = installation.create_staging().unwrap();
+        fixture(&staging, "2.0.0");
+        installation
+            .validate_and_manifest(&staging, "2.0.0", None, None, provider(&staging))
+            .unwrap();
+        fs::remove_file(staging.join("service.bat")).unwrap();
+        assert!(installation.activate(&staging, provider(&active)).is_err());
+        assert!(!active.exists());
+        installation.recover().unwrap();
+        installation.recover().unwrap();
+        assert!(!active.exists());
     }
 
     #[test]

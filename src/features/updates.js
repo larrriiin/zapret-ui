@@ -133,9 +133,19 @@ function showDualUpdateModal(data, manual = false) {
   const uiStatus = data.ui.available
     ? `<span class="px-2 py-0.5 bg-primary/20 text-primary text-[10px] font-bold rounded-full uppercase">${t('update_available_short')}</span>`
     : `<span class="text-on-surface-variant/50 text-[10px] font-bold uppercase">${t('up_to_date')}</span>`;
-  const coreStatus = data.core.available
-    ? `<span class="px-2 py-0.5 bg-secondary/20 text-secondary text-[10px] font-bold rounded-full uppercase">${t('update_available_short')}</span>`
-    : `<span class="text-on-surface-variant/50 text-[10px] font-bold uppercase">${t('up_to_date')}</span>`;
+  const coreStatusLabels = {
+    update_available: t('update_available_short'),
+    not_installed: t('core_not_installed'),
+    up_to_date: t('up_to_date'),
+    ahead: t('core_update_ahead'),
+    unknown: t('core_update_unknown'),
+  };
+  const coreStatus = `<span class="${data.core.available ? 'text-secondary' : 'text-on-surface-variant/70'} text-[10px] font-bold uppercase">${coreStatusLabels[data.core.status] || t('core_update_unknown')}</span>`;
+  const coreCurrentVersion = data.core.status === 'not_installed'
+    ? t('core_not_installed')
+    : data.core.status === 'unknown'
+      ? t('core_version_unknown')
+      : `v${data.core.current}`;
 
   modal.innerHTML = `
     <div class="bg-surface-container-high border border-outline-variant/30 rounded-3xl p-8 max-w-lg w-full shadow-2xl animate-scale-in">
@@ -162,15 +172,15 @@ function showDualUpdateModal(data, manual = false) {
 
           <div class="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
             <div class="flex flex-col items-start text-left">
-              <span class="text-[10px] font-bold text-secondary/70 uppercase tracking-wider mb-1">${t('zapret_core')}</span>
+              <span class="text-[10px] font-bold text-secondary/70 uppercase tracking-wider mb-1">${t('zapret_core')} · ${t('core_stable_channel')}</span>
               <div class="flex items-center gap-2">
-                <span class="text-sm font-bold text-on-surface">v${data.core.current}</span>
+                <span class="text-sm font-bold text-on-surface">${coreCurrentVersion}</span>
                 ${data.core.available ? `<span class="material-symbols-outlined text-xs text-on-surface-variant/40">arrow_forward</span> <span class="text-sm font-bold text-secondary">${data.core.latest === 'Error' ? 'Ошибка' : 'v' + data.core.latest}</span>` : ''}
               </div>
             </div>
             <div class="flex flex-col items-end gap-3">
               ${coreStatus}
-              ${data.core.available ? `<button id="modal-update-core-btn" class="px-4 py-2 bg-secondary/20 hover:bg-secondary/30 border border-secondary/20 rounded-xl text-[10px] font-black text-secondary uppercase transition-all active:scale-95 shadow-lg shadow-secondary/5">${t('update_now')}</button>` : ''}
+              ${(data.core.status === 'update_available' || data.core.status === 'not_installed') ? `<button id="modal-update-core-btn" class="px-4 py-2 bg-secondary/20 hover:bg-secondary/30 border border-secondary/20 rounded-xl text-[10px] font-black text-secondary uppercase transition-all active:scale-95 shadow-lg shadow-secondary/5">${t('update_now')}</button>` : ''}
             </div>
           </div>
         </div>
@@ -223,26 +233,25 @@ async function checkForUpdates(manual = false) {
 
   try {
     const uiLocalVersion = await invoke('get_ui_version_cmd');
-    const [uiUpdate, coreRemoteVersion, coreLocalVersion] = await Promise.all([
+    const [uiUpdate, coreInfo] = await Promise.all([
       checkUIUpdateWithFallback(),
-      invoke('get_remote_core_version', { useProxy: false, customProxy: null }).catch(async (err) => {
+      invoke('get_core_update_info', { useProxy: false, customProxy: null }).catch(async (err) => {
         try {
-          return await invoke('get_remote_core_version', { useProxy: true, customProxy: null });
+          return await invoke('get_core_update_info', { useProxy: true, customProxy: null });
         } catch {
-          return 'Error';
+          return { status: 'unknown', currentVersion: 'Unknown', stableVersion: 'Error', updateAvailable: false };
         }
       }),
-      invoke('get_local_version_cmd').catch((err) => 'Local Err: ' + err),
     ]);
 
     const hasUIUpdate = !!uiUpdate;
-    const hasCoreUpdate = coreRemoteVersion !== 'Unknown' && coreRemoteVersion !== 'Error' && coreLocalVersion !== 'Unknown' && coreRemoteVersion !== coreLocalVersion;
-    const showCoreError = manual && coreRemoteVersion === 'Error';
+    const hasCoreUpdate = coreInfo.status === 'update_available' || coreInfo.status === 'not_installed';
+    const showCoreError = manual && coreInfo.status === 'unknown';
 
     if (hasUIUpdate || hasCoreUpdate || showCoreError || manual) {
       showDualUpdateModal({
         ui: { available: hasUIUpdate, current: uiLocalVersion, latest: hasUIUpdate ? uiUpdate.version : uiLocalVersion, updateObj: uiUpdate },
-        core: { available: hasCoreUpdate || showCoreError, current: coreLocalVersion, latest: coreRemoteVersion },
+        core: { available: hasCoreUpdate, current: coreInfo.currentVersion || t('not_installed'), latest: coreInfo.stableVersion, status: coreInfo.status, error: showCoreError },
       }, manual);
     }
   } catch (err) {

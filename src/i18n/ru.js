@@ -1,4 +1,9 @@
 export default {
+    "core_stable_channel": "Flowseal · Stable",
+    "core_update_unknown": "Версии ядра нельзя безопасно сравнить. Автоматическое обновление недоступно.",
+    "core_update_ahead": "Установленное ядро новее Stable. Понижение версии не предлагается.",
+    "core_not_installed": "Ядро не установлено",
+    "core_version_unknown": "Версия ядра неизвестна",
     "core_rollback_title": "Откат ядра",
     "core_current_version": "Текущая версия",
     "core_previous_version": "Предыдущая версия",

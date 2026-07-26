@@ -7,25 +7,30 @@ use super::CorePaths;
 #[serde(tag = "algorithm", content = "value", rename_all = "lowercase")]
 pub enum Checksum {
     Sha256(String),
+    // Kept only to deserialize schema-v1 installation manifests created by
+    // the former SourceForge updater. Managed channel artifacts never create it.
     Md5(String),
 }
 
 /// Download information without assumptions about a provider's hosting service.
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CoreArtifact {
+    pub url: String,
+    pub checksum: Checksum,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CoreRelease {
+    pub provider: String,
+    pub channel: String,
     pub version: String,
-    pub download_url: String,
-    pub checksum: Option<Checksum>,
+    pub artifacts: Vec<CoreArtifact>,
 }
 
 /// Boundary between Tauri/core orchestration and an upstream core distribution.
 pub trait CoreProvider: Send + Sync {
     fn provider_name(&self) -> &'static str;
     fn paths(&self) -> &CorePaths;
-    fn version_url(&self) -> &'static str;
-    fn release_api_url(&self, version: &str) -> String;
-    fn archive_name(&self, version: &str) -> String;
-    fn release_download_url(&self, version: &str) -> String;
     fn ipset_url(&self) -> &'static str;
     fn service_script(&self) -> PathBuf;
     fn test_script(&self) -> PathBuf;
