@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/larrriiin/zapret-ui/releases"><img alt="GitHub release" src="https://img.shields.io/github/v/release/larrriiin/zapret-ui?display_name=tag&sort=semver"></a>
+  <a href="https://github.com/larrriiin/zapret-ui/releases"><img alt="GitHub release" src="https://img.shields.io/github/v/release/larrriiin/zapret-ui?display_name=tag&sort=date"></a>
   <a href="https://github.com/larrriiin/zapret-ui/releases"><img alt="GitHub downloads" src="https://img.shields.io/github/downloads/larrriiin/zapret-ui/total"></a>
   <a href="https://github.com/larrriiin/zapret-ui/actions/workflows/checks.yml"><img alt="Version checks" src="https://github.com/larrriiin/zapret-ui/actions/workflows/checks.yml/badge.svg"></a>
   <a href="https://github.com/larrriiin/zapret-ui/actions/workflows/security.yml"><img alt="Security checks" src="https://github.com/larrriiin/zapret-ui/actions/workflows/security.yml/badge.svg"></a>
