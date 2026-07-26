@@ -162,7 +162,7 @@ function showDualUpdateModal(data, manual = false) {
 
           <div class="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
             <div class="flex flex-col items-start text-left">
-              <span class="text-[10px] font-bold text-secondary/70 uppercase tracking-wider mb-1">${t('zapret_core')}</span>
+              <span class="text-[10px] font-bold text-secondary/70 uppercase tracking-wider mb-1">${t('zapret_core')} · ${t('core_stable_channel')}</span>
               <div class="flex items-center gap-2">
                 <span class="text-sm font-bold text-on-surface">v${data.core.current}</span>
                 ${data.core.available ? `<span class="material-symbols-outlined text-xs text-on-surface-variant/40">arrow_forward</span> <span class="text-sm font-bold text-secondary">${data.core.latest === 'Error' ? 'Ошибка' : 'v' + data.core.latest}</span>` : ''}
@@ -223,26 +223,25 @@ async function checkForUpdates(manual = false) {
 
   try {
     const uiLocalVersion = await invoke('get_ui_version_cmd');
-    const [uiUpdate, coreRemoteVersion, coreLocalVersion] = await Promise.all([
+    const [uiUpdate, coreInfo] = await Promise.all([
       checkUIUpdateWithFallback(),
-      invoke('get_remote_core_version', { useProxy: false, customProxy: null }).catch(async (err) => {
+      invoke('get_core_update_info', { useProxy: false, customProxy: null }).catch(async (err) => {
         try {
-          return await invoke('get_remote_core_version', { useProxy: true, customProxy: null });
+          return await invoke('get_core_update_info', { useProxy: true, customProxy: null });
         } catch {
-          return 'Error';
+          return { status: 'unknown', currentVersion: 'Unknown', stableVersion: 'Error', updateAvailable: false };
         }
       }),
-      invoke('get_local_version_cmd').catch((err) => 'Local Err: ' + err),
     ]);
 
     const hasUIUpdate = !!uiUpdate;
-    const hasCoreUpdate = coreRemoteVersion !== 'Unknown' && coreRemoteVersion !== 'Error' && coreLocalVersion !== 'Unknown' && coreRemoteVersion !== coreLocalVersion;
-    const showCoreError = manual && coreRemoteVersion === 'Error';
+    const hasCoreUpdate = coreInfo.updateAvailable;
+    const showCoreError = manual && coreInfo.status === 'unknown';
 
     if (hasUIUpdate || hasCoreUpdate || showCoreError || manual) {
       showDualUpdateModal({
         ui: { available: hasUIUpdate, current: uiLocalVersion, latest: hasUIUpdate ? uiUpdate.version : uiLocalVersion, updateObj: uiUpdate },
-        core: { available: hasCoreUpdate || showCoreError, current: coreLocalVersion, latest: coreRemoteVersion },
+        core: { available: hasCoreUpdate, current: coreInfo.currentVersion || t('not_installed'), latest: coreInfo.stableVersion, status: coreInfo.status, error: showCoreError },
       }, manual);
     }
   } catch (err) {

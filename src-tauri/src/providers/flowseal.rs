@@ -1,15 +1,7 @@
 use std::{cmp::Ordering, path::PathBuf};
 
-use crate::core::{Checksum, CorePaths, CoreProvider, CoreRelease};
+use crate::core::{CorePaths, CoreProvider};
 
-const VERSION_URL: &str =
-    "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt";
-const RELEASE_API: &str =
-    "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/tags";
-const FALLBACK_METADATA_URL: &str =
-    "https://sourceforge.net/projects/zapret-discord-youtube.mirror/best_release.json";
-const FALLBACK_LATEST_URL: &str =
-    "https://sourceforge.net/projects/zapret-discord-youtube.mirror/files/latest/download";
 const IPSET_URL: &str = "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/.service/ipset-service.txt";
 
 pub struct FlowsealProvider {
@@ -36,33 +28,6 @@ impl FlowsealProvider {
             })
             .filter(|version| !version.is_empty())
             .ok_or_else(|| "Err: No Version String Found".to_string())
-    }
-
-    pub async fn fetch_fallback_release(
-        &self,
-        client: &reqwest::Client,
-    ) -> Result<CoreRelease, String> {
-        let response = client
-            .get(FALLBACK_METADATA_URL)
-            .header("Cache-Control", "no-cache")
-            .send()
-            .await
-            .map_err(|e| format!("Failed to send SourceForge request: {e}"))?;
-        if !response.status().is_success() {
-            return Err(format!(
-                "SourceForge returned status: {}",
-                response.status()
-            ));
-        }
-        let body = response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse SourceForge JSON: {e}"))?;
-        parse_fallback_release(&body)
-    }
-
-    pub fn fallback_latest_url(&self) -> &'static str {
-        FALLBACK_LATEST_URL
     }
 
     fn parse_strategy_content(
@@ -129,21 +94,6 @@ impl CoreProvider for FlowsealProvider {
     }
     fn paths(&self) -> &CorePaths {
         &self.paths
-    }
-    fn version_url(&self) -> &'static str {
-        VERSION_URL
-    }
-    fn release_api_url(&self, version: &str) -> String {
-        format!("{RELEASE_API}/{version}")
-    }
-    fn archive_name(&self, version: &str) -> String {
-        format!("zapret-discord-youtube-{version}.zip")
-    }
-    fn release_download_url(&self, version: &str) -> String {
-        format!(
-            "https://github.com/Flowseal/zapret-discord-youtube/releases/download/{version}/{}",
-            self.archive_name(version)
-        )
     }
     fn ipset_url(&self) -> &'static str {
         IPSET_URL
@@ -241,36 +191,6 @@ impl CoreProvider for FlowsealProvider {
     }
 }
 
-pub fn parse_fallback_release(body: &serde_json::Value) -> Result<CoreRelease, String> {
-    let release = body
-        .pointer("/platform_releases/windows")
-        .or_else(|| body.get("release"))
-        .ok_or_else(|| "No release information found in SourceForge JSON".to_string())?;
-    let filename = release
-        .get("filename")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "Missing filename in SourceForge JSON".to_string())?;
-    Ok(CoreRelease {
-        version: filename
-            .split('/')
-            .find(|s| !s.is_empty())
-            .ok_or_else(|| "Failed to parse version from SourceForge filename".to_string())?
-            .to_owned(),
-        download_url: release
-            .get("url")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| "Missing url in SourceForge JSON".to_string())?
-            .to_owned(),
-        checksum: Some(Checksum::Md5(
-            release
-                .get("md5sum")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| "Missing md5sum in SourceForge JSON".to_string())?
-                .to_owned(),
-        )),
-    })
-}
-
 fn natural_compare(a: &str, b: &str) -> Ordering {
     let (mut a, mut b) = (a.chars().peekable(), b.chars().peekable());
     loop {
@@ -306,27 +226,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).expect("temp");
         p
-    }
-    #[test]
-    fn release_urls_and_names() {
-        let p = FlowsealProvider::new("x");
-        assert_eq!(p.archive_name("1.2"), "zapret-discord-youtube-1.2.zip");
-        assert!(p
-            .release_download_url("1.2")
-            .ends_with("/1.2/zapret-discord-youtube-1.2.zip"));
-    }
-    #[test]
-    fn parses_sourceforge_release_with_md5() {
-        let body = serde_json::json!({
-            "platform_releases": { "windows": {
-                "filename": "/v1/archive.zip",
-                "url": "https://example.invalid/archive.zip",
-                "md5sum": "abcdef"
-            }}
-        });
-        let release = parse_fallback_release(&body).expect("fallback release");
-        assert_eq!(release.version, "v1");
-        assert_eq!(release.checksum, Some(Checksum::Md5("abcdef".to_string())));
     }
 
     #[test]

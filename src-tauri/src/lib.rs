@@ -33,7 +33,10 @@ use tauri_plugin_notification::NotificationExt;
 
 mod core;
 mod providers;
-use core::{Checksum, CoreInstallation, CoreInstallationState, CoreManager, CoreRelease};
+use core::{
+    compare_versions, resolve_stable, Checksum, CoreInstallation, CoreInstallationState,
+    CoreManager, CoreUpdateStatus,
+};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const GITHUB_USER_AGENT: &str = "zapret-ui-updater";
@@ -382,92 +385,6 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 /// Fetches the expected SHA-256 digest of the given release asset from the
 /// GitHub Releases API. Returns a lowercase hex string on success.
-async fn fetch_expected_sha256(version: &str, asset_name: &str) -> Result<String, String> {
-    if version.is_empty()
-        || !version
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'))
-    {
-        return Err(format!("Invalid upstream version tag: {}", version));
-    }
-
-    let url = core_manager().provider().release_api_url(version);
-    let client = reqwest::Client::builder()
-        .user_agent(GITHUB_USER_AGENT)
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    let resp = client
-        .get(&url)
-        .header("Accept", "application/vnd.github+json")
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch release metadata: {}", e))?;
-
-    if !resp.status().is_success() {
-        return Err(format!(
-            "GitHub API returned status {} for {}",
-            resp.status(),
-            url
-        ));
-    }
-
-    let body: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse release metadata: {}", e))?;
-
-    let assets = body
-        .get("assets")
-        .and_then(|a| a.as_array())
-        .ok_or_else(|| "Release metadata is missing assets".to_string())?;
-
-    let asset = assets
-        .iter()
-        .find(|a| a.get("name").and_then(|n| n.as_str()) == Some(asset_name))
-        .ok_or_else(|| format!("Asset {} not found in release {}", asset_name, version))?;
-
-    let digest = asset
-        .get("digest")
-        .and_then(|d| d.as_str())
-        .ok_or_else(|| format!("Asset {} has no digest field", asset_name))?;
-
-    let hex = digest
-        .strip_prefix("sha256:")
-        .ok_or_else(|| format!("Unsupported digest format: {}", digest))?;
-
-    if hex.len() != 64 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(format!("Malformed sha256 digest: {}", digest));
-    }
-
-    Ok(hex.to_ascii_lowercase())
-}
-
-pub async fn fetch_fallback_release_info(client: &reqwest::Client) -> Result<CoreRelease, String> {
-    core_manager().fetch_fallback_release(client).await
-}
-
-/// Computes the MD5 digest of a file as a lowercase hex string.
-pub fn md5_file(path: &std::path::Path) -> Result<String, String> {
-    use std::io::Read;
-
-    let mut file = std::fs::File::open(path)
-        .map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
-    let mut context = md5::Context::new();
-    let mut buf = [0u8; 64 * 1024];
-    loop {
-        let n = file
-            .read(&mut buf)
-            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-        if n == 0 {
-            break;
-        }
-        context.consume(&buf[..n]);
-    }
-    let digest = context.compute();
-    Ok(format!("{:x}", digest))
-}
-
 /// On Windows, `std::fs::canonicalize` returns the verbatim/extended-length
 /// form (e.g. `\\?\C:\foo\bar`). That form is fine for Rust's file APIs but
 /// breaks `cmd.exe` and downstream `.bat` scripts, which refuse to use it as
@@ -649,40 +566,50 @@ async fn get_remote_core_version(
 
     let client = client_builder.build().map_err(|e| e.to_string())?;
 
-    let response_res = client
-        .get(core_manager().provider().version_url())
-        .send()
-        .await;
+    Ok(resolve_stable(
+        &client,
+        core_manager().provider().provider_name(),
+        GITHUB_USER_AGENT,
+    )
+    .await?
+    .version)
+}
 
-    match response_res {
-        Ok(resp) => {
-            let status = resp.status();
-            if status.is_success() {
-                if let Ok(text) = resp.text().await {
-                    let trimmed = text.trim();
-                    if !trimmed.is_empty() && !trimmed.contains("Not Found") {
-                        return Ok(trimmed.to_string());
-                    }
-                }
-            }
-            if let Ok(info) = fetch_fallback_release_info(&client).await {
-                return Ok(info.version);
-            }
-            Err(format!(
-                "GitHub returned status {} and SourceForge fallback failed",
-                status
-            ))
-        }
-        Err(e) => {
-            if let Ok(info) = fetch_fallback_release_info(&client).await {
-                return Ok(info.version);
-            }
-            Err(format!(
-                "Failed to connect to GitHub ({}) and SourceForge fallback failed",
-                e
-            ))
-        }
-    }
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CoreUpdateInfo {
+    provider: String,
+    channel: String,
+    current_version: Option<String>,
+    stable_version: String,
+    status: CoreUpdateStatus,
+    update_available: bool,
+}
+
+#[tauri::command]
+async fn get_core_update_info(
+    use_proxy: Option<bool>,
+    custom_proxy: Option<String>,
+) -> Result<CoreUpdateInfo, String> {
+    let stable = get_remote_core_version(use_proxy, custom_proxy).await?;
+    let provider = core_manager().provider();
+    let current = provider.is_installed().then(|| provider.local_version());
+    let status = current
+        .as_deref()
+        .map_or(CoreUpdateStatus::NotInstalled, |local| {
+            compare_versions(local, &stable)
+        });
+    Ok(CoreUpdateInfo {
+        provider: provider.provider_name().into(),
+        channel: "stable".into(),
+        current_version: current,
+        stable_version: stable,
+        status,
+        update_available: matches!(
+            status,
+            CoreUpdateStatus::NotInstalled | CoreUpdateStatus::UpdateAvailable
+        ),
+    })
 }
 
 fn get_ui_version() -> String {
@@ -1828,204 +1755,66 @@ async fn download_and_install_update(
         .build()
         .map_err(|e| format!("Failed to build http client: {}", e))?;
 
-    // Fetch version from GitHub with fallback to SourceForge
+    // Resolve the managed channel once; the same immutable release metadata is
+    // then used for every mirror attempt in this operation.
     let provider = manager.provider();
-    let mut fetched_from_sf = false;
-    let mut sf_info: Option<CoreRelease> = None;
-
-    let latest_version = match client
-        .get(provider.version_url())
-        .header("Cache-Control", "no-cache")
-        .send()
-        .await
-    {
-        Ok(resp) if resp.status().is_success() => match resp.text().await {
-            Ok(text) => {
-                let trimmed = text.trim().to_string();
-                if !trimmed.is_empty() && !trimmed.contains("Not Found") {
-                    trimmed
-                } else {
-                    fetched_from_sf = true;
-                    let info = fetch_fallback_release_info(&client).await?;
-                    let version = info.version.clone();
-                    sf_info = Some(info);
-                    version
-                }
+    let release = resolve_stable(&client, provider.provider_name(), GITHUB_USER_AGENT).await?;
+    let latest_version = release.version.clone();
+    if provider.is_installed() {
+        match compare_versions(&provider.local_version(), &latest_version) {
+            CoreUpdateStatus::Ahead | CoreUpdateStatus::Unknown => {
+                return Err(
+                    "The installed core cannot be safely updated to this stable release".into(),
+                )
             }
-            Err(_) => {
-                fetched_from_sf = true;
-                let info = fetch_fallback_release_info(&client).await?;
-                let version = info.version.clone();
-                sf_info = Some(info);
-                version
-            }
-        },
-        _ => {
-            fetched_from_sf = true;
-            let info = fetch_fallback_release_info(&client).await?;
-            let version = info.version.clone();
-            sf_info = Some(info);
-            version
+            CoreUpdateStatus::UpToDate => return Ok("Core is already up to date".into()),
+            _ => {}
         }
-    };
-
+    }
     window.emit("download-progress", 10).ok();
-
     let zip_path = temp_dir.join("update.zip");
-
-    use std::sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    };
-    let done_flag = Arc::new(AtomicBool::new(false));
-    let done_flag_thread = done_flag.clone();
-    let window_clone = window.clone();
-    std::thread::spawn(move || {
-        let steps: &[u16] = &[15, 20, 28, 35, 42, 50, 58, 65, 72, 78, 83, 88];
-        for pct in steps {
-            if done_flag_thread.load(Ordering::Relaxed) {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_secs(3));
-            if done_flag_thread.load(Ordering::Relaxed) {
-                break;
-            }
-            window_clone.emit("download-progress", *pct).ok();
-        }
-    });
-
-    // 1. Try downloading from GitHub
-    let mut response = None;
-    let mut downloaded_from_sf = false;
-
-    if !fetched_from_sf {
-        let github_url = provider.release_download_url(&latest_version);
-        if let Ok(resp) = client.get(&github_url).send().await {
-            if resp.status().is_success() {
-                response = Some(resp);
-            }
-        }
-    }
-
-    // 2. If GitHub failed or wasn't tried, try SourceForge
-    if response.is_none() {
-        // Ensure we have SF info loaded
-        let info = match sf_info {
-            Some(i) => i,
-            None => fetch_fallback_release_info(&client).await?,
-        };
-
-        // Try downloading from the direct SourceForge URL
-        match client.get(&info.download_url).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                response = Some(resp);
-                downloaded_from_sf = true;
-                sf_info = Some(info);
-            }
-            _ => {
-                // Also try downloading from the generic latest URL user requested as fallback
-                let generic_url = manager.fallback_latest_url();
-                match client.get(generic_url).send().await {
-                    Ok(resp) if resp.status().is_success() => {
-                        response = Some(resp);
-                        downloaded_from_sf = true;
-                        sf_info = Some(info);
-                    }
-                    Ok(resp) => {
-                        done_flag.store(true, Ordering::Relaxed);
-                        return Err(format!(
-                            "SourceForge download failed with status: {}",
-                            resp.status()
-                        ));
-                    }
-                    Err(e) => {
-                        done_flag.store(true, Ordering::Relaxed);
-                        return Err(format!(
-                            "Failed to download from both GitHub and SourceForge. SF error: {}",
-                            e
-                        ));
-                    }
-                }
-            }
-        }
-    }
-
-    let response = response.unwrap();
-
     use futures_util::StreamExt;
-    let mut file = std::fs::File::create(&zip_path).map_err(|e| {
-        done_flag.store(true, Ordering::Relaxed);
-        format!("Failed to create update zip file: {}", e)
-    })?;
-
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        match chunk {
-            Ok(bytes) => {
-                use std::io::Write;
-                if let Err(e) = file.write_all(&bytes) {
-                    done_flag.store(true, Ordering::Relaxed);
-                    return Err(format!("Failed to write to zip file: {}", e));
-                }
-            }
-            Err(e) => {
-                done_flag.store(true, Ordering::Relaxed);
-                return Err(format!("Error while downloading: {}", e));
-            }
-        }
-    }
-
-    done_flag.store(true, Ordering::Relaxed);
-
-    if !zip_path.exists() {
-        return Err("Download failed: output file not found".to_string());
-    }
-
-    // Verify integrity of downloaded archive before extraction.
-    let verified_checksum;
-    let source_url;
-    if downloaded_from_sf {
-        if let Some(info) = sf_info {
-            let expected_md5 = match info.checksum {
-                Some(Checksum::Md5(value)) => value,
-                _ => {
-                    return Err(
-                        "Downloaded from SourceForge but MD5 metadata is missing".to_string()
-                    )
-                }
-            };
-            let actual_md5 = md5_file(&zip_path)?;
-            if actual_md5 != expected_md5.to_ascii_lowercase() {
-                let _ = std::fs::remove_file(&zip_path);
-                return Err(format!(
-                    "Checksum mismatch (MD5) for SourceForge download: expected {}, got {}",
-                    expected_md5, actual_md5
-                ));
-            }
-            verified_checksum = Checksum::Md5(expected_md5);
-            source_url = Some(info.download_url);
-        } else {
-            return Err("Downloaded from SourceForge but release metadata is missing".to_string());
-        }
-    } else {
-        let asset_name = provider.archive_name(&latest_version);
-        let expected_checksum =
-            Checksum::Sha256(fetch_expected_sha256(&latest_version, &asset_name).await?);
-        let expected_sha256 = match expected_checksum {
-            Checksum::Sha256(value) => value,
-            Checksum::Md5(_) => unreachable!("GitHub releases require SHA-256"),
+    let mut selected = None;
+    for artifact in &release.artifacts {
+        let _ = std::fs::remove_file(&zip_path);
+        let response = match client.get(&artifact.url).send().await {
+            Ok(response) if response.status().is_success() => response,
+            _ => continue,
         };
-        let actual_sha256 = sha256_file(&zip_path)?;
-        if actual_sha256 != expected_sha256 {
-            let _ = std::fs::remove_file(&zip_path);
-            return Err(format!(
-                "Checksum mismatch (SHA-256) for {}: expected {}, got {}",
-                asset_name, expected_sha256, actual_sha256
-            ));
+        let mut file = std::fs::File::create(&zip_path)
+            .map_err(|e| format!("Failed to create update archive: {e}"))?;
+        let mut stream = response.bytes_stream();
+        let mut failed = false;
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(bytes) => {
+                    use std::io::Write;
+                    if file.write_all(&bytes).is_err() {
+                        failed = true;
+                        break;
+                    }
+                }
+                Err(_) => {
+                    failed = true;
+                    break;
+                }
+            }
         }
-        verified_checksum = Checksum::Sha256(expected_sha256);
-        source_url = Some(provider.release_download_url(&latest_version));
+        drop(file);
+        if failed {
+            continue;
+        }
+        let actual = sha256_file(&zip_path)?;
+        if actual == artifact.checksum.value {
+            selected = Some((artifact.url.clone(), Checksum::Sha256(actual)));
+            break;
+        }
+        let _ = std::fs::remove_file(&zip_path);
+        eprintln!("Core artifact checksum mismatch: {}", artifact.url);
     }
+    let (source_url, verified_checksum) = selected
+        .map(|(url, checksum)| (Some(url), checksum))
+        .ok_or_else(|| "No stable core artifact could be downloaded and verified".to_string())?;
 
     // Extraction
     window.emit("download-progress", 92).ok();
@@ -2076,6 +1865,9 @@ async fn download_and_install_update(
         installation.remove_owned_staging(&staging)?;
         return Err(error);
     }
+    let mut installed_manifest = core::CoreManifest::read(&staging)?;
+    installed_manifest.channel = Some(release.channel.clone());
+    installed_manifest.write_atomic(&staging)?;
     installation.preserve_user_files(&dir, &staging)?;
 
     // Capture the exact runtime state only after the candidate is ready, just
@@ -3743,6 +3535,7 @@ pub fn run() {
             import_backup_file,
             update_ipset_list,
             get_remote_core_version,
+            get_core_update_info,
             download_and_install_update,
             get_core_installation_state,
             rollback_core_update,

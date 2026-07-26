@@ -1,4 +1,6 @@
 export default {
+    "core_stable_channel": "Flowseal · Stable",
+    "core_update_unknown": "Core versions cannot be compared safely. Automatic update is unavailable.",
     "core_rollback_title": "Core rollback",
     "core_current_version": "Current version",
     "core_previous_version": "Previous version",
