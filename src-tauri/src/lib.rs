@@ -96,6 +96,23 @@ struct ZapretStatus {
     mode: Option<String>,
 }
 
+fn restart_context(
+    status: ZapretStatus,
+    operation: &str,
+) -> Result<Option<(String, String)>, String> {
+    if !status.running {
+        return Ok(None);
+    }
+    Ok(Some((
+        status.strategy.ok_or_else(|| {
+            format!("Cannot {operation} while zapret is running: active strategy is unknown")
+        })?,
+        status.mode.ok_or_else(|| {
+            format!("Cannot {operation} while zapret is running: launch mode is unknown")
+        })?,
+    )))
+}
+
 #[derive(serde::Serialize)]
 struct FiltersStatus {
     /// "disabled" | "all" | "tcp" | "udp"
@@ -1763,9 +1780,11 @@ fn is_ip_or_cidr(s: &str) -> bool {
 
 #[tauri::command]
 async fn download_and_install_update(
+    app: tauri::AppHandle,
     window: tauri::Window,
     use_proxy: Option<bool>,
     custom_proxy: Option<String>,
+    state: State<'_, AppState>,
 ) -> Result<String, String> {
     let _operation_guard = CoreOperationGuard::acquire()?;
     let filters_status = get_filters_status();
@@ -2059,59 +2078,55 @@ async fn download_and_install_update(
     }
     installation.preserve_user_files(&dir, &staging)?;
 
-    // Stop managed processes only after the candidate is completely validated.
-    if let Err(error) = stop_zapret_internal() {
-        installation.remove_owned_staging(&staging)?;
-        return Err(format!("Cannot stop zapret before activation: {error}"));
-    }
-    installation.activate(&staging, manager.provider())?;
-
-    // Restore settings after update
-    if let Err(error) = set_game_filter(filters_status.game_filter)
-        .and_then(|_| set_ipset_filter(filters_status.ipset))
-    {
-        installation
-            .rollback(
-                manager.provider(),
-                core_manager_at(dir.with_file_name("binaries.previous")).provider(),
-            )
-            .map_err(|rollback| {
-                format!(
-                "Cannot restore filter settings ({error}); automatic rollback failed: {rollback}"
-            )
-            })?;
-        return Err(format!(
-            "Cannot restore filter settings ({error}); automatic rollback completed"
-        ));
+    // Capture the exact runtime state only after the candidate is ready, just
+    // before stopping anything managed by the application.
+    let restart = restart_context(get_zapret_status(state.clone()), "update")?;
+    if restart.is_some() {
+        if let Err(error) = stop_zapret_internal() {
+            installation.remove_owned_staging(&staging)?;
+            return Err(format!("Cannot stop zapret before activation: {error}"));
+        }
     }
 
-    remove_download_temp(&temp_dir)?;
-    window.emit("download-progress", 100).ok();
+    let operation = (|| {
+        installation.activate(&staging, manager.provider())?;
+        if let Err(error) = set_game_filter(filters_status.game_filter)
+            .and_then(|_| set_ipset_filter(filters_status.ipset))
+        {
+            installation
+                .rollback(
+                    manager.provider(),
+                    core_manager_at(dir.with_file_name("binaries.previous")).provider(),
+                )
+                .map_err(|rollback| {
+                    format!(
+                        "Cannot restore filter settings ({error}); automatic rollback failed: {rollback}"
+                    )
+                })?;
+            return Err(format!(
+                "Cannot restore filter settings ({error}); automatic rollback completed"
+            ));
+        }
+        Ok(())
+    })();
 
-    Ok("Update successful".to_string())
-}
-
-fn remove_download_temp(path: &std::path::Path) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| "Download temporary directory has no parent".to_string())?;
-    let expected_parent = std::env::temp_dir()
-        .canonicalize()
-        .map_err(|e| format!("Cannot verify temporary parent: {e}"))?;
-    let actual_parent = parent
-        .canonicalize()
-        .map_err(|e| format!("Cannot verify download temporary parent: {e}"))?;
-    let owned = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with(".zapret-ui-core-download-"));
-    if actual_parent != expected_parent || !owned {
-        return Err(format!(
-            "Refusing unsafe download temporary path: {}",
-            path.display()
-        ));
+    let restart_result = restart.map(|(strategy, mode)| {
+        start_zapret(app, strategy, mode, state)
+            .map(|_| ())
+            .map_err(|e| format!("Cannot restart zapret after core update: {e}"))
+    });
+    match (operation, restart_result) {
+        (Err(error), Some(Err(restart_error))) => Err(format!("{error}; {restart_error}")),
+        (Err(error), _) => Err(error),
+        (Ok(()), Some(Err(restart_error))) => {
+            window.emit("download-progress", 100).ok();
+            Ok(format!("Update successful. Warning: {restart_error}"))
+        }
+        (Ok(()), _) => {
+            window.emit("download-progress", 100).ok();
+            Ok("Update successful".to_string())
+        }
     }
-    std::fs::remove_dir_all(path).map_err(|e| format!("Cannot clean download files: {e}"))
 }
 
 struct OwnedDirectoryCleanup {
@@ -2167,7 +2182,45 @@ impl Drop for OwnedDirectoryCleanup {
 
 #[cfg(test)]
 mod temporary_cleanup_tests {
-    use super::{CoreOperationGuard, OwnedDirectoryCleanup};
+    use super::{restart_context, CoreOperationGuard, OwnedDirectoryCleanup, ZapretStatus};
+
+    #[test]
+    fn restart_context_preserves_service_and_temporary_modes() {
+        for mode in ["service", "temporary"] {
+            let context = restart_context(
+                ZapretStatus {
+                    running: true,
+                    strategy: Some("ALT12".to_string()),
+                    mode: Some(mode.to_string()),
+                },
+                "update",
+            )
+            .unwrap();
+            assert_eq!(context, Some(("ALT12".to_string(), mode.to_string())));
+        }
+        assert_eq!(
+            restart_context(
+                ZapretStatus {
+                    running: false,
+                    strategy: None,
+                    mode: None,
+                },
+                "update",
+            )
+            .unwrap(),
+            None
+        );
+        assert!(restart_context(
+            ZapretStatus {
+                running: true,
+                strategy: None,
+                mode: Some("service".to_string()),
+            },
+            "update",
+        )
+        .unwrap_err()
+        .contains("active strategy is unknown"));
+    }
 
     #[test]
     fn core_operation_guard_rejects_overlap_and_resets_on_drop() {
@@ -2219,17 +2272,7 @@ fn rollback_core_update(
     let active_manager = core_manager_at(&dir);
     installation.prepare(active_manager.provider())?;
     let filters = get_filters_status();
-    let running = get_zapret_status(state.clone());
-    let restart = if running.running {
-        Some((
-            running.strategy.ok_or_else(|| {
-                "Cannot rollback while zapret is running: active strategy is unknown".to_string()
-            })?,
-            running.mode.unwrap_or_else(|| "service".to_string()),
-        ))
-    } else {
-        None
-    };
+    let restart = restart_context(get_zapret_status(state.clone()), "rollback")?;
     if restart.is_some() {
         stop_zapret_internal().map_err(|e| format!("Cannot stop zapret before rollback: {e}"))?;
     }

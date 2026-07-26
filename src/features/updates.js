@@ -30,9 +30,10 @@ async function downloadAndInstallCoreUpdate(useProxy = false, customProxy = null
   try {
     const modalTitle = document.querySelector('#update-modal h3');
     if (modalTitle) modalTitle.textContent = t('downloading_installing');
-    await invoke('download_and_install_update', { useProxy, customProxy });
-    if (modalTitle) modalTitle.textContent = t('update_installed_restarting');
-    setTimeout(() => location.reload(), 1500);
+    const result = await invoke('download_and_install_update', { useProxy, customProxy });
+    if (modalTitle) modalTitle.textContent = result;
+    setTimeout(() => location.reload(), 3000);
+    return result;
   } catch (err) {
     console.error('Core update failed:', err);
     showProxyFallbackModal(err, 
@@ -288,21 +289,7 @@ function initLegacyUpdateNowButton() {
     statusEl.className = 'mt-4 text-sm text-secondary';
     updateNowBtn.disabled = true;
 
-    let zapretWasRunning = false;
-    let zapretStrategy = null;
-    let zapretMode = 'service';
-
     try {
-      statusEl.textContent = t('checking_service_status');
-      const status = await invoke('get_zapret_status');
-      if (status.running) {
-        zapretWasRunning = true;
-        zapretStrategy = status.strategy;
-        zapretMode = status.mode || 'service';
-        statusEl.textContent = t('stopping_before_update');
-        await invoke('stop_zapret');
-      }
-
       const progressContainer = $('update-status-container');
       const progressText = $('update-progress-text');
       const progressBar = $('update-progress-bar');
@@ -324,19 +311,8 @@ function initLegacyUpdateNowButton() {
       if (progressText) progressText.textContent = '100%';
       statusEl.className = 'text-xs text-secondary font-mono mb-3 text-center';
 
-      if (zapretWasRunning && zapretStrategy) {
-        statusEl.textContent = t('update_installed_restarting');
-        try {
-          await invoke('start_zapret', { strategy: zapretStrategy, mode: zapretMode });
-          await pollStatus();
-          statusEl.textContent = result + ' Zapret restarted successfully.';
-        } catch (restartErr) {
-          statusEl.textContent = result + ' Warning: failed to restart: ' + restartErr;
-          statusEl.className = 'text-xs text-primary font-mono mb-3 text-center';
-        }
-      } else {
-        statusEl.textContent = result;
-      }
+      statusEl.textContent = result;
+      await pollStatus();
 
       await refreshCoreVersion();
 
@@ -346,9 +322,6 @@ function initLegacyUpdateNowButton() {
     } catch (err) {
       statusEl.textContent = 'Error: ' + err;
       statusEl.className = 'mt-4 text-sm text-error-dim';
-      if (zapretWasRunning && zapretStrategy) {
-        try { await invoke('start_zapret', { strategy: zapretStrategy, mode: zapretMode }); await pollStatus(); } catch {}
-      }
       updateNowBtn.disabled = false;
 
       showProxyFallbackModal(err, 
