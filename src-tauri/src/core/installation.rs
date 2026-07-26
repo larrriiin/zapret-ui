@@ -11,6 +11,7 @@ pub const MANIFEST_NAME: &str = ".zapret-ui-core.json";
 const SCHEMA_VERSION: u32 = 1;
 const STAGING_PREFIX: &str = ".binaries-staging-";
 const SWAP_NAME: &str = ".binaries-rollback-swap";
+const RESTORE_SWAP_NAME: &str = ".binaries-rollback-restore-swap";
 const PREVIOUS_BACKUP_NAME: &str = ".binaries-previous-backup";
 const USER_FILES: [&str; 3] = [
     "list-general-user.txt",
@@ -117,6 +118,7 @@ impl CoreInstallation {
 
     pub fn recover(&self) -> Result<(), String> {
         fs::create_dir_all(&self.parent).map_err(|e| format!("Cannot prepare core parent: {e}"))?;
+        self.recover_interrupted_rollback_restore()?;
         self.recover_interrupted_rollback()?;
         self.recover_interrupted_activation()?;
         if !self.active.exists() && self.previous.exists() {
@@ -351,27 +353,61 @@ impl CoreInstallation {
     }
 
     fn reverse_completed_rollback(&self) -> Result<(), String> {
-        let swap = self.parent.join(SWAP_NAME);
+        let swap = self.parent.join(RESTORE_SWAP_NAME);
         if swap.exists() {
-            return Err("Rollback swap unexpectedly exists during restoration".into());
+            return Err("Rollback restore swap unexpectedly exists during restoration".into());
         }
         fs::rename(&self.active, &swap)
             .map_err(|e| format!("Cannot move failed rollback core aside: {e}"))?;
         if let Err(error) = fs::rename(&self.previous, &self.active) {
-            fs::rename(&swap, &self.active).map_err(|restore| {
-                format!("Cannot restore original active core ({error}); cannot undo temporary move: {restore}")
-            })?;
-            return Err(format!("Cannot restore original active core: {error}"));
+            return Err(format!(
+                "Cannot restore original active core ({error}); recovery marker was retained"
+            ));
         }
         if let Err(error) = fs::rename(&swap, &self.previous) {
-            fs::rename(&self.active, &self.previous).map_err(|restore| {
-                format!("Cannot restore original previous core ({error}); rollback recovery failed: {restore}")
-            })?;
-            fs::rename(&swap, &self.active).map_err(|restore| {
-                format!("Cannot restore original previous core ({error}); active recovery failed: {restore}")
-            })?;
-            return Err(format!("Cannot restore original previous core: {error}"));
+            return Err(format!(
+                "Cannot restore original previous core ({error}); original active core is working and recovery marker was retained"
+            ));
         }
+        Ok(())
+    }
+
+    fn recover_interrupted_rollback_restore(&self) -> Result<(), String> {
+        let restore_swap = self.parent.join(RESTORE_SWAP_NAME);
+        if !restore_swap.exists() {
+            return Ok(());
+        }
+        self.assert_owned(&restore_swap, RESTORE_SWAP_NAME)?;
+        match (self.active.exists(), self.previous.exists()) {
+            (false, true) => {
+                fs::rename(&self.previous, &self.active).map_err(|e| {
+                    format!("Cannot restore original active core during recovery: {e}")
+                })?;
+                fs::rename(&restore_swap, &self.previous).map_err(|e| {
+                    format!(
+                        "Original active core was recovered, but previous core restoration must be retried: {e}"
+                    )
+                })?;
+            }
+            (true, false) => {
+                fs::rename(&restore_swap, &self.previous).map_err(|e| {
+                    format!("Cannot finish previous core restoration during recovery: {e}")
+                })?;
+            }
+            (true, true) => {
+                return Err(
+                    "Ambiguous rollback restoration: active, previous, and restore swap all exist"
+                        .to_string(),
+                );
+            }
+            (false, false) => {
+                return Err(
+                    "Cannot recover rollback restoration: only the invalid restore swap remains"
+                        .to_string(),
+                );
+            }
+        }
+        eprintln!("Recovered interrupted rollback restoration");
         Ok(())
     }
 
@@ -802,5 +838,45 @@ mod tests {
         assert_eq!(CoreManifest::read(&active).unwrap().version, "2.0.0");
         assert_eq!(CoreManifest::read(&previous).unwrap().version, "1.0.0");
         assert!(!temp.0.join(SWAP_NAME).exists());
+    }
+
+    #[test]
+    fn recovers_rollback_restore_before_original_active_was_restored() {
+        let temp = Temp::new();
+        let active = temp.0.join("binaries");
+        let previous = temp.0.join("binaries.previous");
+        let restore_swap = temp.0.join(RESTORE_SWAP_NAME);
+        fixture(&previous, "2.0.0");
+        manifest("2.0.0").write_atomic(&previous).unwrap();
+        fixture(&restore_swap, "1.0.0");
+        manifest("1.0.0").write_atomic(&restore_swap).unwrap();
+
+        let installation = CoreInstallation::new(&active).unwrap();
+        installation.recover().unwrap();
+        installation.recover().unwrap();
+
+        assert_eq!(CoreManifest::read(&active).unwrap().version, "2.0.0");
+        assert_eq!(CoreManifest::read(&previous).unwrap().version, "1.0.0");
+        assert!(!restore_swap.exists());
+    }
+
+    #[test]
+    fn recovers_rollback_restore_after_original_active_was_restored() {
+        let temp = Temp::new();
+        let active = temp.0.join("binaries");
+        let previous = temp.0.join("binaries.previous");
+        let restore_swap = temp.0.join(RESTORE_SWAP_NAME);
+        fixture(&active, "2.0.0");
+        manifest("2.0.0").write_atomic(&active).unwrap();
+        fixture(&restore_swap, "1.0.0");
+        manifest("1.0.0").write_atomic(&restore_swap).unwrap();
+
+        let installation = CoreInstallation::new(&active).unwrap();
+        installation.recover().unwrap();
+        installation.recover().unwrap();
+
+        assert_eq!(CoreManifest::read(&active).unwrap().version, "2.0.0");
+        assert_eq!(CoreManifest::read(&previous).unwrap().version, "1.0.0");
+        assert!(!restore_swap.exists());
     }
 }
