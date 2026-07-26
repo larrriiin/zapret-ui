@@ -2039,11 +2039,11 @@ mod temporary_cleanup_tests {
             let path = temp_parent.join(format!("{prefix}test-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&path);
             std::fs::create_dir(&path).unwrap();
-            let result: Result<(), &str> = (|| {
+            let result: Result<(), &str> = {
                 let _cleanup =
                     OwnedDirectoryCleanup::new(path.clone(), expected_parent.clone(), prefix);
                 Err("simulated failure")
-            })();
+            };
             assert!(result.is_err());
             assert!(!path.exists());
         }
