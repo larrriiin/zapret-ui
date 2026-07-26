@@ -37,6 +37,26 @@ use core::{Checksum, CoreInstallation, CoreInstallationState, CoreManager, CoreR
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const GITHUB_USER_AGENT: &str = "zapret-ui-updater";
+static CORE_OPERATION_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+struct CoreOperationGuard;
+
+impl CoreOperationGuard {
+    fn acquire() -> Result<Self, String> {
+        CORE_OPERATION_ACTIVE
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| {
+                "Another core update or rollback operation is already in progress".to_string()
+            })?;
+        Ok(Self)
+    }
+}
+
+impl Drop for CoreOperationGuard {
+    fn drop(&mut self) {
+        CORE_OPERATION_ACTIVE.store(false, Ordering::Release);
+    }
+}
 
 struct AppState {
     active_strategy: Mutex<Option<String>>,
@@ -1747,6 +1767,7 @@ async fn download_and_install_update(
     use_proxy: Option<bool>,
     custom_proxy: Option<String>,
 ) -> Result<String, String> {
+    let _operation_guard = CoreOperationGuard::acquire()?;
     let filters_status = get_filters_status();
     let dir = find_binaries_dir();
     let installation = CoreInstallation::new(&dir)?;
@@ -2114,7 +2135,12 @@ impl Drop for OwnedDirectoryCleanup {
         if !self.path.exists() {
             return;
         }
-        let owned = self.path.parent() == Some(self.expected_parent.as_path())
+        let actual_parent = self
+            .path
+            .parent()
+            .and_then(|parent| parent.canonicalize().ok());
+        let expected_parent = self.expected_parent.canonicalize().ok();
+        let owned = actual_parent == expected_parent
             && self
                 .path
                 .file_name()
@@ -2141,17 +2167,30 @@ impl Drop for OwnedDirectoryCleanup {
 
 #[cfg(test)]
 mod temporary_cleanup_tests {
-    use super::OwnedDirectoryCleanup;
+    use super::{CoreOperationGuard, OwnedDirectoryCleanup};
+
+    #[test]
+    fn core_operation_guard_rejects_overlap_and_resets_on_drop() {
+        let guard = CoreOperationGuard::acquire().unwrap();
+        assert!(CoreOperationGuard::acquire()
+            .err()
+            .unwrap()
+            .contains("already in progress"));
+        drop(guard);
+        assert!(CoreOperationGuard::acquire().is_ok());
+    }
 
     #[test]
     fn owned_temporary_directory_is_cleaned_during_error_unwind() {
-        let parent = std::env::temp_dir().canonicalize().unwrap();
+        let temp_parent = std::env::temp_dir();
+        let expected_parent = temp_parent.canonicalize().unwrap();
         for prefix in [".zapret-ui-core-download-", ".binaries-staging-"] {
-            let path = parent.join(format!("{prefix}test-{}", std::process::id()));
+            let path = temp_parent.join(format!("{prefix}test-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&path);
             std::fs::create_dir(&path).unwrap();
             let result: Result<(), &str> = (|| {
-                let _cleanup = OwnedDirectoryCleanup::new(path.clone(), parent.clone(), prefix);
+                let _cleanup =
+                    OwnedDirectoryCleanup::new(path.clone(), expected_parent.clone(), prefix);
                 Err("simulated failure")
             })();
             assert!(result.is_err());
@@ -2173,6 +2212,7 @@ fn rollback_core_update(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<CoreInstallationState, String> {
+    let _operation_guard = CoreOperationGuard::acquire()?;
     let dir = find_binaries_dir();
     let previous_dir = dir.with_file_name("binaries.previous");
     let installation = CoreInstallation::new(&dir)?;
@@ -2224,7 +2264,7 @@ fn rollback_core_update(
             .map_err(|e| format!("Cannot restart zapret after rollback attempt: {e}"))
     });
     match (operation, restart_result) {
-        (Ok(result), Some(Err(error))) => Err(error),
+        (Ok(_), Some(Err(error))) => Err(error),
         (Err(error), Some(Err(restart))) => Err(format!("{error}; {restart}")),
         (result, _) => result,
     }

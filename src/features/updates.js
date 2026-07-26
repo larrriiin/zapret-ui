@@ -185,7 +185,10 @@ function showDualUpdateModal(data, manual = false) {
 
   modal.querySelector('#modal-close-btn')?.addEventListener('click', () => modal.remove());
   modal.querySelector('#modal-update-ui-btn')?.addEventListener('click', (e) => downloadAndInstallUIUpdate(e, currentUpdateObject));
-  modal.querySelector('#modal-update-core-btn')?.addEventListener('click', () => downloadAndInstallCoreUpdate().catch(console.error));
+  modal.querySelector('#modal-update-core-btn')?.addEventListener('click', (event) => {
+    event.currentTarget.disabled = true;
+    downloadAndInstallCoreUpdate().catch(console.error);
+  });
 }
 
 async function checkUIUpdateWithFallback() {

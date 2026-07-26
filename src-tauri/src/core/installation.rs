@@ -300,6 +300,16 @@ impl CoreInstallation {
         active_provider: &dyn CoreProvider,
         previous_provider: &dyn CoreProvider,
     ) -> Result<CoreInstallationState, String> {
+        self.rollback_with_post_validation(previous_provider, || {
+            active_provider.validate_installation().map(|_| ())
+        })
+    }
+
+    fn rollback_with_post_validation(
+        &self,
+        previous_provider: &dyn CoreProvider,
+        post_validate: impl FnOnce() -> Result<(), String>,
+    ) -> Result<CoreInstallationState, String> {
         if !self.previous.is_dir() {
             return Err("Rollback is unavailable: previous core is missing".into());
         }
@@ -327,8 +337,42 @@ impl CoreInstallation {
                 "Rollback swap failed: {error}; active core restored"
             ));
         }
-        active_provider.validate_installation()?;
+        if let Err(validation_error) = post_validate() {
+            self.reverse_completed_rollback().map_err(|restore_error| {
+                format!(
+                    "Rollback post-validation failed ({validation_error}); restoration failed: {restore_error}"
+                )
+            })?;
+            return Err(format!(
+                "Rollback post-validation failed ({validation_error}); original installation restored"
+            ));
+        }
         Ok(self.state())
+    }
+
+    fn reverse_completed_rollback(&self) -> Result<(), String> {
+        let swap = self.parent.join(SWAP_NAME);
+        if swap.exists() {
+            return Err("Rollback swap unexpectedly exists during restoration".into());
+        }
+        fs::rename(&self.active, &swap)
+            .map_err(|e| format!("Cannot move failed rollback core aside: {e}"))?;
+        if let Err(error) = fs::rename(&self.previous, &self.active) {
+            fs::rename(&swap, &self.active).map_err(|restore| {
+                format!("Cannot restore original active core ({error}); cannot undo temporary move: {restore}")
+            })?;
+            return Err(format!("Cannot restore original active core: {error}"));
+        }
+        if let Err(error) = fs::rename(&swap, &self.previous) {
+            fs::rename(&self.active, &self.previous).map_err(|restore| {
+                format!("Cannot restore original previous core ({error}); rollback recovery failed: {restore}")
+            })?;
+            fs::rename(&swap, &self.active).map_err(|restore| {
+                format!("Cannot restore original previous core ({error}); active recovery failed: {restore}")
+            })?;
+            return Err(format!("Cannot restore original previous core: {error}"));
+        }
+        Ok(())
     }
 
     fn recover_interrupted_rollback(&self) -> Result<(), String> {
@@ -737,5 +781,26 @@ mod tests {
         assert_eq!(CoreManifest::read(&previous).unwrap().version, "0.9.0");
         assert!(!staging.exists());
         assert!(!temp.0.join(PREVIOUS_BACKUP_NAME).exists());
+    }
+
+    #[test]
+    fn rollback_post_validation_failure_restores_original_directories() {
+        let temp = Temp::new();
+        let active = temp.0.join("binaries");
+        let previous = temp.0.join("binaries.previous");
+        fixture(&active, "2.0.0");
+        manifest("2.0.0").write_atomic(&active).unwrap();
+        fixture(&previous, "1.0.0");
+        manifest("1.0.0").write_atomic(&previous).unwrap();
+        let installation = CoreInstallation::new(&active).unwrap();
+        let error = installation
+            .rollback_with_post_validation(provider(&previous), || {
+                Err("simulated validation failure".to_string())
+            })
+            .unwrap_err();
+        assert!(error.contains("original installation restored"));
+        assert_eq!(CoreManifest::read(&active).unwrap().version, "2.0.0");
+        assert_eq!(CoreManifest::read(&previous).unwrap().version, "1.0.0");
+        assert!(!temp.0.join(SWAP_NAME).exists());
     }
 }
