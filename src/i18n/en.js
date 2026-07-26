@@ -3,6 +3,7 @@ export default {
     "core_update_unknown": "Core versions cannot be compared safely. Automatic update is unavailable.",
     "core_update_ahead": "Installed core is newer than Stable. No downgrade will be offered.",
     "core_not_installed": "Core is not installed",
+    "core_version_unknown": "Core version is unknown",
     "core_rollback_title": "Core rollback",
     "core_current_version": "Current version",
     "core_previous_version": "Previous version",

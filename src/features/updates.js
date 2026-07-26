@@ -141,6 +141,11 @@ function showDualUpdateModal(data, manual = false) {
     unknown: t('core_update_unknown'),
   };
   const coreStatus = `<span class="${data.core.available ? 'text-secondary' : 'text-on-surface-variant/70'} text-[10px] font-bold uppercase">${coreStatusLabels[data.core.status] || t('core_update_unknown')}</span>`;
+  const coreCurrentVersion = data.core.status === 'not_installed'
+    ? t('core_not_installed')
+    : data.core.status === 'unknown'
+      ? t('core_version_unknown')
+      : `v${data.core.current}`;
 
   modal.innerHTML = `
     <div class="bg-surface-container-high border border-outline-variant/30 rounded-3xl p-8 max-w-lg w-full shadow-2xl animate-scale-in">
@@ -169,7 +174,7 @@ function showDualUpdateModal(data, manual = false) {
             <div class="flex flex-col items-start text-left">
               <span class="text-[10px] font-bold text-secondary/70 uppercase tracking-wider mb-1">${t('zapret_core')} · ${t('core_stable_channel')}</span>
               <div class="flex items-center gap-2">
-                <span class="text-sm font-bold text-on-surface">v${data.core.current}</span>
+                <span class="text-sm font-bold text-on-surface">${coreCurrentVersion}</span>
                 ${data.core.available ? `<span class="material-symbols-outlined text-xs text-on-surface-variant/40">arrow_forward</span> <span class="text-sm font-bold text-secondary">${data.core.latest === 'Error' ? 'Ошибка' : 'v' + data.core.latest}</span>` : ''}
               </div>
             </div>

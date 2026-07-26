@@ -114,7 +114,7 @@ where
         if body.len().saturating_add(chunk.len()) > MAX_MANIFEST_BYTES {
             return Err("channel response is too large".into());
         }
-        body.extend_from_slice(&chunk);
+        body.extend_from_slice(chunk);
     }
     Ok(body)
 }
