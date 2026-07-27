@@ -1,0 +1,223 @@
+name: Check Flowseal stable release
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: flowseal-stable-check
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check-release:
+    name: Check and propose stable core update
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          token: ${{ github.token }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Test Flowseal version comparison
+        run: npm run test:flowseal-version
+
+      - name: Read latest published Flowseal release
+        id: release
+        env:
+          API_URL: https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest
+          API_TOKEN: ${{ github.token }}
+        run: |
+          response="$(mktemp)"
+          status="$(curl --silent --show-error --location \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --header "Authorization: Bearer $API_TOKEN" \
+            --output "$response" --write-out '%{http_code}' "$API_URL")"
+          if [ "$status" != 200 ]; then
+            echo "::error::GitHub releases/latest returned HTTP $status."
+            exit 1
+          fi
+          if [ "$(jq -r '.draft // false' "$response")" != false ] || \
+             [ "$(jq -r '.prerelease // false' "$response")" != false ]; then
+            echo "::error::GitHub releases/latest unexpectedly returned a draft or prerelease."
+            exit 1
+          fi
+
+          tag="$(jq -er '.tag_name | select(type == "string" and length > 0)' "$response")"
+          current_version="$(jq -er '.version' core-channel/stable.json)"
+          node scripts/flowseal-version.mjs "$tag" "$current_version" >> "$GITHUB_OUTPUT"
+          version="$(node -e "import('./scripts/flowseal-version.mjs').then(({normalizeVersion}) => process.stdout.write(normalizeVersion(process.argv[1]) ?? ''))" "$tag")"
+          expected="zapret-discord-youtube-${version}.zip"
+          asset_count="$(jq --arg expected "$expected" '[.assets[]? | select(.name == $expected and (.browser_download_url | type == "string"))] | length' "$response")"
+          if [ "$asset_count" != 1 ]; then
+            echo "::error::Expected exactly one release asset named $expected, found $asset_count."
+            exit 1
+          fi
+          {
+            echo "asset_url=$(jq -er --arg expected "$expected" '.assets[] | select(.name == $expected) | .browser_download_url' "$response")"
+            echo "release_url=$(jq -er '.html_url' "$response")"
+            echo "current_version=$current_version"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether promotion is needed
+        id: decision
+        env:
+          COMPARISON: ${{ steps.release.outputs.comparison }}
+          CURRENT_VERSION: ${{ steps.release.outputs.current_version }}
+          LATEST_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          case "$COMPARISON" in
+            equal)
+              echo "Flowseal $LATEST_VERSION is already stable; no branch or PR is needed."
+              echo "promote=false" >> "$GITHUB_OUTPUT"
+              ;;
+            older)
+              echo "::warning::Managed stable $CURRENT_VERSION is newer than latest Flowseal release $LATEST_VERSION; refusing to downgrade."
+              echo "promote=false" >> "$GITHUB_OUTPUT"
+              ;;
+            newer) echo "promote=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::Unknown version comparison result: $COMPARISON"; exit 1 ;;
+          esac
+
+      - name: Prepare safe automation branch
+        if: steps.decision.outputs.promote == 'true'
+        id: branch
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          safe_version="$(printf '%s' "$VERSION" | sed -E 's/[^0-9.]+/-/g; s/^[.-]+//; s/[.-]+$//' | cut -c1-100)"
+          branch="automation/flowseal-$safe_version"
+          git check-ref-format --branch "$branch" >/dev/null
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Check for an existing pull request
+        if: steps.decision.outputs.promote == 'true'
+        id: pull_request
+        env:
+          GH_TOKEN: ${{ secrets.FLOWSEAL_UPDATE_TOKEN }}
+          BRANCH: ${{ steps.branch.outputs.branch }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "::error::FLOWSEAL_UPDATE_TOKEN is required."; exit 1; fi
+          pr_url="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --head "$BRANCH" --json url --jq '.[0].url // empty')"
+          if [ -n "$pr_url" ]; then
+            echo "An open PR already exists: $pr_url"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Inspect an existing automation branch
+        if: steps.decision.outputs.promote == 'true' && steps.pull_request.outputs.exists == 'false'
+        id: existing_branch
+        env:
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          VERSION: ${{ steps.release.outputs.version }}
+          ASSET_URL: ${{ steps.release.outputs.asset_url }}
+        run: |
+          if ! git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+          remote_ref="refs/remotes/origin/$BRANCH"
+          changed="$(git diff --name-only main..."$remote_ref")"
+          manifest="$(mktemp)"
+          git show "$remote_ref:core-channel/stable.json" > "$manifest"
+          if [ "$changed" != "core-channel/stable.json" ] || \
+             [ "$(jq -r '.version' "$manifest")" != "$VERSION" ] || \
+             [ "$(jq -r '.artifacts | length' "$manifest")" != 1 ] || \
+             [ "$(jq -r '.artifacts[0].url' "$manifest")" != "$ASSET_URL" ] || \
+             ! jq -e '.artifacts[0].checksum | .algorithm == "sha256" and (.value | test("^[0-9a-f]{64}$"))' "$manifest" >/dev/null; then
+            echo "::error::Branch $BRANCH exists without an open PR but does not contain only the expected verified stable manifest. Inspect, fix, or delete that branch before rerunning."
+            exit 1
+          fi
+          echo "Validated existing branch $BRANCH; the workflow will recover by creating its missing PR."
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+          echo "checksum=$(jq -r '.artifacts[0].checksum.value' "$manifest")" >> "$GITHUB_OUTPUT"
+
+      - name: Promote Flowseal release in managed channel
+        if: steps.decision.outputs.promote == 'true' && steps.pull_request.outputs.exists == 'false' && steps.existing_branch.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          ASSET_URL: ${{ steps.release.outputs.asset_url }}
+        run: npm run promote-core-stable -- --version "$VERSION" --url "$ASSET_URL"
+
+      - name: Verify the promotion diff
+        if: steps.decision.outputs.promote == 'true' && steps.pull_request.outputs.exists == 'false' && steps.existing_branch.outputs.exists == 'false'
+        id: manifest
+        run: |
+          changed="$(git status --porcelain | sed -E 's/^...//')"
+          if [ "$changed" != "core-channel/stable.json" ]; then
+            echo "::error::Promotion must change only core-channel/stable.json; changed paths: ${changed:-none}"
+            exit 1
+          fi
+          git diff --check
+          echo "checksum=$(jq -er '.artifacts[0].checksum | select(.algorithm == "sha256") | .value | select(test("^[0-9a-f]{64}$"))' core-channel/stable.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push automation branch
+        if: steps.decision.outputs.promote == 'true' && steps.pull_request.outputs.exists == 'false' && steps.existing_branch.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.FLOWSEAL_UPDATE_TOKEN }}
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          gh auth setup-git
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git switch -c "$BRANCH"
+          git add core-channel/stable.json
+          git commit -m "chore(core): promote Flowseal $VERSION to stable"
+          git push --set-upstream origin "$BRANCH"
+
+      - name: Create pull request for manual testing
+        if: steps.decision.outputs.promote == 'true' && steps.pull_request.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.FLOWSEAL_UPDATE_TOKEN }}
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          VERSION: ${{ steps.release.outputs.version }}
+          CURRENT_VERSION: ${{ steps.release.outputs.current_version }}
+          RELEASE_URL: ${{ steps.release.outputs.release_url }}
+          ASSET_URL: ${{ steps.release.outputs.asset_url }}
+          CHECKSUM: ${{ steps.existing_branch.outputs.checksum || steps.manifest.outputs.checksum }}
+        run: |
+          body="$(mktemp)"
+          cat > "$body" <<EOF
+          ## Flowseal stable core promotion
+
+          - Current stable version: \`$CURRENT_VERSION\`
+          - Proposed version: \`$VERSION\`
+          - [Upstream Flowseal release]($RELEASE_URL)
+          - [Release ZIP]($ASSET_URL)
+          - SHA-256: \`$CHECKSUM\`
+
+          > **Do not merge this PR without completing manual testing.** This automation only proposes a managed-channel update; it does not approve or merge it.
+
+          ## Manual test checklist
+
+          - [ ] Ядро скачивается и устанавливается
+          - [ ] Временный режим запуска работает
+          - [ ] Режим службы Windows работает
+          - [ ] Выбранная стратегия сохраняется после обновления
+          - [ ] Пользовательские списки сохраняются
+          - [ ] Откат на предыдущую версию работает
+          - [ ] После отката восстанавливается выбранная стратегия
+          - [ ] Приложение нормально запускается после перезагрузки
+          EOF
+          pr_url="$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "chore(core): promote Flowseal $VERSION to stable" --body-file "$body")"
+          echo "Created pull request: $pr_url"
+          if ! gh pr edit "$pr_url" --add-assignee larrriiin; then
+            echo "::warning::PR was created, but GitHub did not allow assigning larrriiin."
+          fi

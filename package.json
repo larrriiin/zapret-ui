@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "check-versions": "node scripts/check-versions.mjs",
+    "test:flowseal-version": "node --test scripts/flowseal-version.test.mjs",
     "set-version": "node scripts/set-version.mjs",
     "promote-core-stable": "node scripts/promote-core-stable.mjs"
   },
