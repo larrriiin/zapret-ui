@@ -31,15 +31,20 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Test Flowseal version comparison
+        run: npm run test:flowseal-version
+
       - name: Read latest published Flowseal release
         id: release
         env:
           API_URL: https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest
+          API_TOKEN: ${{ github.token }}
         run: |
           response="$(mktemp)"
           status="$(curl --silent --show-error --location \
             --header 'Accept: application/vnd.github+json' \
             --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --header "Authorization: Bearer $API_TOKEN" \
             --output "$response" --write-out '%{http_code}' "$API_URL")"
           if [ "$status" != 200 ]; then
             echo "::error::GitHub releases/latest returned HTTP $status."
