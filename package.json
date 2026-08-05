@@ -20,7 +20,7 @@
     "autoprefixer": "^10.5.4",
     "postcss": "^8.5.23",
     "tailwindcss": "^4.3.3",
-    "vite": "^8.1.5"
+    "vite": "^8.2.0"
   },
   "optionalDependencies": {
     "@tailwindcss/oxide-win32-x64-msvc": "^4.3.3"
