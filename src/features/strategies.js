@@ -1,7 +1,7 @@
 import { $, invoke } from '../lib/core.js';
 import { t } from '../lib/i18n.js';
 import { state } from '../lib/state.js';
-import { showRestartStatus } from '../lib/restart.js';
+import { beginRestart, endRestart } from '../lib/restart.js';
 
 // Re-exported so other features (wizard, titlebar search, etc.) can refresh
 // the list after mutating favourites, cached test results or strategy files.
@@ -206,14 +206,20 @@ export function renderStrategyList() {
         closeStrategyDropdown();
         renderStrategyList();
 
-        invoke('get_zapret_status').then((status) => {
+        invoke('get_zapret_status').then(async (status) => {
           if (status.running) {
-            showRestartStatus(t('switching_strategy'), true);
-            invoke('start_zapret', { strategy: name, mode: status.mode || 'service' }).then(() => {
+            beginRestart(t('switching_strategy'));
+            try {
+              await invoke('start_zapret', { strategy: name, mode: status.mode || 'service' });
+            } catch (err) {
+              console.error('Strategy restart failed:', err);
+            } finally {
+              endRestart();
               // Re-polling is scheduled here so the header/hero reflect the
               // newly applied strategy without waiting for the next tick.
+              if (_pollStatus) await _pollStatus();
               setTimeout(() => _pollStatus && _pollStatus(), 500);
-            });
+            }
           }
         });
       });

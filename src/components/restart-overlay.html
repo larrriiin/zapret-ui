@@ -1,0 +1,16 @@
+<!-- Full-screen operation overlay shown while Zapret is being restarted. -->
+<div id="restart-operation-overlay"
+    class="hidden fixed inset-0 z-[20000] items-center justify-center bg-background/65 backdrop-blur-xl"
+    role="status" aria-live="polite" aria-busy="true">
+    <div class="restart-operation-card flex flex-col items-center text-center px-10 py-9 rounded-3xl border border-primary/25">
+        <div class="restart-operation-spinner mb-6" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span class="material-symbols-outlined">sync</span>
+        </div>
+        <h2 class="font-headline text-xl font-black text-on-surface uppercase tracking-wider"
+            data-i18n="restart_overlay_title">Перезапуск Zapret</h2>
+        <p id="restart-operation-message" class="mt-3 text-sm text-on-surface-variant max-w-sm"
+            data-i18n="restart_overlay_desc">Применяем изменения и восстанавливаем подключение…</p>
+    </div>
+</div>

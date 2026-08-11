@@ -2,7 +2,21 @@
 <div id="section-ips"
     class="hidden fixed top-[30px] right-0 bottom-0 left-0 ml-20 pt-20 overflow-y-auto bg-surface z-10">
     <div class="p-8 space-y-6 pb-24 max-w-[1400px] mx-auto">
-    <h2 class="font-headline text-2xl font-bold text-primary mb-4" data-i18n="ip_settings">IP Settings</h2>
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="font-headline text-2xl font-bold text-primary" data-i18n="ip_settings">IP Settings</h2>
+        <div class="flex gap-2">
+            <button id="ip-backup-export-btn"
+                class="px-4 py-2 bg-surface-container-high/40 border border-outline-variant/20 hover:border-primary/50 hover:text-primary rounded-xl text-on-surface-variant font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-sm">backup</span>
+                <span data-i18n="backup_export_btn">Create Backup</span>
+            </button>
+            <button id="ip-backup-import-btn"
+                class="px-4 py-2 bg-surface-container-high/40 border border-outline-variant/20 hover:border-primary/50 hover:text-primary rounded-xl text-on-surface-variant font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-sm">settings_backup_restore</span>
+                <span data-i18n="backup_import_btn">Restore Backup</span>
+            </button>
+        </div>
+    </div>
 
     <div class="flex flex-col gap-6 w-full">
         <!-- Update IPSet List Block -->
@@ -41,6 +55,33 @@
                         Add
                     </button>
                 </div>
+            </div>
+            <div class="flex items-center justify-between gap-3 mb-4">
+                <div class="flex gap-2 flex-1">
+                    <button id="ip-exclude-bulk-btn"
+                        class="flex-1 py-2 bg-surface-container-high/40 border border-outline-variant/10 hover:border-tertiary/40 hover:text-tertiary rounded-xl text-on-surface-variant font-bold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5">
+                        <span class="material-symbols-outlined text-sm">playlist_add</span>
+                        <span data-i18n="bulk_add_btn">Bulk Add</span>
+                    </button>
+                    <button id="ip-exclude-export-btn"
+                        class="flex-1 py-2 bg-surface-container-high/40 border border-outline-variant/10 hover:border-tertiary/40 hover:text-tertiary rounded-xl text-on-surface-variant font-bold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5">
+                        <span class="material-symbols-outlined text-sm">share</span>
+                        <span data-i18n="export_btn">Share</span>
+                    </button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="ip-exclude-search-toggle" class="text-tertiary/40 hover:text-tertiary transition-colors flex p-1 rounded hover:bg-white/5">
+                        <span class="material-symbols-outlined text-lg">search</span>
+                    </button>
+                    <button id="ip-exclude-clear-btn" class="text-error-dim/40 hover:text-error-dim transition-colors flex p-1 rounded hover:bg-white/5">
+                        <span class="material-symbols-outlined text-lg">delete</span>
+                    </button>
+                </div>
+            </div>
+            <div id="ip-exclude-search-container" class="relative mb-3 hidden">
+                <input type="text" id="ip-exclude-search" data-i18n="search_placeholder" data-i18n-attr="placeholder" autocomplete="off" spellcheck="false"
+                    class="w-full bg-surface-container-high/40 border border-outline-variant/20 rounded-xl pl-9 pr-4 py-1.5 text-xs outline-none focus:border-primary/50 text-on-surface">
+                <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50 text-xs">search</span>
             </div>
             <div id="ip-exclude-list" class="multi-column-list">
                 <!-- Dynamic list -->

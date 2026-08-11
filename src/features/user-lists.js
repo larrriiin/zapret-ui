@@ -26,7 +26,7 @@ export async function loadUserLists() {
     filterAndRender('site-exclude-list', 'list-exclude-user.txt', 'site-exclude-search');
 
     listsCache['ipset-exclude-user.txt'] = await invoke('read_user_list', { filename: 'ipset-exclude-user.txt' });
-    renderList('ip-exclude-list', listsCache['ipset-exclude-user.txt'], 'ipset-exclude-user.txt');
+    filterAndRender('ip-exclude-list', 'ipset-exclude-user.txt', 'ip-exclude-search');
   } catch (err) {
     console.error('Error loading user lists:', err);
   }
@@ -140,9 +140,17 @@ function openImportModal(filename, title) {
   const modal = $('list-import-modal');
   const titleEl = $('list-import-title');
   const textarea = $('list-import-textarea');
+  const pasteLabel = $('list-import-paste-label');
+  const isIPList = filename.includes('ipset');
   
   if (titleEl) titleEl.textContent = title;
-  if (textarea) textarea.value = '';
+  if (pasteLabel) pasteLabel.textContent = t(isIPList ? 'import_paste_ips' : 'import_paste_domains');
+  if (textarea) {
+    textarea.value = '';
+    textarea.placeholder = isIPList
+      ? '192.168.1.1\n10.0.0.0/24'
+      : 'example.com\ngoogle.com\nyoutube.com';
+  }
   
   modal?.classList.remove('hidden');
 }
@@ -165,10 +173,12 @@ export function initUserLists() {
   // Bind Export/Share buttons
   $('site-include-export-btn')?.addEventListener('click', () => handleExport('list-general-user.txt', 'site-include-export-btn'));
   $('site-exclude-export-btn')?.addEventListener('click', () => handleExport('list-exclude-user.txt', 'site-exclude-export-btn'));
+  $('ip-exclude-export-btn')?.addEventListener('click', () => handleExport('ipset-exclude-user.txt', 'ip-exclude-export-btn'));
 
   // Bind Bulk Add/Import buttons
   $('site-include-bulk-btn')?.addEventListener('click', () => openImportModal('list-general-user.txt', t('import_title_include')));
   $('site-exclude-bulk-btn')?.addEventListener('click', () => openImportModal('list-exclude-user.txt', t('import_title_exclude')));
+  $('ip-exclude-bulk-btn')?.addEventListener('click', () => openImportModal('ipset-exclude-user.txt', t('import_title_ip')));
 
   // Modal event bindings
   const modal = $('list-import-modal');
@@ -287,6 +297,7 @@ export function initUserLists() {
   };
   setupSearch('site-include-search', 'site-include-list', 'list-general-user.txt');
   setupSearch('site-exclude-search', 'site-exclude-list', 'list-exclude-user.txt');
+  setupSearch('ip-exclude-search', 'ip-exclude-list', 'ipset-exclude-user.txt');
 
   // Bind Clear events
   const setupClear = (btnId, filename) => {
@@ -307,10 +318,10 @@ export function initUserLists() {
   };
   setupClear('site-include-clear-btn', 'list-general-user.txt');
   setupClear('site-exclude-clear-btn', 'list-exclude-user.txt');
+  setupClear('ip-exclude-clear-btn', 'ipset-exclude-user.txt');
 
   // Bind Backup events
-  const exportBtn = $('backup-export-btn');
-  if (exportBtn) {
+  for (const exportBtn of [$('backup-export-btn'), $('ip-backup-export-btn')].filter(Boolean)) {
     exportBtn.onclick = async () => {
       try {
         const exported = await invoke('export_backup_file');
@@ -332,8 +343,7 @@ export function initUserLists() {
     };
   }
 
-  const importBtn = $('backup-import-btn');
-  if (importBtn) {
+  for (const importBtn of [$('backup-import-btn'), $('ip-backup-import-btn')].filter(Boolean)) {
     importBtn.onclick = async () => {
       const confirmed = await showConfirm(t('confirm_backup_restore'));
       if (!confirmed) return;
@@ -378,4 +388,5 @@ export function initUserLists() {
   };
   bindSearchToggle('site-include-search-toggle', 'site-include-search-container', 'site-include-search');
   bindSearchToggle('site-exclude-search-toggle', 'site-exclude-search-container', 'site-exclude-search');
+  bindSearchToggle('ip-exclude-search-toggle', 'ip-exclude-search-container', 'ip-exclude-search');
 }

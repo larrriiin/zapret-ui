@@ -1,4 +1,5 @@
 import { $, invoke } from '../lib/core.js';
+import { t } from '../lib/i18n.js';
 
 export function initStatusCheck() {
   const checkStatusBtn = $('check-status-btn');
@@ -8,13 +9,13 @@ export function initStatusCheck() {
 
   if (checkStatusBtn && statusModal && statusContent) {
     checkStatusBtn.addEventListener('click', async () => {
-      statusContent.textContent = 'Checking status in real-time...';
+      statusContent.textContent = t('status_checking_realtime');
       statusModal.classList.remove('hidden');
       try {
         const status = await invoke('check_status_full');
         statusContent.textContent = status;
       } catch (err) {
-        statusContent.textContent = 'Error checking status: ' + err;
+        statusContent.textContent = `${t('status_check_failed')}: ${err}`;
       }
     });
   }
