@@ -19,3 +19,5 @@ jobs:
         run: node scripts/check-versions.mjs
       - name: Test Flowseal version comparison
         run: npm run test:flowseal-version
+      - name: Verify UI translations
+        run: npm run test:i18n

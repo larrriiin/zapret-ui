@@ -1,6 +1,5 @@
 import { $, invoke } from '../lib/core.js';
 import { t } from '../lib/i18n.js';
-import { escapeHtml } from '../lib/dom.js';
 
 let lastDiagnosticsResults = null;
 let showingAllDiagnostics = false;
@@ -123,9 +122,9 @@ function renderDiagnostics(result, showAll) {
       <div class="flex items-start gap-3">
         <span class="material-symbols-outlined text-primary text-xl mt-0.5">vpn_key</span>
         <div class="flex-1">
-          <h4 class="font-headline text-sm font-bold text-on-surface">VPN Services Found</h4>
+          <h4 class="font-headline text-sm font-bold text-on-surface">${t('vpn_services_found')}</h4>
           <p class="text-xs text-on-surface-variant mt-1">${result.vpn_services}</p>
-          <p class="text-xs text-primary mt-2">Make sure that all VPNs are disabled</p>
+          <p class="text-xs text-primary mt-2">${t('vpn_disable_hint')}</p>
         </div>
       </div>
     `;
@@ -166,7 +165,7 @@ export function initDiagnostics() {
       if (diagnosticsResults) {
         diagnosticsResults.innerHTML = `
           <div class="bg-white/5 rounded-xl border border-error-dim/30 p-4 text-error-dim text-sm">
-            Failed to run diagnostics: ${err}
+            ${t('diagnostics_failed')}: ${err}
           </div>
         `;
       }
@@ -186,15 +185,15 @@ export function initDiagnostics() {
     const statusEl = $('discord-cache-status');
     if (!statusEl) return;
     statusEl.classList.remove('hidden');
-    statusEl.innerHTML = 'Clearing...';
+    statusEl.textContent = t('clearing_cache');
     statusEl.className = 'mt-4 text-sm text-secondary whitespace-pre-line';
     clearDiscordCacheBtn.disabled = true;
     try {
-      const result = await invoke('clear_discord_cache');
-      statusEl.innerHTML = escapeHtml(result).replace(/\n/g, '<br>');
+      await invoke('clear_discord_cache');
+      statusEl.textContent = t('cache_cleared');
       statusEl.className = 'mt-4 text-sm text-secondary whitespace-pre-line';
     } catch (err) {
-      statusEl.textContent = 'Error: ' + err;
+      statusEl.textContent = `${t('error')}: ${err}`;
       statusEl.className = 'mt-4 text-sm text-error-dim';
     } finally {
       clearDiscordCacheBtn.disabled = false;
@@ -233,7 +232,7 @@ function initSiteChecker() {
       
       // Run HTTP check in frontend
       let httpStatus = 'blocked';
-      let httpMessage = 'Connection refused or reset (possible DPI block)';
+      let httpMessage = t('site_checker_connection_failed');
       let youtubeVideoBlocked = false;
 
       if (res.dns_status === 'ok' && res.dns_resolved_ips.length > 0) {
@@ -248,12 +247,12 @@ function initSiteChecker() {
           });
           clearTimeout(timeoutId);
           httpStatus = 'accessible';
-          httpMessage = 'Success (HTTP OK)';
+          httpMessage = t('site_checker_http_success');
         } catch (err) {
           if (err.name === 'AbortError') {
-            httpMessage = 'Connection timed out (possible DPI block)';
+            httpMessage = t('site_checker_connection_timeout');
           } else {
-            httpMessage = 'Connection refused or reset (possible DPI block)';
+            httpMessage = t('site_checker_connection_failed');
           }
         }
 
@@ -276,7 +275,7 @@ function initSiteChecker() {
         }
       } else {
         httpStatus = 'error';
-        httpMessage = 'DNS resolution failed';
+        httpMessage = t('site_checker_dns_failed');
       }
 
       res.http_status = httpStatus;
@@ -315,7 +314,7 @@ function initSiteChecker() {
       const dnsBorder = res.dns_status === 'ok' ? 'border-secondary/20' : 'border-error-dim/20';
 
       // Determine Ping status icon and color
-      const pingVal = res.ping_ms !== null ? `${res.ping_ms} ms` : 'Timeout';
+      const pingVal = res.ping_ms !== null ? `${res.ping_ms} ${t('ms')}` : t('timeout');
       const pingIcon = res.ping_ms !== null ? 'check_circle' : 'error';
       const pingColor = res.ping_ms !== null ? 'text-secondary' : 'text-error-dim';
       const pingBorder = res.ping_ms !== null ? 'border-secondary/20' : 'border-error-dim/20';
@@ -331,7 +330,7 @@ function initSiteChecker() {
             <span class="material-symbols-outlined ${dnsColor} text-xl mt-0.5">${dnsIcon}</span>
             <div class="flex-1 min-w-0">
               <h4 class="font-headline text-xs font-bold uppercase tracking-wider text-on-surface-variant">${t('site_checker_dns_title')}</h4>
-              <p class="text-sm font-bold text-on-surface mt-1 truncate">${res.dns_message}</p>
+              <p class="text-sm font-bold text-on-surface mt-1 truncate">${res.dns_status === 'ok' ? t('site_checker_dns_resolved', { count: res.dns_resolved_ips.length }) : t('site_checker_dns_failed')}</p>
               ${res.dns_resolved_ips.length > 0 ? `
                 <div class="mt-2 text-[10px] font-mono text-on-surface-variant/80 max-h-16 overflow-y-auto space-y-0.5">
                   ${res.dns_resolved_ips.map(ip => `<div>${ip}</div>`).join('')}

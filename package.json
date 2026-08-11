@@ -1,7 +1,7 @@
 {
   "name": "zapret-ui",
   "private": true,
-  "version": "26.7.6",
+  "version": "26.8.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,7 @@
     "tauri": "tauri",
     "check-versions": "node scripts/check-versions.mjs",
     "test:flowseal-version": "node --test scripts/flowseal-version.test.mjs",
+    "test:i18n": "node --test scripts/i18n.test.mjs",
     "set-version": "node scripts/set-version.mjs",
     "promote-core-stable": "node scripts/promote-core-stable.mjs"
   },

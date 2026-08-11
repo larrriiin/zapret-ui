@@ -2,7 +2,7 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Acquire `Mutex` access without panicking when the mutex is poisoned. If a
 /// previous holder panicked the data is still well-formed for our use-cases
@@ -33,10 +33,12 @@ use tauri_plugin_notification::NotificationExt;
 
 mod core;
 mod providers;
+mod traffic_monitor;
 use core::{
     compare_versions, resolve_stable, Checksum, CoreInstallation, CoreInstallationState,
     CoreManager, CoreUpdateStatus,
 };
+use traffic_monitor::{TrafficMonitor, TrafficSnapshot};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const GITHUB_USER_AGENT: &str = "zapret-ui-updater";
@@ -76,6 +78,7 @@ struct AppState {
     last_strategy: Mutex<Option<String>>,
     translations: Mutex<Option<TrayTranslations>>,
     temp_process_child: Mutex<Option<std::process::Child>>,
+    traffic_monitor: Arc<TrafficMonitor>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Clone)]
@@ -940,6 +943,44 @@ fn get_zapret_status(state: State<'_, AppState>) -> ZapretStatus {
     }
 }
 
+fn refresh_traffic_filter(state: State<'_, AppState>) {
+    let status = get_zapret_status(state.clone());
+    if !status.running {
+        state.traffic_monitor.clear_filter();
+        return;
+    }
+    let Some(strategy) = status.strategy else {
+        state.traffic_monitor.clear_filter();
+        return;
+    };
+    if let Ok(args) = parse_bat_args(&strategy) {
+        state.traffic_monitor.refresh_filter(&args, Some(strategy));
+    } else {
+        state.traffic_monitor.clear_filter();
+    }
+}
+
+#[tauri::command]
+fn start_traffic_monitor(state: State<'_, AppState>) -> Result<TrafficSnapshot, String> {
+    refresh_traffic_filter(state.clone());
+    let dll_path = find_binaries_dir().join("bin").join("WinDivert.dll");
+    state.traffic_monitor.start(&dll_path)?;
+    Ok(state.traffic_monitor.snapshot())
+}
+
+#[tauri::command]
+fn stop_traffic_monitor(state: State<'_, AppState>) -> TrafficSnapshot {
+    let dll_path = find_binaries_dir().join("bin").join("WinDivert.dll");
+    state.traffic_monitor.stop(&dll_path);
+    state.traffic_monitor.snapshot()
+}
+
+#[tauri::command]
+fn get_traffic_snapshot(state: State<'_, AppState>) -> TrafficSnapshot {
+    refresh_traffic_filter(state.clone());
+    state.traffic_monitor.snapshot()
+}
+
 /// Состояние Game Filter и IPSet Filter по файлам конфигурации.
 #[tauri::command]
 fn get_filters_status() -> FiltersStatus {
@@ -1613,17 +1654,28 @@ fn import_backup_file() -> Result<bool, String> {
 /// Updates the IPSet list from remote source (same as service.bat)
 #[tauri::command]
 async fn update_ipset_list() -> Result<String, String> {
+    update_ipset_list_inner()
+        .await
+        .map(|count| format!("Updated successfully. {} IPs loaded.", count))
+}
+
+async fn update_ipset_list_inner() -> Result<usize, String> {
     let dir = find_binaries_dir();
     let manager = core_manager_at(&dir);
     let provider = manager.provider();
     let list_file = provider.paths().lists_dir().join("ipset-all.txt");
+    let download_file = provider
+        .paths()
+        .lists_dir()
+        .join(format!(".ipset-all-download-{}.txt", std::process::id()));
     let url = provider.ipset_url();
+    let _ = std::fs::remove_file(&download_file);
 
     // Check if curl exists in System32
     let curl_path = std::path::Path::new(r"C:\Windows\System32\curl.exe");
     let output = if curl_path.exists() {
         Command::new(curl_path)
-            .args(["-L", "-o", list_file.to_str().unwrap_or(""), url])
+            .args(["-L", "-o", download_file.to_str().unwrap_or(""), url])
             .creation_flags(CREATE_NO_WINDOW)
             .output()
     } else {
@@ -1631,7 +1683,7 @@ async fn update_ipset_list() -> Result<String, String> {
         let ps_cmd = format!(
             "$url = '{}'; $out = '{}'; try {{ $res = Invoke-WebRequest -Uri $url -TimeoutSec 30 -UseBasicParsing; if ($res.StatusCode -eq 200) {{ $res.Content | Out-File -FilePath $out -Encoding UTF8 }} else {{ exit 1 }} }} catch {{ exit 1 }}",
             url,
-            list_file.to_str().unwrap_or("")
+            download_file.to_str().unwrap_or("")
         );
         Command::new(powershell_path())
             .args(["-NoProfile", "-Command", &ps_cmd])
@@ -1647,17 +1699,17 @@ async fn update_ipset_list() -> Result<String, String> {
             // IPv6 literal (with optional /prefix). If the remote is
             // compromised and starts serving something else, we delete the
             // file and fail rather than silently loading garbage.
-            let content = std::fs::read_to_string(&list_file)
+            let content = std::fs::read_to_string(&download_file)
                 .map_err(|e| format!("Failed to read downloaded file: {}", e))?;
 
             let mut count = 0usize;
             for (idx, raw) in content.lines().enumerate() {
-                let line = raw.trim();
+                let line = raw.trim().trim_start_matches('\u{feff}');
                 if line.is_empty() || line.starts_with('#') {
                     continue;
                 }
                 if !is_ip_or_cidr(line) {
-                    let _ = std::fs::remove_file(&list_file);
+                    let _ = std::fs::remove_file(&download_file);
                     return Err(format!(
                         "Downloaded ipset list is not valid (line {}): {:?}",
                         idx + 1,
@@ -1667,16 +1719,23 @@ async fn update_ipset_list() -> Result<String, String> {
                 count += 1;
             }
             if count == 0 {
-                let _ = std::fs::remove_file(&list_file);
+                let _ = std::fs::remove_file(&download_file);
                 return Err("Downloaded ipset list is empty".to_string());
             }
-            Ok(format!("Updated successfully. {} IPs loaded.", count))
+            std::fs::copy(&download_file, &list_file)
+                .map_err(|e| format!("Failed to install downloaded IPSet list: {}", e))?;
+            let _ = std::fs::remove_file(&download_file);
+            Ok(count)
         }
         Ok(out) => {
+            let _ = std::fs::remove_file(&download_file);
             let stderr = String::from_utf8_lossy(&out.stderr);
             Err(format!("Failed to update IPSet list: {}", stderr))
         }
-        Err(e) => Err(format!("Failed to execute update command: {}", e)),
+        Err(e) => {
+            let _ = std::fs::remove_file(&download_file);
+            Err(format!("Failed to execute update command: {}", e))
+        }
     }
 }
 
@@ -1707,6 +1766,16 @@ fn is_ip_or_cidr(s: &str) -> bool {
     }
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CoreUpdateResult {
+    status: &'static str,
+    restart_attempted: bool,
+    restarted: bool,
+    ipset_updated: bool,
+    warnings: Vec<String>,
+}
+
 #[tauri::command]
 async fn download_and_install_update(
     app: tauri::AppHandle,
@@ -1714,7 +1783,7 @@ async fn download_and_install_update(
     use_proxy: Option<bool>,
     custom_proxy: Option<String>,
     state: State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<CoreUpdateResult, String> {
     let _operation_guard = CoreOperationGuard::acquire()?;
     let dir = find_binaries_dir();
     let installation = CoreInstallation::new(&dir)?;
@@ -1768,7 +1837,15 @@ async fn download_and_install_update(
                     "The installed core cannot be safely updated to this stable release".into(),
                 )
             }
-            CoreUpdateStatus::UpToDate => return Ok("Core is already up to date".into()),
+            CoreUpdateStatus::UpToDate => {
+                return Ok(CoreUpdateResult {
+                    status: "up_to_date",
+                    restart_attempted: false,
+                    restarted: false,
+                    ipset_updated: false,
+                    warnings: Vec::new(),
+                })
+            }
             _ => {}
         }
     }
@@ -1878,14 +1955,17 @@ async fn download_and_install_update(
     // Capture the exact runtime state only after the candidate is ready, just
     // before stopping anything managed by the application.
     let restart = restart_context(get_zapret_status(state.clone()), "update")?;
+    let should_restart = restart.is_some();
     let filters_status = get_filters_status();
     if restart.is_some() {
+        window.emit("core-update-phase", "stopping").ok();
         if let Err(error) = stop_zapret_internal() {
             installation.remove_owned_staging(&staging)?;
             return Err(format!("Cannot stop zapret before activation: {error}"));
         }
     }
 
+    window.emit("core-update-phase", "activating").ok();
     let operation = (|| {
         installation.activate(&staging, manager.provider())?;
         if let Err(error) = set_game_filter(filters_status.game_filter)
@@ -1908,6 +1988,19 @@ async fn download_and_install_update(
         Ok(())
     })();
 
+    let mut warnings = Vec::new();
+    let mut ipset_updated = false;
+    if operation.is_ok() {
+        window.emit("core-update-phase", "updating_ipset").ok();
+        match update_ipset_list_inner().await {
+            Ok(_) => ipset_updated = true,
+            Err(error) => warnings.push(format!("IPSet update failed: {error}")),
+        }
+    }
+
+    if should_restart {
+        window.emit("core-update-phase", "restarting").ok();
+    }
     let restart_result = restart.map(|(strategy, mode)| {
         start_zapret(app, strategy, mode, state)
             .map(|_| ())
@@ -1917,12 +2010,27 @@ async fn download_and_install_update(
         (Err(error), Some(Err(restart_error))) => Err(format!("{error}; {restart_error}")),
         (Err(error), _) => Err(error),
         (Ok(()), Some(Err(restart_error))) => {
+            warnings.push(restart_error);
             window.emit("download-progress", 100).ok();
-            Ok(format!("Update successful. Warning: {restart_error}"))
+            window.emit("core-update-phase", "complete").ok();
+            Ok(CoreUpdateResult {
+                status: "updated",
+                restart_attempted: true,
+                restarted: false,
+                ipset_updated,
+                warnings,
+            })
         }
         (Ok(()), _) => {
             window.emit("download-progress", 100).ok();
-            Ok("Update successful".to_string())
+            window.emit("core-update-phase", "complete").ok();
+            Ok(CoreUpdateResult {
+                status: "updated",
+                restart_attempted: should_restart,
+                restarted: should_restart,
+                ipset_updated,
+                warnings,
+            })
         }
     }
 }
@@ -3268,7 +3376,10 @@ fn graceful_exit(app: &tauri::AppHandle) {
         return;
     }
 
-    stop_zapret_on_exit(app.state::<AppState>());
+    let state = app.state::<AppState>();
+    let dll_path = find_binaries_dir().join("bin").join("WinDivert.dll");
+    state.traffic_monitor.stop(&dll_path);
+    stop_zapret_on_exit(state);
     if let Some(window) = app.get_webview_window("main") {
         if let Err(error) = window.destroy() {
             eprintln!("Failed to destroy main WebView window during shutdown: {error}");
@@ -3319,6 +3430,7 @@ pub fn run() {
             last_strategy: Mutex::new(None),
             translations: Mutex::new(None),
             temp_process_child: Mutex::new(None),
+            traffic_monitor: Arc::new(TrafficMonitor::default()),
         })
         .setup(|app| {
             let is_autostart = std::env::args().any(|a| a == "--autostart");
@@ -3524,6 +3636,9 @@ pub fn run() {
             get_ui_version_cmd,
             get_update_proxy,
             get_zapret_status,
+            start_traffic_monitor,
+            stop_traffic_monitor,
+            get_traffic_snapshot,
             get_filters_status,
             set_game_filter,
             set_ipset_filter,

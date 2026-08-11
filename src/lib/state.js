@@ -10,4 +10,5 @@ export const state = {
   currentSectionId: 'home',
   pendingNavId: null,
   cachedTestResults: null,
+  restartInProgress: false,
 };

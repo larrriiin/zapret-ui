@@ -1,5 +1,6 @@
 import { $, invoke } from '../lib/core.js';
 import { restartServiceIfRunning } from '../lib/restart.js';
+import { t } from '../lib/i18n.js';
 
 let availableFakes = [];
 let currentDiscordFake = 'quic_initial_steamcommunity_com';
@@ -28,7 +29,7 @@ function renderFakeOptionsList(type) {
   if (availableFakes.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'px-4 py-3 text-xs text-on-surface-variant/60 italic font-mono';
-    empty.textContent = 'No .bin fake files found';
+    empty.textContent = t('no_fake_files');
     listContainer.appendChild(empty);
     return;
   }

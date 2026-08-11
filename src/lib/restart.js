@@ -6,6 +6,32 @@ import { state } from './state.js';
 let pollStatus;
 export function setPollStatus(fn) { pollStatus = fn; }
 
+export function beginRestart(message = t('restart_overlay_desc')) {
+  state.restartInProgress = true;
+  showRestartStatus(t('status_restarting'), true);
+  const overlay = $('restart-operation-overlay');
+  const messageEl = $('restart-operation-message');
+  if (messageEl) messageEl.textContent = message;
+  if (overlay) {
+    overlay.classList.remove('hidden');
+    overlay.classList.add('flex');
+  }
+}
+
+export function updateRestartOverlay(message) {
+  const messageEl = $('restart-operation-message');
+  if (messageEl && message) messageEl.textContent = message;
+}
+
+export function endRestart() {
+  state.restartInProgress = false;
+  const overlay = $('restart-operation-overlay');
+  if (overlay) {
+    overlay.classList.add('hidden');
+    overlay.classList.remove('flex');
+  }
+}
+
 export function showRestartStatus(message, isRestarting = false) {
   const el = $('hero-status');
   if (!el) return;
@@ -28,18 +54,20 @@ export function showRestartStatus(message, isRestarting = false) {
 export async function restartServiceIfRunning() {
   const status = await invoke('get_zapret_status');
   if (status.running && status.strategy) {
-    showRestartStatus(t('restarting'), true);
+    beginRestart(t('restart_overlay_desc'));
     try {
       await invoke('stop_zapret');
       await new Promise((r) => setTimeout(r, 1000));
       await invoke('start_zapret', { strategy: status.strategy, mode: status.mode || 'service' });
       showRestartStatus(t('status_connected'));
+      endRestart();
       if (pollStatus) {
         await pollStatus();
         setTimeout(() => pollStatus(), 2000);
       }
     } catch (err) {
       console.error('Ошибка перезапуска:', err);
+      endRestart();
       showRestartStatus(t('restart_failed') + ': ' + err);
     }
   }

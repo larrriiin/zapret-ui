@@ -2,8 +2,13 @@ import { $, invoke } from '../lib/core.js';
 import { t } from '../lib/i18n.js';
 import { setStrategyValue, setPollStatus as setStrategyPollStatus } from './strategies.js';
 import { setPollStatus } from '../lib/restart.js';
+import { state } from '../lib/state.js';
 
 export function updateStatusUI(status) {
+  // During a controlled restart winws/service is briefly absent. Keep the
+  // explicit "Restarting" state instead of flashing "Disconnected".
+  if (state.restartInProgress) return;
+
   const trigger = $('strategy-trigger');
   const tempBtn = $('connect-temp-btn');
 
