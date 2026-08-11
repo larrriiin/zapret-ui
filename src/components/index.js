@@ -7,6 +7,7 @@ import sectionHome from './sections/home.html?raw';
 import sectionSites from './sections/sites.html?raw';
 import sectionIps from './sections/ips.html?raw';
 import sectionDiagnostics from './sections/diagnostics.html?raw';
+import sectionTraffic from './sections/traffic.html?raw';
 import sectionSettings from './sections/settings.html?raw';
 
 import modalCloseConfirm from './modals/close-confirm.html?raw';
@@ -39,6 +40,7 @@ export function mountComponents() {
   mount('sections-host', sectionSites);
   mount('sections-host', sectionIps);
   mount('sections-host', sectionDiagnostics);
+  mount('sections-host', sectionTraffic);
   mount('sections-host', sectionSettings);
 
   // Modals and the restart banner are top-level, mounted into <body>.

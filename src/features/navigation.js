@@ -3,7 +3,7 @@ import { state } from '../lib/state.js';
 import { showRestartModal } from '../lib/restart.js';
 import { loadUserLists } from './user-lists.js';
 
-const ALL_SECTIONS = ['section-home', 'section-sites', 'section-ips', 'section-diagnostics', 'section-settings'];
+const ALL_SECTIONS = ['section-home', 'section-sites', 'section-ips', 'section-diagnostics', 'section-traffic', 'section-settings'];
 
 export function showSection(sectionId) {
   if (state.pendingRestart && !state.restartGuardDismissed && sectionId !== state.currentSectionId) {
@@ -27,6 +27,7 @@ export function showSection(sectionId) {
 
   const prevId = state.currentSectionId;
   state.currentSectionId = sectionId;
+  document.dispatchEvent(new CustomEvent('zapret:section-changed', { detail: { sectionId } }));
 
   const prevSection = prevId ? $(`section-${prevId}`) : null;
   const nextSection = $(`section-${sectionId}`);
@@ -87,6 +88,10 @@ export function initNavigation() {
   $('nav-diagnostics')?.addEventListener('click', (e) => {
     e.preventDefault();
     showSection('diagnostics');
+  });
+  $('nav-traffic')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    showSection('traffic');
   });
   $('nav-settings')?.addEventListener('click', (e) => {
     e.preventDefault();

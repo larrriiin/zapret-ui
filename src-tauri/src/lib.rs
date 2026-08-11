@@ -2,7 +2,7 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Acquire `Mutex` access without panicking when the mutex is poisoned. If a
 /// previous holder panicked the data is still well-formed for our use-cases
@@ -33,10 +33,12 @@ use tauri_plugin_notification::NotificationExt;
 
 mod core;
 mod providers;
+mod traffic_monitor;
 use core::{
     compare_versions, resolve_stable, Checksum, CoreInstallation, CoreInstallationState,
     CoreManager, CoreUpdateStatus,
 };
+use traffic_monitor::{TrafficMonitor, TrafficSnapshot};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const GITHUB_USER_AGENT: &str = "zapret-ui-updater";
@@ -76,6 +78,7 @@ struct AppState {
     last_strategy: Mutex<Option<String>>,
     translations: Mutex<Option<TrayTranslations>>,
     temp_process_child: Mutex<Option<std::process::Child>>,
+    traffic_monitor: Arc<TrafficMonitor>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Clone)]
@@ -938,6 +941,44 @@ fn get_zapret_status(state: State<'_, AppState>) -> ZapretStatus {
         strategy: from_reg,
         mode,
     }
+}
+
+fn refresh_traffic_filter(state: State<'_, AppState>) {
+    let status = get_zapret_status(state.clone());
+    if !status.running {
+        state.traffic_monitor.clear_filter();
+        return;
+    }
+    let Some(strategy) = status.strategy else {
+        state.traffic_monitor.clear_filter();
+        return;
+    };
+    if let Ok(args) = parse_bat_args(&strategy) {
+        state.traffic_monitor.refresh_filter(&args, Some(strategy));
+    } else {
+        state.traffic_monitor.clear_filter();
+    }
+}
+
+#[tauri::command]
+fn start_traffic_monitor(state: State<'_, AppState>) -> Result<TrafficSnapshot, String> {
+    refresh_traffic_filter(state.clone());
+    let dll_path = find_binaries_dir().join("bin").join("WinDivert.dll");
+    state.traffic_monitor.start(&dll_path)?;
+    Ok(state.traffic_monitor.snapshot())
+}
+
+#[tauri::command]
+fn stop_traffic_monitor(state: State<'_, AppState>) -> TrafficSnapshot {
+    let dll_path = find_binaries_dir().join("bin").join("WinDivert.dll");
+    state.traffic_monitor.stop(&dll_path);
+    state.traffic_monitor.snapshot()
+}
+
+#[tauri::command]
+fn get_traffic_snapshot(state: State<'_, AppState>) -> TrafficSnapshot {
+    refresh_traffic_filter(state.clone());
+    state.traffic_monitor.snapshot()
 }
 
 /// Состояние Game Filter и IPSet Filter по файлам конфигурации.
@@ -3335,7 +3376,10 @@ fn graceful_exit(app: &tauri::AppHandle) {
         return;
     }
 
-    stop_zapret_on_exit(app.state::<AppState>());
+    let state = app.state::<AppState>();
+    let dll_path = find_binaries_dir().join("bin").join("WinDivert.dll");
+    state.traffic_monitor.stop(&dll_path);
+    stop_zapret_on_exit(state);
     if let Some(window) = app.get_webview_window("main") {
         if let Err(error) = window.destroy() {
             eprintln!("Failed to destroy main WebView window during shutdown: {error}");
@@ -3386,6 +3430,7 @@ pub fn run() {
             last_strategy: Mutex::new(None),
             translations: Mutex::new(None),
             temp_process_child: Mutex::new(None),
+            traffic_monitor: Arc::new(TrafficMonitor::default()),
         })
         .setup(|app| {
             let is_autostart = std::env::args().any(|a| a == "--autostart");
@@ -3591,6 +3636,9 @@ pub fn run() {
             get_ui_version_cmd,
             get_update_proxy,
             get_zapret_status,
+            start_traffic_monitor,
+            stop_traffic_monitor,
+            get_traffic_snapshot,
             get_filters_status,
             set_game_filter,
             set_ipset_filter,

@@ -1,6 +1,6 @@
 [package]
 name = "zapret-ui"
-version = "26.7.6"
+version = "26.8.1"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -35,12 +35,20 @@ zip = { version = "8", default-features = false, features = ["deflate", "deflate
 rfd = "0.15"
 tokio = { version = "1", features = ["net", "time"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Networking_WinSock",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+] }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
 
 [[bin]]
 name = "zapret-ui"
 path = "src/main.rs"
-
 
 

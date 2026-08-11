@@ -1,0 +1,138 @@
+<section id="section-traffic" class="hidden h-full overflow-y-auto px-6 py-8 pb-24">
+    <div class="max-w-6xl mx-auto space-y-5">
+        <div class="flex items-start justify-between gap-6">
+            <div>
+                <div class="flex items-center gap-3 mb-2">
+                    <span class="material-symbols-outlined text-secondary text-2xl">monitoring</span>
+                    <h2 class="font-headline text-xl font-black uppercase tracking-[0.16em] text-on-surface" data-i18n="traffic_title">Traffic monitor</h2>
+                    <span class="px-2 py-1 rounded-lg border border-primary/20 bg-primary/5 text-[9px] font-black uppercase tracking-widest text-primary" data-i18n="traffic_experimental">Experimental</span>
+                </div>
+                <p class="text-xs text-on-surface-variant/70 max-w-2xl leading-relaxed" data-i18n="traffic_desc">Real-time network activity without storing packet contents.</p>
+            </div>
+            <button id="traffic-toggle-btn" type="button"
+                class="shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl border border-secondary/25 bg-secondary/10 text-secondary hover:bg-secondary/15 transition-all text-[10px] font-black uppercase tracking-widest">
+                <span id="traffic-toggle-icon" class="material-symbols-outlined text-base">play_arrow</span>
+                <span id="traffic-toggle-text" data-i18n="traffic_start">Start monitoring</span>
+            </button>
+        </div>
+
+        <div id="traffic-status" class="flex items-center gap-3 rounded-xl border border-outline-variant/15 bg-surface-container-high/30 px-4 py-3">
+            <span id="traffic-status-dot" class="w-2 h-2 rounded-full bg-on-surface-variant/30"></span>
+            <span id="traffic-status-text" class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60" data-i18n="traffic_stopped">Monitoring is stopped</span>
+            <span id="traffic-strategy" class="hidden ml-auto text-[10px] font-mono text-primary/70"></span>
+        </div>
+
+        <div class="flex items-center justify-between gap-4 flex-wrap">
+            <div class="inline-flex rounded-xl border border-outline-variant/20 bg-surface-container-high/30 p-1">
+                <button id="traffic-mode-zapret" type="button" data-mode="zapret"
+                    class="traffic-mode-btn px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all bg-primary/15 text-primary">
+                    <span data-i18n="traffic_mode_zapret">Through Zapret</span>
+                </button>
+                <button id="traffic-mode-all" type="button" data-mode="all"
+                    class="traffic-mode-btn px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all text-on-surface-variant/50 hover:text-on-surface">
+                    <span data-i18n="traffic_mode_all">All traffic</span>
+                </button>
+            </div>
+            <div class="flex items-center gap-3 ml-auto">
+                <label class="flex items-center gap-2 cursor-pointer text-[10px] font-bold text-on-surface-variant/60 whitespace-nowrap">
+                    <input id="traffic-hide-system" type="checkbox" checked
+                        class="rounded border-outline-variant/30 bg-surface-container-high text-primary focus:ring-primary/30">
+                    <span data-i18n="traffic_hide_system">Hide system processes</span>
+                </label>
+                <label class="relative w-72 max-w-[36vw]">
+                    <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-sm text-on-surface-variant/40">search</span>
+                    <input id="traffic-search" type="search" autocomplete="off" spellcheck="false"
+                        data-i18n="traffic_search" placeholder="Process, IP or port"
+                        class="w-full rounded-xl border border-outline-variant/20 bg-surface-container-high/30 pl-9 pr-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/35 focus:border-primary/40 focus:ring-0">
+                </label>
+            </div>
+        </div>
+
+        <div id="traffic-focus-bar" class="hidden items-center gap-3 rounded-xl border border-tertiary/20 bg-tertiary/5 px-4 py-3">
+            <span class="material-symbols-outlined text-tertiary text-base">filter_center_focus</span>
+            <span class="text-[9px] font-black uppercase tracking-widest text-on-surface-variant/50" data-i18n="traffic_tracking">Tracking</span>
+            <span id="traffic-focus-label" class="text-xs font-semibold text-tertiary"></span>
+            <button id="traffic-focus-clear" type="button" class="ml-auto flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-on-surface-variant/50 hover:text-on-surface transition-colors">
+                <span class="material-symbols-outlined text-sm">close</span>
+                <span data-i18n="traffic_tracking_clear">Show everything</span>
+            </button>
+        </div>
+
+        <div class="grid grid-cols-3 gap-4">
+            <div class="rounded-2xl border border-outline-variant/15 bg-surface-container-high/25 p-4">
+                <p class="text-[9px] font-black uppercase tracking-[0.18em] text-on-surface-variant/45 mb-2" data-i18n="traffic_download">Download</p>
+                <p id="traffic-download-rate" class="font-headline text-xl font-bold text-secondary">0 B/s</p>
+                <p id="traffic-download-total" class="text-[10px] text-on-surface-variant/50 mt-1">0 B</p>
+            </div>
+            <div class="rounded-2xl border border-outline-variant/15 bg-surface-container-high/25 p-4">
+                <p class="text-[9px] font-black uppercase tracking-[0.18em] text-on-surface-variant/45 mb-2" data-i18n="traffic_upload">Upload</p>
+                <p id="traffic-upload-rate" class="font-headline text-xl font-bold text-primary">0 B/s</p>
+                <p id="traffic-upload-total" class="text-[10px] text-on-surface-variant/50 mt-1">0 B</p>
+            </div>
+            <div class="rounded-2xl border border-outline-variant/15 bg-surface-container-high/25 p-4">
+                <p class="text-[9px] font-black uppercase tracking-[0.18em] text-on-surface-variant/45 mb-2" data-i18n="traffic_connections">Connections</p>
+                <p id="traffic-connection-count" class="font-headline text-xl font-bold text-on-surface">0</p>
+                <p id="traffic-candidate-note" class="text-[10px] text-on-surface-variant/50 mt-1" data-i18n="traffic_candidates_note">Filter candidates</p>
+            </div>
+        </div>
+
+        <div class="rounded-2xl border border-outline-variant/15 bg-surface-container-high/20 p-4">
+            <div class="flex items-center justify-between mb-3">
+                <span class="text-[9px] font-black uppercase tracking-[0.18em] text-on-surface-variant/45" data-i18n="traffic_realtime">Real-time speed</span>
+                <div class="flex gap-4 text-[9px] font-bold uppercase tracking-wider">
+                    <span class="flex items-center gap-1.5 text-secondary"><i class="w-2 h-2 rounded-full bg-secondary"></i><span data-i18n="traffic_download">Download</span></span>
+                    <span class="flex items-center gap-1.5 text-primary"><i class="w-2 h-2 rounded-full bg-primary"></i><span data-i18n="traffic_upload">Upload</span></span>
+                </div>
+            </div>
+            <div class="relative h-48">
+                <canvas id="traffic-chart" class="absolute inset-0 w-full h-full"></canvas>
+                <div id="traffic-chart-empty" class="absolute inset-0 flex items-center justify-center text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/30" data-i18n="traffic_chart_waiting">Start monitoring to see the graph</div>
+            </div>
+        </div>
+
+        <div class="rounded-2xl border border-outline-variant/15 bg-surface-container-high/20 overflow-hidden">
+            <div class="flex items-center gap-1 px-3 py-2 border-b border-outline-variant/10">
+                <button id="traffic-tab-connections" type="button" data-tab="connections"
+                    class="traffic-tab-btn px-3 py-2 rounded-lg bg-primary/10 text-primary text-[9px] font-black uppercase tracking-widest transition-colors"
+                    data-i18n="traffic_connections">Connections</button>
+                <button id="traffic-tab-log" type="button" data-tab="log"
+                    class="traffic-tab-btn px-3 py-2 rounded-lg text-on-surface-variant/45 hover:text-on-surface text-[9px] font-black uppercase tracking-widest transition-colors"
+                    data-i18n="traffic_log">Connection log</button>
+                <span class="ml-auto text-[9px] text-on-surface-variant/35" data-i18n="traffic_focus_hint">Click a process or IP to track it</span>
+            </div>
+            <div id="traffic-connections-panel">
+                <div class="grid grid-cols-[minmax(150px,1.4fr)_minmax(180px,1.5fr)_72px_90px_90px_90px] gap-3 px-4 py-3 border-b border-outline-variant/10 text-[9px] font-black uppercase tracking-wider text-on-surface-variant/40">
+                    <span data-i18n="traffic_process">Process</span>
+                    <span data-i18n="traffic_remote">Remote endpoint</span>
+                    <span data-i18n="traffic_protocol">Protocol</span>
+                    <span class="text-right" data-i18n="traffic_download">Download</span>
+                    <span class="text-right" data-i18n="traffic_upload">Upload</span>
+                    <span class="text-right" data-i18n="traffic_total">Total</span>
+                </div>
+                <div id="traffic-connections-list" class="max-h-[420px] overflow-y-auto divide-y divide-outline-variant/10"></div>
+                <div id="traffic-connections-empty" class="px-4 py-12 text-center">
+                    <span class="material-symbols-outlined text-3xl text-on-surface-variant/20 mb-3">lan</span>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/35" data-i18n="traffic_no_connections">No matching connections yet</p>
+                </div>
+            </div>
+            <div id="traffic-log-panel" class="hidden">
+                <div class="grid grid-cols-[86px_minmax(140px,1fr)_minmax(180px,1.5fr)_110px] gap-3 px-4 py-3 border-b border-outline-variant/10 text-[9px] font-black uppercase tracking-wider text-on-surface-variant/40">
+                    <span data-i18n="traffic_time">Time</span>
+                    <span data-i18n="traffic_process">Process</span>
+                    <span data-i18n="traffic_remote">Remote endpoint</span>
+                    <span data-i18n="traffic_result">Result</span>
+                </div>
+                <div id="traffic-log-list" class="max-h-[420px] overflow-y-auto divide-y divide-outline-variant/10"></div>
+                <div id="traffic-log-empty" class="px-4 py-12 text-center">
+                    <span class="material-symbols-outlined text-3xl text-on-surface-variant/20 mb-3">receipt_long</span>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/35" data-i18n="traffic_log_empty">No connection events yet</p>
+                </div>
+            </div>
+        </div>
+
+        <p class="flex items-start gap-2 text-[10px] leading-relaxed text-on-surface-variant/45 px-1">
+            <span class="material-symbols-outlined text-sm text-primary/50 mt-px">info</span>
+            <span data-i18n="traffic_privacy_note">Only packet headers and byte counters are processed in memory. “Through Zapret” accounts for active winws profiles and IPSet rules, but hostlist-only matches cannot always be confirmed without inspecting encrypted names.</span>
+        </p>
+    </div>
+</section>
