@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "channel": "stable",
   "provider": "flowseal",
-  "version": "1.10.1",
+  "version": "1.10.2",
   "artifacts": [
     {
-      "url": "https://github.com/Flowseal/zapret-discord-youtube/releases/download/1.10.1/zapret-discord-youtube-1.10.1.zip",
+      "url": "https://github.com/Flowseal/zapret-discord-youtube/releases/download/1.10.2/zapret-discord-youtube-1.10.2.zip",
       "checksum": {
         "algorithm": "sha256",
-        "value": "f748d61fec75e4edc992cb5b09d554e914197c68c690384aceb61f143d8f76c9"
+        "value": "5eaac9fb2e4b1abd693487452a3ff3f4dfe9578a45f9ddddfa4bc1f5a6bb62d5"
       }
     }
   ]
