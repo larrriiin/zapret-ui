@@ -3,24 +3,146 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-
   <title>ZAPRET UI — Zapret GUI для Windows</title>
-
-  <meta name="description"
-        content="ZAPRET UI — современный графический интерфейс для zapret на Windows 10 и Windows 11. Установка, настройка и управление zapret без BAT-файлов.">
+  <meta name="description" content="Современный Zapret GUI для Windows 10 и 11. Управляйте стратегиями, обновляйте ядро и настраивайте пользовательские списки в одном приложении.">
+  <meta name="theme-color" content="#070d1f">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="ru_RU">
+  <meta property="og:title" content="ZAPRET UI — современный Zapret GUI для Windows">
+  <meta property="og:description" content="Привычное приложение вместо BAT-файлов. Стратегии, обновления ядра и служба Windows — в одном интерфейсе.">
+  <link rel="icon" type="image/png" href="./assets/icon.png">
+  <link rel="preload" href="./assets/inter-400.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="preload" href="./assets/inter-700.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="stylesheet" href="./styles.css">
 </head>
-
 <body>
-  <h1>ZAPRET UI</h1>
+  <a class="skip-link" href="#main">Перейти к содержимому</a>
+  <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="icon-download" viewBox="0 0 24 24">
+      <path d="M12 3v12m-5-5 5 5 5-5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>
+    </symbol>
+    <symbol id="icon-github" viewBox="0 0 24 24">
+      <path d="M9 19c-4.3 1.3-4.3-2.2-6-2.7m12 5v-3.4c0-1 .1-1.4-.5-2 3.3-.4 6.8-1.6 6.8-7.3a5.7 5.7 0 0 0-1.5-4 5.3 5.3 0 0 0-.1-4s-1.3-.4-4.3 1.5a14.8 14.8 0 0 0-7.8 0C4.6.2 3.3.6 3.3.6a5.3 5.3 0 0 0-.1 4 5.7 5.7 0 0 0-1.5 4c0 5.7 3.5 6.9 6.8 7.3-.6.6-.6 1.2-.5 2v3.4" transform="translate(1 1) scale(.9)"/>
+    </symbol>
+    <symbol id="icon-arrow" viewBox="0 0 24 24">
+      <path d="M5 12h14m-6-6 6 6-6 6"/>
+    </symbol>
+    <symbol id="icon-check" viewBox="0 0 24 24">
+      <path d="m5 12 4 4L19 6"/>
+    </symbol>
+    <symbol id="icon-windows" viewBox="0 0 24 24">
+      <path d="M3 3h7v7H3zm11 0h7v7h-7zM3 14h7v7H3zm11 0h7v7h-7z"/>
+    </symbol>
+  </svg>
 
-  <p>
-    Графический интерфейс для zapret на Windows 10 и Windows 11.
-  </p>
-
-  <p>
-    <a href="https://github.com/larrriiin/zapret-ui">
-      GitHub
+  <header class="site-header container">
+    <a class="brand" href="#" aria-label="ZAPRET UI — в начало страницы">
+      <img src="./assets/icon.png" width="36" height="36" alt="">
+      <span>ZAPRET <span class="brand-accent">UI</span></span>
     </a>
-  </p>
+    <nav aria-label="Основная навигация">
+      <a href="#features">Возможности</a>
+      <a href="#install">Установка</a>
+      <a class="nav-github" href="https://github.com/larrriiin/zapret-ui" aria-label="Исходный код на GitHub">
+        <svg class="icon" aria-hidden="true"><use href="#icon-github"/></svg>
+        <span>GitHub</span>
+      </a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero container" aria-labelledby="hero-title">
+      <h1 id="hero-title">ZAPRET <span>UI</span></h1>
+      <p class="hero-heading">Современный Zapret GUI<br class="mobile-break"> для Windows</p>
+      <p class="hero-description">Привычное приложение вместо BAT-файлов.<br> Выбирайте стратегию, обновляйте ядро и управляйте запуском в одном окне.</p>
+      <div class="hero-actions">
+        <a class="button button-primary" href="https://github.com/larrriiin/zapret-ui/releases/latest">
+          <svg class="icon" aria-hidden="true"><use href="#icon-download"/></svg>
+          Скачать для Windows
+        </a>
+        <a class="button button-secondary" href="https://github.com/larrriiin/zapret-ui">
+          <svg class="icon" aria-hidden="true"><use href="#icon-github"/></svg>
+          GitHub
+        </a>
+      </div>
+      <p class="platform-note">
+        <svg class="icon" aria-hidden="true"><use href="#icon-windows"/></svg>
+        Windows 10 / 11 <span aria-hidden="true">·</span> x64 <span aria-hidden="true">·</span> Открытый код
+      </p>
+
+      <figure class="app-preview">
+        <a class="screenshot-link" href="./assets/app-screenshot.png" target="_blank" rel="noopener" aria-label="Открыть скриншот ZAPRET UI в полном размере (новая вкладка)">
+          <img class="app-screenshot" src="./assets/app-screenshot.png" width="1102" height="979" alt="Главное окно ZAPRET UI: выбор стратегии, управление запуском, фильтры IPSet и Game Filter." fetchpriority="high" decoding="async">
+        </a>
+        <figcaption>
+          <span>Знакомый zapret. Удобный интерфейс.</span>
+          <a href="./assets/app-screenshot.png" target="_blank" rel="noopener" aria-label="Рассмотреть скриншот (новая вкладка)">Рассмотреть <svg class="icon" aria-hidden="true"><use href="#icon-arrow"/></svg></a>
+        </figcaption>
+      </figure>
+    </section>
+
+    <section class="features container section" id="features" aria-labelledby="features-title">
+      <div class="section-intro">
+        <h2 id="features-title">Всё нужное.<br><span>В одном месте.</span></h2>
+        <p>От первого запуска до обновления ядра — через понятный графический интерфейс.</p>
+      </div>
+      <ul class="feature-list">
+        <li>
+          <svg class="icon feature-check" aria-hidden="true"><use href="#icon-check"/></svg>
+          <div><h3>Управление стратегиями</h3><p>Выбирайте готовые стратегии Flowseal и переключайте их прямо в приложении.</p></div>
+        </li>
+        <li>
+          <svg class="icon feature-check" aria-hidden="true"><use href="#icon-check"/></svg>
+          <div><h3>Установка и обновление ядра</h3><p>Загружайте стабильное ядро, обновляйте его и возвращайтесь к предыдущей версии с сохранением настроек.</p></div>
+        </li>
+        <li>
+          <svg class="icon feature-check" aria-hidden="true"><use href="#icon-check"/></svg>
+          <div><h3>Служба Windows</h3><p>Запускайте стратегию как службу Windows или временно — чтобы проверить её работу в вашей сети.</p></div>
+        </li>
+        <li>
+          <svg class="icon feature-check" aria-hidden="true"><use href="#icon-check"/></svg>
+          <div><h3>Пользовательские списки</h3><p>Добавляйте свои домены, исключения, IP-адреса и подсети во встроенном редакторе.</p></div>
+        </li>
+      </ul>
+    </section>
+
+    <section class="installation section" id="install" aria-labelledby="install-title">
+      <div class="container">
+        <div class="installation-heading">
+          <div><h2 id="install-title">Несколько шагов —<br><span>и можно запускать.</span></h2><p>Как установить ZAPRET UI</p></div>
+          <a class="text-link" href="https://github.com/larrriiin/zapret-ui#ru">Подробная инструкция <svg class="icon" aria-hidden="true"><use href="#icon-arrow"/></svg></a>
+        </div>
+        <ol class="steps">
+          <li><span class="step-number" aria-hidden="true">01</span><h3>Скачайте приложение</h3><p>Откройте <a href="https://github.com/larrriiin/zapret-ui/releases/latest">последний релиз на GitHub</a>, скачайте установщик из раздела Assets и установите приложение.</p></li>
+          <li><span class="step-number" aria-hidden="true">02</span><h3>Установите ядро</h3><p>Откройте ZAPRET UI и следуйте подсказкам первого запуска. Приложение предложит загрузить стабильное ядро.</p></li>
+          <li><span class="step-number" aria-hidden="true">03</span><h3>Выберите стратегию</h3><p>Проверьте её во временном режиме. Если всё работает, запускайте как службу Windows.</p></li>
+        </ol>
+        <p class="install-note">Для работы нужны права администратора, а для загрузки ядра — подключение к интернету.</p>
+      </div>
+    </section>
+
+    <section class="open-source container section" aria-labelledby="source-title">
+      <div>
+        <h2 id="source-title">Открытый код.<br><span>Открыт для вашего вклада.</span></h2>
+        <p>ZAPRET UI — open-source проект под лицензией MIT.<br> Изучайте код, предлагайте улучшения и сообщайте об ошибках.</p>
+      </div>
+      <a class="button button-secondary" href="https://github.com/larrriiin/zapret-ui">
+        <svg class="icon" aria-hidden="true"><use href="#icon-github"/></svg>
+        Проект на GitHub <svg class="icon" aria-hidden="true"><use href="#icon-arrow"/></svg>
+      </a>
+    </section>
+  </main>
+
+  <footer class="site-footer container">
+    <div class="footer-top">
+      <a class="brand" href="#" aria-label="ZAPRET UI — в начало страницы"><img src="./assets/icon.png" width="28" height="28" alt=""><span>ZAPRET <span class="brand-accent">UI</span></span></a>
+      <nav aria-label="Ссылки проекта">
+        <a href="https://github.com/larrriiin/zapret-ui/releases/latest">Релизы</a>
+        <a href="https://github.com/larrriiin/zapret-ui/issues">Сообщить об ошибке</a>
+        <a href="https://github.com/larrriiin/zapret-ui/blob/main/LICENSE">MIT</a>
+      </nav>
+    </div>
+    <p>На основе <a href="https://github.com/bol-van/zapret">zapret</a> и ядра <a href="https://github.com/Flowseal/zapret-discord-youtube">Flowseal</a>. Независимый интерфейс для Windows.</p>
+  </footer>
 </body>
 </html>
