@@ -6,6 +6,10 @@ import { fileURLToPath } from 'node:url';
 
 import en from '../src/i18n/en.js';
 import ru from '../src/i18n/ru.js';
+import {
+  DIAGNOSTIC_MESSAGE_KEYS,
+  DIAGNOSTIC_NAME_KEYS,
+} from '../src/features/diagnostics.js';
 
 const sourceRoot = fileURLToPath(new URL('../src/', import.meta.url));
 
@@ -41,4 +45,27 @@ test('literal translation keys used by the UI exist in both dictionaries', async
     }
   }
   assert.deepEqual(missing, []);
+});
+
+test('every static backend diagnostic label and message has a frontend localization', async () => {
+  const rust = await readFile(fileURLToPath(new URL('../src-tauri/src/lib.rs', import.meta.url)), 'utf8');
+  const start = rust.indexOf('async fn run_diagnostics()');
+  const end = rust.indexOf('\n#[derive(serde::Serialize)]', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const diagnosticsSource = rust.slice(start, end);
+
+  const names = [...diagnosticsSource.matchAll(/name:\s*"([^"]+)"\.to_string\(\)/g)].map((match) => match[1]);
+  const messages = [...diagnosticsSource.matchAll(/message:\s*"([^"]+)"\s*\.to_string\(\)/g)].map((match) => match[1]);
+  const missingNames = [...new Set(names)].filter((name) => !(name in DIAGNOSTIC_NAME_KEYS));
+  const missingMessages = [...new Set(messages)].filter((message) => !(message in DIAGNOSTIC_MESSAGE_KEYS));
+  const mappedTranslationKeys = [
+    ...Object.values(DIAGNOSTIC_NAME_KEYS),
+    ...Object.values(DIAGNOSTIC_MESSAGE_KEYS),
+  ];
+  const missingTranslations = mappedTranslationKeys.filter((key) => !(key in ru) || !(key in en));
+
+  assert.deepEqual(missingNames, []);
+  assert.deepEqual(missingMessages, []);
+  assert.deepEqual(missingTranslations, []);
 });

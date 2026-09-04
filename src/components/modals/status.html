@@ -1,17 +1,28 @@
 <!-- Status Modal -->
 <div id="status-modal"
-    class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
-    <div class="glass-panel rounded-2xl border border-secondary/30 p-8 max-w-lg w-full mx-4">
-        <div class="flex items-center gap-3 mb-4">
-            <span class="material-symbols-outlined text-secondary text-2xl">query_stats</span>
-            <h3 class="font-headline text-lg font-bold text-on-surface uppercase tracking-widest" data-i18n="system_status">System Status</h3>
+    class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+    role="dialog" aria-modal="true" aria-labelledby="status-modal-title">
+    <div class="glass-panel rounded-2xl border border-secondary/30 p-6 max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-[0_24px_80px_rgba(0,0,0,0.55)]"
+        style="background: #0d1225;">
+        <div class="flex items-center justify-between gap-4 mb-5">
+            <div class="flex items-center gap-3 min-w-0">
+                <span class="material-symbols-outlined text-secondary text-2xl">query_stats</span>
+                <h3 id="status-modal-title" class="font-headline text-lg font-bold text-on-surface" data-i18n="system_status">System Status</h3>
+            </div>
+            <button id="status-modal-close" type="button"
+                class="w-9 h-9 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-white/5 transition-colors flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary/70"
+                data-i18n="close" data-i18n-attr="aria-label" aria-label="Close">
+                <span class="material-symbols-outlined text-xl">close</span>
+            </button>
         </div>
-        <div class="bg-[#0a1022] rounded-xl p-6 font-mono text-sm leading-relaxed text-secondary/90 border border-outline-variant/10 whitespace-pre-wrap" id="status-content" data-i18n="checking_status">
-            Checking status...
+        <div id="status-content" class="space-y-3" aria-live="polite" aria-busy="false">
+            <div class="rounded-xl bg-surface-container-high/70 p-5 text-sm text-on-surface-variant" data-i18n="checking_status">
+                Checking status...
+            </div>
         </div>
         <div class="mt-6 flex justify-end">
-            <button id="status-modal-close"
-                class="px-8 py-3 bg-secondary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:opacity-80 transition-colors" data-i18n="close">
+            <button id="status-modal-done" type="button"
+                class="px-6 py-3 bg-secondary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface" data-i18n="close">
                 Close
             </button>
         </div>

@@ -56,10 +56,10 @@ async function startWizardProgress(testType) {
   logEl.innerHTML = '';
 
   wizardUnlisten.progress = await listen('test-progress', (event) => {
-    const { line, kind } = event.payload;
+    const { line, messageKey, params, kind } = event.payload;
     const row = document.createElement('div');
     row.className = logColors[kind] || 'text-on-surface/80';
-    row.textContent = line;
+    row.textContent = messageKey ? t(messageKey, params || {}) : line;
     logEl.appendChild(row);
     logEl.scrollTop = logEl.scrollHeight;
   });
@@ -104,7 +104,7 @@ async function startWizardProgress(testType) {
     if (logBox) {
       const row = document.createElement('div');
       row.className = 'text-error-dim';
-      row.textContent = `${t('error')}: ${err}`;
+      row.textContent = `${t('error')}: ${t(String(err))}`;
       logBox.appendChild(row);
       logBox.scrollTop = logBox.scrollHeight;
     }
@@ -160,7 +160,7 @@ function renderWizardResults(results, best) {
         ${isBest ? `<span class="text-[9px] bg-secondary/20 text-secondary px-2 py-0.5 rounded-full uppercase tracking-widest shrink-0">${t('wizard_best_badge')}</span>` : ''}
       </div>
       <div class="text-[10px] text-on-surface-variant text-right shrink-0">
-        HTTP ${r.http_ok}/${total} · Ping ${pingTxt}
+        HTTP ${r.http_ok}/${total} · ${t('ping_label')} ${pingTxt}
       </div>
     `;
     list.appendChild(row);

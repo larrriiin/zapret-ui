@@ -8,6 +8,7 @@ use std::{
 use super::{Checksum, CoreProvider};
 
 pub const MANIFEST_NAME: &str = ".zapret-ui-core.json";
+const MANIFEST_BACKUP_NAME: &str = ".zapret-ui-core.json.backup";
 const SCHEMA_VERSION: u32 = 1;
 const STAGING_PREFIX: &str = ".binaries-staging-";
 const SWAP_NAME: &str = ".binaries-rollback-swap";
@@ -19,6 +20,8 @@ const USER_FILES: [&str; 3] = [
     "ipset-exclude-user.txt",
 ];
 const ACTIVE_FAKE_FILES: [&str; 2] = ["ACTIVE_DISCORD_UDP.bin", "ACTIVE_GAME_UDP.bin"];
+const CUSTOM_STRATEGIES_DIR: &str = "custom-strategies";
+static MANIFEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -57,7 +60,17 @@ impl CoreManifest {
     }
 
     pub fn read(root: &Path) -> Result<Self, String> {
+        let _guard = MANIFEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let path = root.join(MANIFEST_NAME);
+        let backup = root.join(MANIFEST_BACKUP_NAME);
+        if !path.exists() && backup.is_file() {
+            fs::rename(&backup, &path).map_err(|e| format!("Cannot recover core manifest: {e}"))?;
+        } else if path.is_file() && backup.exists() {
+            fs::remove_file(&backup)
+                .map_err(|e| format!("Cannot remove stale core manifest backup: {e}"))?;
+        }
         let data = fs::read(&path).map_err(|e| {
             format!(
                 "Core manifest is missing or unreadable ({}): {e}",
@@ -76,13 +89,45 @@ impl CoreManifest {
     }
 
     pub fn write_atomic(&self, root: &Path) -> Result<(), String> {
+        let _guard = MANIFEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let path = root.join(MANIFEST_NAME);
+        let backup = root.join(MANIFEST_BACKUP_NAME);
         let temporary = root.join(format!("{MANIFEST_NAME}.tmp-{}", std::process::id()));
+        if temporary.exists() {
+            fs::remove_file(&temporary)
+                .map_err(|e| format!("Cannot remove stale temporary core manifest: {e}"))?;
+        }
+        if backup.exists() {
+            if path.exists() {
+                fs::remove_file(&backup)
+                    .map_err(|e| format!("Cannot remove stale core manifest backup: {e}"))?;
+            } else {
+                fs::rename(&backup, &path)
+                    .map_err(|e| format!("Cannot recover core manifest before writing: {e}"))?;
+            }
+        }
         let data = serde_json::to_vec_pretty(self)
             .map_err(|e| format!("Cannot serialize core manifest: {e}"))?;
         fs::write(&temporary, data)
             .map_err(|e| format!("Cannot write temporary core manifest: {e}"))?;
-        fs::rename(&temporary, &path).map_err(|e| format!("Cannot activate core manifest: {e}"))
+        if path.exists() {
+            fs::rename(&path, &backup)
+                .map_err(|e| format!("Cannot back up current core manifest: {e}"))?;
+        }
+        if let Err(error) = fs::rename(&temporary, &path) {
+            if backup.exists() {
+                let _ = fs::rename(&backup, &path);
+            }
+            let _ = fs::remove_file(&temporary);
+            return Err(format!("Cannot activate core manifest: {error}"));
+        }
+        if backup.exists() {
+            fs::remove_file(&backup)
+                .map_err(|e| format!("Cannot remove committed core manifest backup: {e}"))?;
+        }
+        Ok(())
     }
 }
 
@@ -147,6 +192,12 @@ impl CoreInstallation {
 
     pub fn prepare(&self, provider: &dyn CoreProvider) -> Result<(), String> {
         self.recover()?;
+        self.prepare_active(provider)
+    }
+
+    /// Imports/migrates only the active installation. Unlike `prepare`, this
+    /// does not inspect update staging directories and is safe for UI reads.
+    pub fn prepare_active(&self, provider: &dyn CoreProvider) -> Result<(), String> {
         if self.active.is_dir() && !self.active.join(MANIFEST_NAME).exists() {
             let (version, count) = provider.validate_installation()?;
             CoreManifest::new(
@@ -158,6 +209,9 @@ impl CoreInstallation {
                 true,
             )
             .write_atomic(&self.active)?;
+        }
+        if self.active.is_dir() && self.active.join(MANIFEST_NAME).is_file() {
+            provider.finalize_installation()?;
         }
         Ok(())
     }
@@ -212,6 +266,7 @@ impl CoreInstallation {
         serde_json::to_vec(&manifest)
             .map_err(|e| format!("Cannot serialize core manifest: {e}"))?;
         manifest.write_atomic(root)?;
+        provider.finalize_installation()?;
         Ok(manifest)
     }
 
@@ -234,6 +289,38 @@ impl CoreInstallation {
                     .map_err(|e| format!("Cannot preserve selected fake {name}: {e}"))?;
             }
         }
+        let custom_source = from.join(CUSTOM_STRATEGIES_DIR);
+        if custom_source.is_dir() {
+            let custom_destination = to.join(CUSTOM_STRATEGIES_DIR);
+            fs::create_dir_all(&custom_destination)
+                .map_err(|e| format!("Cannot create custom strategies directory: {e}"))?;
+            for entry in fs::read_dir(&custom_source)
+                .map_err(|e| format!("Cannot read custom strategies directory: {e}"))?
+            {
+                let entry = entry.map_err(|e| format!("Cannot read custom strategy: {e}"))?;
+                let file_type = entry
+                    .file_type()
+                    .map_err(|e| format!("Cannot inspect custom strategy: {e}"))?;
+                if file_type.is_symlink() {
+                    return Err(format!(
+                        "Custom strategy cannot be a symbolic link: {}",
+                        entry.path().display()
+                    ));
+                }
+                let path = entry.path();
+                if !file_type.is_file()
+                    || !path
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("bat"))
+                {
+                    continue;
+                }
+                fs::copy(&path, custom_destination.join(entry.file_name())).map_err(|e| {
+                    format!("Cannot preserve custom strategy {}: {e}", path.display())
+                })?;
+            }
+        }
         Ok(())
     }
 
@@ -250,7 +337,10 @@ impl CoreInstallation {
             }
             fs::rename(staging, &self.active)
                 .map_err(|e| format!("Cannot activate first core: {e}"))?;
-            if let Err(error) = active_provider.validate_installation() {
+            if let Err(error) = active_provider
+                .validate_installation()
+                .and_then(|_| active_provider.finalize_installation())
+            {
                 self.assert_owned(&self.active, "binaries")?;
                 fs::remove_dir_all(&self.active).map_err(|cleanup| {
                     format!(
@@ -286,7 +376,10 @@ impl CoreInstallation {
                 "Activation failed ({error}); automatic rollback completed"
             ));
         }
-        if let Err(error) = active_provider.validate_installation() {
+        if let Err(error) = active_provider
+            .validate_installation()
+            .and_then(|_| active_provider.finalize_installation())
+        {
             let failed = self
                 .parent
                 .join(format!("{STAGING_PREFIX}failed-{}", std::process::id()));
@@ -320,7 +413,9 @@ impl CoreInstallation {
         previous_provider: &dyn CoreProvider,
     ) -> Result<CoreInstallationState, String> {
         self.rollback_with_post_validation(previous_provider, || {
-            active_provider.validate_installation().map(|_| ())
+            active_provider
+                .validate_installation()
+                .and_then(|_| active_provider.finalize_installation())
         })
     }
 
@@ -334,6 +429,7 @@ impl CoreInstallation {
         }
         CoreManifest::read(&self.previous)?;
         previous_provider.validate_installation()?;
+        previous_provider.finalize_installation()?;
         self.preserve_user_files(&self.active, &self.previous)?;
         let swap = self.parent.join(SWAP_NAME);
         if swap.exists() {
@@ -589,14 +685,7 @@ mod tests {
     }
 
     fn manifest(version: &str) -> CoreManifest {
-        CoreManifest::new(
-            "fixture-provider".into(),
-            version.into(),
-            None,
-            None,
-            1,
-            false,
-        )
+        CoreManifest::new("flowseal".into(), version.into(), None, None, 1, false)
     }
 
     #[test]
@@ -604,6 +693,9 @@ mod tests {
         let temp = Temp::new();
         manifest("1.2.3").write_atomic(&temp.0).unwrap();
         assert_eq!(CoreManifest::read(&temp.0).unwrap(), manifest("1.2.3"));
+        manifest("1.2.4").write_atomic(&temp.0).unwrap();
+        assert_eq!(CoreManifest::read(&temp.0).unwrap(), manifest("1.2.4"));
+        assert!(!temp.0.join(MANIFEST_BACKUP_NAME).exists());
         let mut invalid = manifest("1.2.3");
         invalid.schema_version = 99;
         fs::write(
@@ -626,7 +718,33 @@ mod tests {
         let imported = CoreManifest::read(&active).unwrap();
         assert!(imported.imported_legacy);
         assert_eq!(imported.version, "1.0.0");
+        assert!(!active.join("service.bat").exists());
+        assert_eq!(provider(&active).local_version(), "1.0.0");
+        assert!(provider(&active).is_installed());
         assert!(!installation.state().rollback_available);
+    }
+
+    #[test]
+    fn preserves_custom_strategies_during_core_replacement() {
+        let temp = Temp::new();
+        let active = temp.0.join("binaries");
+        let staging = temp.0.join("candidate");
+        fs::create_dir_all(active.join(CUSTOM_STRATEGIES_DIR)).unwrap();
+        fs::create_dir_all(staging.join("bin")).unwrap();
+        fs::create_dir_all(staging.join("lists")).unwrap();
+        fs::write(
+            active.join(CUSTOM_STRATEGIES_DIR).join("mine.bat"),
+            "winws.exe --wf-tcp=80",
+        )
+        .unwrap();
+
+        let installation = CoreInstallation::new(&active).unwrap();
+        installation.preserve_user_files(&active, &staging).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(staging.join(CUSTOM_STRATEGIES_DIR).join("mine.bat")).unwrap(),
+            "winws.exe --wf-tcp=80"
+        );
     }
 
     #[test]
@@ -635,21 +753,30 @@ mod tests {
         let active = temp.0.join("binaries");
         fs::create_dir(&active).unwrap();
         let installation = CoreInstallation::new(&active).unwrap();
-        for missing in ["service.bat", "bin/winws.exe", "utils/test zapret.ps1"] {
-            let staging = installation.create_staging().unwrap();
-            fixture(&staging, "2.0.0");
-            fs::remove_file(staging.join(missing)).unwrap();
-            assert!(installation
-                .validate_and_manifest(&staging, "2.0.0", None, None, provider(&staging))
-                .unwrap_err()
-                .contains("Missing required"));
-            installation.remove_owned_staging(&staging).unwrap();
-        }
+        let staging = installation.create_staging().unwrap();
+        fixture(&staging, "2.0.0");
+        fs::remove_file(staging.join("bin/winws.exe")).unwrap();
+        assert!(installation
+            .validate_and_manifest(&staging, "2.0.0", None, None, provider(&staging))
+            .unwrap_err()
+            .contains("Missing required"));
+        installation.remove_owned_staging(&staging).unwrap();
+        let staging = installation.create_staging().unwrap();
+        fixture(&staging, "2.0.0");
+        fs::remove_file(staging.join("service.bat")).unwrap();
+        assert!(installation
+            .validate_and_manifest(&staging, "2.0.0", None, None, provider(&staging))
+            .unwrap_err()
+            .contains("manifest"));
+        installation.remove_owned_staging(&staging).unwrap();
         let staging = installation.create_staging().unwrap();
         fixture(&staging, "2.0.0");
         installation
             .validate_and_manifest(&staging, "2.0.0", None, None, provider(&staging))
             .unwrap();
+        assert!(!staging.join("service.bat").exists());
+        assert!(!staging.join("utils/test zapret.ps1").exists());
+        assert_eq!(provider(&staging).local_version(), "2.0.0");
     }
 
     #[test]
@@ -796,6 +923,12 @@ mod tests {
         let previous = temp.0.join("binaries.previous");
         fixture(&active, "1.0.0");
         manifest("1.0.0").write_atomic(&active).unwrap();
+        fs::create_dir(active.join(CUSTOM_STRATEGIES_DIR)).unwrap();
+        fs::write(
+            active.join(CUSTOM_STRATEGIES_DIR).join("mine.bat"),
+            "winws.exe --wf-tcp=443",
+        )
+        .unwrap();
         fixture(&previous, "0.9.0");
         manifest("0.9.0").write_atomic(&previous).unwrap();
         let installation = CoreInstallation::new(&active).unwrap();
@@ -807,6 +940,14 @@ mod tests {
         installation.activate(&staging, provider(&active)).unwrap();
         assert_eq!(CoreManifest::read(&active).unwrap().version, "2.0.0");
         assert_eq!(CoreManifest::read(&previous).unwrap().version, "1.0.0");
+        assert!(active
+            .join(CUSTOM_STRATEGIES_DIR)
+            .join("mine.bat")
+            .is_file());
+        assert!(provider(&active)
+            .strategies()
+            .unwrap()
+            .contains(&"mine".to_string()));
         assert!(!temp.0.join(PREVIOUS_BACKUP_NAME).exists());
     }
 
@@ -841,7 +982,7 @@ mod tests {
         installation
             .validate_and_manifest(&staging, "2.0.0", None, None, provider(&staging))
             .unwrap();
-        fs::remove_file(staging.join("service.bat")).unwrap();
+        fs::remove_file(staging.join("bin/winws.exe")).unwrap();
         assert!(installation.activate(&staging, provider(&active)).is_err());
         assert!(!active.exists());
         installation.recover().unwrap();
@@ -864,7 +1005,7 @@ mod tests {
         installation
             .validate_and_manifest(&staging, "2.0.0", None, None, provider(&staging))
             .unwrap();
-        fs::remove_file(staging.join("service.bat")).unwrap();
+        fs::remove_file(staging.join("bin/winws.exe")).unwrap();
         assert!(installation
             .activate(&staging, provider(&active))
             .unwrap_err()

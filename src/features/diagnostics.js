@@ -1,23 +1,100 @@
 import { $, invoke } from '../lib/core.js';
-import { t } from '../lib/i18n.js';
+import { getCurrentLang, onLangChange, t } from '../lib/i18n.js';
 
 let lastDiagnosticsResults = null;
 let showingAllDiagnostics = false;
 
+export const DIAGNOSTIC_NAME_KEYS = {
+  'Base Filtering Engine': 'diagnostic_bfe_name',
+  'System Proxy': 'diagnostic_proxy_name',
+  'TCP Timestamps': 'diagnostic_tcp_timestamps_name',
+  Adguard: 'diagnostic_adguard_name',
+  'Killer Network Service': 'diagnostic_killer_name',
+  'Intel Connectivity Network Service': 'diagnostic_intel_connectivity_name',
+  'Check Point': 'diagnostic_checkpoint_name',
+  SmartByte: 'diagnostic_smartbyte_name',
+  'VPN Services': 'diagnostic_vpn_name',
+  'Secure DNS': 'diagnostic_secure_dns_name',
+  'Hosts File': 'diagnostic_hosts_name',
+  WinDivert: 'diagnostic_windivert_name',
+};
+
+export const DIAGNOSTIC_MESSAGE_KEYS = {
+  'Service is running': 'diagnostic_bfe_running',
+  'Service is not running. This service is required for zapret to work': 'diagnostic_bfe_stopped',
+  'Failed to check service status': 'diagnostic_bfe_check_failed',
+  'No system proxy detected': 'diagnostic_proxy_not_detected',
+  'Proxy check passed': 'diagnostic_proxy_check_passed',
+  'TCP timestamps are enabled': 'diagnostic_tcp_timestamps_enabled',
+  'TCP timestamps were disabled. Attempted to enable them.': 'diagnostic_tcp_timestamps_enabled_automatically',
+  'Failed to check TCP timestamps': 'diagnostic_tcp_timestamps_check_failed',
+  'Adguard process found. Adguard may cause problems with Discord': 'diagnostic_adguard_found',
+  'Adguard not detected': 'diagnostic_adguard_not_detected',
+  'Adguard check passed': 'diagnostic_adguard_check_passed',
+  'Killer services found. Killer conflicts with zapret': 'diagnostic_killer_found',
+  'Killer services not detected': 'diagnostic_killer_not_detected',
+  'Killer check passed': 'diagnostic_killer_check_passed',
+  'Intel Connectivity Network Service found. It conflicts with zapret': 'diagnostic_intel_connectivity_found',
+  'Intel Connectivity service not detected': 'diagnostic_intel_connectivity_not_detected',
+  'Intel Connectivity check passed': 'diagnostic_intel_connectivity_check_passed',
+  'Check Point services found. Check Point conflicts with zapret': 'diagnostic_checkpoint_found',
+  'Check Point services not detected': 'diagnostic_checkpoint_not_detected',
+  'Check Point check passed': 'diagnostic_checkpoint_check_passed',
+  'SmartByte services found. SmartByte conflicts with zapret': 'diagnostic_smartbyte_found',
+  'SmartByte services not detected': 'diagnostic_smartbyte_not_detected',
+  'SmartByte check passed': 'diagnostic_smartbyte_check_passed',
+  'VPN services found. Some VPNs can conflict with zapret': 'diagnostic_vpn_found',
+  'No VPN services detected': 'diagnostic_vpn_not_detected',
+  'VPN check passed': 'diagnostic_vpn_check_passed',
+  'Make sure you have configured secure DNS in a browser with some non-default DNS service provider. If you use Windows 11 you can configure encrypted DNS in the Settings to hide this warning': 'diagnostic_secure_dns_not_configured',
+  'Secure DNS is configured': 'diagnostic_secure_dns_configured',
+  'Failed to check DNS configuration': 'diagnostic_secure_dns_check_failed',
+  'Your hosts file contains entries for youtube.com or youtu.be. This may cause problems with YouTube access': 'diagnostic_hosts_youtube_found',
+  'No YouTube entries in hosts file': 'diagnostic_hosts_clean',
+  'WinDivert driver is running': 'diagnostic_windivert_running',
+  'WinDivert driver not active (will be started when needed)': 'diagnostic_windivert_inactive',
+  'WinDivert check passed': 'diagnostic_windivert_check_passed',
+};
+
+function getDiagnosticName(check) {
+  const key = DIAGNOSTIC_NAME_KEYS[check?.name];
+  return key ? t(key) : (check?.name || t('diagnostic_unknown_name'));
+}
+
+function getDiagnosticMessage(check) {
+  const message = check?.message || '';
+  const proxyPrefix = 'System proxy is enabled: ';
+  const proxySuffix = ". Make sure it's valid or disable it if you don't use a proxy";
+  if (message.startsWith(proxyPrefix) && message.endsWith(proxySuffix)) {
+    const proxy = message.slice(proxyPrefix.length, -proxySuffix.length);
+    return t('diagnostic_proxy_enabled', { proxy });
+  }
+  const key = DIAGNOSTIC_MESSAGE_KEYS[message];
+  return key ? t(key) : message;
+}
+
+function getDiagnosticStatus(status) {
+  const key = `diagnostics_status_${status}`;
+  const translated = t(key);
+  return translated === key ? status : translated;
+}
+
 function buildDiagnosticsReport(result) {
   if (!result || !result.checks) return '';
   const lines = [];
-  lines.push(`Zapret UI diagnostics — ${new Date().toISOString()}`);
+  const locale = getCurrentLang() === 'ru' ? 'ru-RU' : 'en-US';
+  const timestamp = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'medium' }).format(new Date());
+  lines.push(`${t('diagnostics_report_title')} — ${timestamp}`);
   lines.push('');
   for (const check of result.checks) {
-    const status = (check.status || '').toUpperCase();
-    lines.push(`[${status}] ${check.name}`);
-    if (check.message) lines.push(`    ${check.message}`);
+    const status = getDiagnosticStatus(check.status).toUpperCase();
+    lines.push(`[${status}] ${getDiagnosticName(check)}`);
+    if (check.message) lines.push(`    ${getDiagnosticMessage(check)}`);
     if (check.link) lines.push(`    ${check.link}`);
   }
   if (result.vpn_services) {
     lines.push('');
-    lines.push('[INFO] VPN services found');
+    lines.push(`[${t('diagnostics_status_info').toUpperCase()}] ${t('vpn_services_found')}`);
     lines.push(`    ${result.vpn_services}`);
   }
   return lines.join('\n');
@@ -81,19 +158,31 @@ function renderDiagnostics(result, showAll) {
     }
     row.classList.add(borderColor);
 
-    let linkHtml = '';
+    const statusIcon = document.createElement('span');
+    statusIcon.className = `material-symbols-outlined ${iconColor} text-xl mt-0.5 shrink-0`;
+    statusIcon.textContent = icon;
+
+    const content = document.createElement('div');
+    content.className = 'flex-1 min-w-0';
+    const title = document.createElement('h4');
+    title.className = 'font-headline text-sm font-bold text-on-surface';
+    title.textContent = getDiagnosticName(check);
+    const message = document.createElement('p');
+    message.className = 'text-xs text-on-surface-variant mt-1 leading-relaxed break-words';
+    message.textContent = getDiagnosticMessage(check);
+    content.append(title, message);
+
     if (check.link) {
-      linkHtml = `<a href="${check.link}" target="_blank" class="text-xs text-primary hover:underline mt-1 block">${check.link}</a>`;
+      const link = document.createElement('a');
+      link.href = check.link;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.className = 'text-xs text-primary hover:underline underline-offset-4 mt-1 block break-all';
+      link.textContent = check.link;
+      content.appendChild(link);
     }
 
-    row.innerHTML = `
-      <span class="material-symbols-outlined ${iconColor} text-xl mt-0.5">${icon}</span>
-      <div class="flex-1">
-        <h4 class="font-headline text-sm font-bold text-on-surface">${check.name}</h4>
-        <p class="text-xs text-on-surface-variant mt-1">${check.message}</p>
-        ${linkHtml}
-      </div>
-    `;
+    row.append(statusIcon, content);
     diagnosticsResults.appendChild(row);
   });
 
@@ -118,16 +207,25 @@ function renderDiagnostics(result, showAll) {
   if (result.vpn_services) {
     const vpnRow = document.createElement('div');
     vpnRow.className = 'bg-white/5 rounded-xl border border-primary/30 p-4 mt-3';
-    vpnRow.innerHTML = `
-      <div class="flex items-start gap-3">
-        <span class="material-symbols-outlined text-primary text-xl mt-0.5">vpn_key</span>
-        <div class="flex-1">
-          <h4 class="font-headline text-sm font-bold text-on-surface">${t('vpn_services_found')}</h4>
-          <p class="text-xs text-on-surface-variant mt-1">${result.vpn_services}</p>
-          <p class="text-xs text-primary mt-2">${t('vpn_disable_hint')}</p>
-        </div>
-      </div>
-    `;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'flex items-start gap-3';
+    const icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined text-primary text-xl mt-0.5 shrink-0';
+    icon.textContent = 'vpn_key';
+    const content = document.createElement('div');
+    content.className = 'flex-1 min-w-0';
+    const title = document.createElement('h4');
+    title.className = 'font-headline text-sm font-bold text-on-surface';
+    title.textContent = t('vpn_services_found');
+    const services = document.createElement('p');
+    services.className = 'text-xs text-on-surface-variant mt-1 leading-relaxed break-words';
+    services.textContent = result.vpn_services;
+    const hint = document.createElement('p');
+    hint.className = 'text-xs text-primary mt-2';
+    hint.textContent = t('vpn_disable_hint');
+    content.append(title, services, hint);
+    wrapper.append(icon, content);
+    vpnRow.appendChild(wrapper);
     diagnosticsResults.appendChild(vpnRow);
   }
 }
@@ -163,11 +261,11 @@ export function initDiagnostics() {
       }
     } catch (err) {
       if (diagnosticsResults) {
-        diagnosticsResults.innerHTML = `
-          <div class="bg-white/5 rounded-xl border border-error-dim/30 p-4 text-error-dim text-sm">
-            ${t('diagnostics_failed')}: ${err}
-          </div>
-        `;
+        diagnosticsResults.replaceChildren();
+        const error = document.createElement('div');
+        error.className = 'bg-white/5 rounded-xl border border-error-dim/30 p-4 text-error-dim text-sm break-words';
+        error.textContent = `${t('diagnostics_failed')}: ${err}`;
+        diagnosticsResults.appendChild(error);
       }
     } finally {
       runDiagnosticsBtn.disabled = false;
@@ -201,6 +299,9 @@ export function initDiagnostics() {
   });
 
   initSiteChecker();
+  onLangChange(() => {
+    if (lastDiagnosticsResults) renderDiagnostics(lastDiagnosticsResults, showingAllDiagnostics);
+  });
 }
 
 function initSiteChecker() {

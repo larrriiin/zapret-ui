@@ -81,8 +81,13 @@ jobs:
         run: |
           case "$COMPARISON" in
             equal)
-              echo "Flowseal $LATEST_VERSION is already stable; no branch or PR is needed."
-              echo "promote=false" >> "$GITHUB_OUTPUT"
+              if [ -s core-channel/stable.json.sig ]; then
+                echo "Flowseal $LATEST_VERSION is already stable and has a detached signature."
+                echo "promote=false" >> "$GITHUB_OUTPUT"
+              else
+                echo "Flowseal $LATEST_VERSION is already stable but must be signed."
+                echo "promote=true" >> "$GITHUB_OUTPUT"
+              fi
               ;;
             older)
               echo "::warning::Managed stable $CURRENT_VERSION is newer than latest Flowseal release $LATEST_VERSION; refusing to downgrade."
@@ -136,11 +141,14 @@ jobs:
           changed="$(git diff --name-only main..."$remote_ref")"
           manifest="$(mktemp)"
           git show "$remote_ref:core-channel/stable.json" > "$manifest"
-          if [ "$changed" != "core-channel/stable.json" ] || \
+          expected_changed="$(printf '%s\n' core-channel/stable.json core-channel/stable.json.sig)"
+          changed_sorted="$(printf '%s\n' "$changed" | sort)"
+          if { [ "$changed_sorted" != "$(printf '%s\n' "$expected_changed" | sort)" ] && [ "$changed_sorted" != "core-channel/stable.json.sig" ]; } || \
              [ "$(jq -r '.version' "$manifest")" != "$VERSION" ] || \
              [ "$(jq -r '.artifacts | length' "$manifest")" != 1 ] || \
              [ "$(jq -r '.artifacts[0].url' "$manifest")" != "$ASSET_URL" ] || \
-             ! jq -e '.artifacts[0].checksum | .algorithm == "sha256" and (.value | test("^[0-9a-f]{64}$"))' "$manifest" >/dev/null; then
+             ! jq -e '.artifacts[0].checksum | .algorithm == "sha256" and (.value | test("^[0-9a-f]{64}$"))' "$manifest" >/dev/null || \
+             ! git cat-file -e "$remote_ref:core-channel/stable.json.sig"; then
             echo "::error::Branch $BRANCH exists without an open PR but does not contain only the expected verified stable manifest. Inspect, fix, or delete that branch before rerunning."
             exit 1
           fi
@@ -155,15 +163,31 @@ jobs:
           ASSET_URL: ${{ steps.release.outputs.asset_url }}
         run: npm run promote-core-stable -- --version "$VERSION" --url "$ASSET_URL"
 
+      - name: Install signing tool
+        if: steps.decision.outputs.promote == 'true' && steps.pull_request.outputs.exists == 'false' && steps.existing_branch.outputs.exists == 'false'
+        run: npm ci
+
+      - name: Sign stable core channel
+        if: steps.decision.outputs.promote == 'true' && steps.pull_request.outputs.exists == 'false' && steps.existing_branch.outputs.exists == 'false'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then echo "::error::TAURI_SIGNING_PRIVATE_KEY is required."; exit 1; fi
+          npm run sign-core-channel
+
       - name: Verify the promotion diff
         if: steps.decision.outputs.promote == 'true' && steps.pull_request.outputs.exists == 'false' && steps.existing_branch.outputs.exists == 'false'
         id: manifest
         run: |
           changed="$(git status --porcelain | sed -E 's/^...//')"
-          if [ "$changed" != "core-channel/stable.json" ]; then
-            echo "::error::Promotion must change only core-channel/stable.json; changed paths: ${changed:-none}"
+          expected_changed="$(printf '%s\n' core-channel/stable.json core-channel/stable.json.sig)"
+          changed_sorted="$(printf '%s\n' "$changed" | sort)"
+          if [ "$changed_sorted" != "$(printf '%s\n' "$expected_changed" | sort)" ] && [ "$changed_sorted" != "core-channel/stable.json.sig" ]; then
+            echo "::error::Promotion must change only the core channel manifest and signature; changed paths: ${changed:-none}"
             exit 1
           fi
+          test -s core-channel/stable.json.sig
           git diff --check
           echo "checksum=$(jq -er '.artifacts[0].checksum | select(.algorithm == "sha256") | .value | select(test("^[0-9a-f]{64}$"))' core-channel/stable.json)" >> "$GITHUB_OUTPUT"
 
@@ -178,7 +202,7 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git switch -c "$BRANCH"
-          git add core-channel/stable.json
+          git add core-channel/stable.json core-channel/stable.json.sig
           git commit -m "chore(core): promote Flowseal $VERSION to stable"
           git push --set-upstream origin "$BRANCH"
 

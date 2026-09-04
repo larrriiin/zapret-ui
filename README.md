@@ -71,7 +71,7 @@ ZAPRET UI не конкурирует с Flowseal и не присваивает
 | Стратегии | Создаются и публикуются в проекте Flowseal | Показываются в интерфейсе и запускаются без ручного редактирования BAT-файлов |
 | Обновления | Механизмы и выпуски исходного проекта | Отдельные каналы обновления приложения и ядра |
 | Выбор стабильного ядра | Актуальные выпуски Flowseal | В приложение попадает только версия, явно повышенная сопровождающим до канала `stable` |
-| Целостность установки | Определяется исходным проектом | ZIP сверяется по SHA-256, проверяется во временной папке и активируется транзакционно |
+| Целостность установки | Определяется исходным проектом | Канал обновлений подписан, ZIP сверяется по SHA-256, проверяется во временной папке и активируется транзакционно |
 | Откат | Зависит от ручного сценария пользователя | Предыдущую успешно установленную версию можно вернуть из интерфейса |
 | Пользовательские данные | Хранятся в файлах сборки | Пользовательские списки и выбранные параметры сохраняются при обновлении ядра |
 
@@ -86,7 +86,8 @@ ZAPRET UI не конкурирует с Flowseal и не присваивает
 - Автозапуск, системный трей, уведомления и выбор поведения при закрытии окна.
 - Раздельные обновления интерфейса ZAPRET UI и ядра Flowseal.
 - Проверка версии и источника стабильного ядра через управляемый канал.
-- Скачивание ядра с проверкой SHA-256 до распаковки.
+- Нативная проверка стратегий по HTTP, TLS, времени отклика и признакам DPI без BAT- или PowerShell-скриптов.
+- Проверка подписи канала ядра и SHA-256 архива до распаковки.
 - Транзакционная установка: подготовка и проверка новой версии до замены рабочей.
 - Откат к предыдущей успешно установленной версии.
 - Сохранение пользовательских списков, выбранной стратегии, режима запуска и настроек фильтров при обновлении или откате.
@@ -97,7 +98,7 @@ ZAPRET UI не конкурирует с Flowseal и не присваивает
 Обновление интерфейса и обновление ядра — разные процессы:
 
 1. Сопровождающий проверяет новый выпуск Flowseal.
-2. Проверенная версия публикуется в [`core-channel/stable.json`](core-channel/stable.json) вместе с URL и SHA-256.
+2. Проверенная версия публикуется в [`core-channel/stable.json`](core-channel/stable.json) вместе с URL, SHA-256 и отдельной minisign-подписью `stable.json.sig`.
 3. ZAPRET UI получает манифест стабильного канала. Если сеть или GitHub недоступны, используется встроенная в приложение резервная копия манифеста.
 4. Архив скачивается во временную папку, сверяется по контрольной сумме и проверяется до активации.
 5. Рабочая версия заменяется только после успешной проверки; предыдущая версия остаётся доступной для отката.
@@ -264,7 +265,7 @@ git push origin vX.Y.Z
 npm run promote-core-stable -- --version <FLOWSEAL_VERSION> --url <FLOWSEAL_ZIP_URL>
 ```
 
-Скрипт скачивает архив, рассчитывает SHA-256 и обновляет [`core-channel/stable.json`](core-channel/stable.json). Перед коммитом обязательно проверьте diff, выполните полный набор тестов и вручную проверьте установку, запуск, обновление и откат.
+Скрипт скачивает архив, рассчитывает SHA-256 и обновляет [`core-channel/stable.json`](core-channel/stable.json). После этого подпишите манифест командой `npm run sign-core-channel`; она использует `TAURI_SIGNING_PRIVATE_KEY` и `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Перед коммитом обязательно проверьте `stable.json` и `stable.json.sig`, выполните полный набор тестов и вручную проверьте установку, запуск, обновление и откат.
 
 ### Структура проекта
 
@@ -323,7 +324,7 @@ ZAPRET UI does not compete with Flowseal and does not claim ownership of its str
 | Strategies | Developed and published by Flowseal | Displayed and launched through the UI without editing BAT files manually |
 | Updates | Upstream releases and update mechanisms | Separate application and core update channels |
 | Stable core selection | Current Flowseal releases | Only a release explicitly promoted by the maintainer enters the `stable` channel |
-| Installation integrity | Defined by the upstream project | ZIP is SHA-256 verified, validated in staging, and transactionally activated |
+| Installation integrity | Defined by the upstream project | The update channel is signed; the ZIP is SHA-256 verified, validated in staging, and transactionally activated |
 | Rollback | Depends on the user's manual workflow | The previous successfully installed core can be restored from the UI |
 | User data | Stored in distribution files | User lists and selected settings are preserved across core updates |
 
@@ -338,7 +339,8 @@ In short: **Flowseal supplies the working core content; ZAPRET UI makes it easie
 - Autostart, system tray integration, notifications, and configurable close behavior.
 - Independent updates for the ZAPRET UI application and the Flowseal core.
 - A maintainer-controlled stable core channel with explicit version and source metadata.
-- SHA-256 verification before a downloaded core is extracted.
+- Native HTTP, TLS, latency, and DPI strategy checks without BAT or PowerShell scripts.
+- Core-channel signature verification and SHA-256 verification before an archive is extracted.
 - Transactional installation: stage and validate a new version before replacing the working one.
 - Rollback to the previous successfully installed core.
 - Preserve user lists, the selected strategy, run mode, and filter settings during update or rollback.
@@ -349,7 +351,7 @@ In short: **Flowseal supplies the working core content; ZAPRET UI makes it easie
 Application updates and core updates are separate:
 
 1. A maintainer tests a new Flowseal release.
-2. The approved version is published in [`core-channel/stable.json`](core-channel/stable.json) together with its URL and SHA-256.
+2. The approved version is published in [`core-channel/stable.json`](core-channel/stable.json) together with its URL, SHA-256, and detached minisign signature `stable.json.sig`.
 3. ZAPRET UI loads the stable channel manifest. If the network or GitHub is unavailable, it uses a manifest embedded in the application as a fallback.
 4. The archive is downloaded to a temporary directory, checksum-verified, and validated before activation.
 5. The working version is replaced only after validation succeeds; the previous version remains available for rollback.
@@ -516,7 +518,7 @@ To promote a tested Flowseal release to the stable core channel:
 npm run promote-core-stable -- --version <FLOWSEAL_VERSION> --url <FLOWSEAL_ZIP_URL>
 ```
 
-The script downloads the archive, calculates its SHA-256, and updates [`core-channel/stable.json`](core-channel/stable.json). Review the diff, run the complete test suite, and manually test installation, startup, update, and rollback before committing it.
+The script downloads the archive, calculates its SHA-256, and updates [`core-channel/stable.json`](core-channel/stable.json). Then sign it with `npm run sign-core-channel`, using `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Review both `stable.json` and `stable.json.sig`, run the complete test suite, and manually test installation, startup, update, and rollback before committing them.
 
 ### Project layout
 
