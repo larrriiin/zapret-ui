@@ -32,13 +32,14 @@ pub trait CoreProvider: Send + Sync {
     fn provider_name(&self) -> &'static str;
     fn paths(&self) -> &CorePaths;
     fn ipset_url(&self) -> &'static str;
-    fn service_script(&self) -> PathBuf;
-    fn test_script(&self) -> PathBuf;
     fn winws_executable(&self) -> PathBuf;
     fn local_version(&self) -> String;
     fn is_installed(&self) -> bool;
     fn strategies(&self) -> Result<Vec<String>, String>;
     fn parse_strategy(&self, strategy: &str, game_filter: &str) -> Result<String, String>;
+    fn import_custom_strategy(&self, name: &str, content: &str) -> Result<(), String>;
     /// Validates provider-specific on-disk structure and returns its version and strategy count.
     fn validate_installation(&self) -> Result<(String, usize), String>;
+    /// Removes provider source files that are no longer needed after a valid manifest exists.
+    fn finalize_installation(&self) -> Result<(), String>;
 }

@@ -1,0 +1,2 @@
+core-channel/*.json text eol=lf
+core-channel/*.json.sig text eol=lf

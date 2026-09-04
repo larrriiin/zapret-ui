@@ -1,7 +1,5 @@
-use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::Command;
-use std::process::Stdio;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Acquire `Mutex` access without panicking when the mutex is poisoned. If a
@@ -33,6 +31,7 @@ use tauri_plugin_notification::NotificationExt;
 
 mod core;
 mod providers;
+mod strategy_test;
 mod traffic_monitor;
 use core::{
     compare_versions, resolve_stable, Checksum, CoreInstallation, CoreInstallationState,
@@ -126,6 +125,15 @@ struct FiltersStatus {
     game_filter: String,
     /// "none" | "any" | "loaded"
     ipset: String,
+}
+
+#[derive(serde::Serialize)]
+struct SystemStatusReport {
+    running: bool,
+    strategy: Option<String>,
+    zapret_service: &'static str,
+    windivert_service: &'static str,
+    bypass_process: &'static str,
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -628,10 +636,20 @@ fn get_ui_version_cmd() -> String {
 
 #[tauri::command]
 fn ensure_binaries_present() -> bool {
-    core_manager().provider().is_installed()
+    let dir = find_binaries_dir();
+    let manager = core_manager_at(&dir);
+    match CoreInstallation::new(&dir)
+        .and_then(|installation| installation.prepare_active(manager.provider()))
+    {
+        Ok(()) => manager.provider().is_installed(),
+        Err(error) => {
+            eprintln!("Cannot prepare installed core: {error}");
+            false
+        }
+    }
 }
 
-fn parse_bat_args(strategy: &str) -> Result<String, String> {
+fn parse_strategy_args(strategy: &str) -> Result<String, String> {
     if !is_safe_strategy_name(strategy) {
         return Err(format!("Invalid strategy name: {}", strategy));
     }
@@ -662,6 +680,24 @@ fn split_arguments(s: &str) -> Vec<String> {
         args.push(current);
     }
     args
+}
+
+fn ensure_strategy_user_lists(root: &std::path::Path) -> Result<(), String> {
+    let lists_dir = root.join("lists");
+    std::fs::create_dir_all(&lists_dir)
+        .map_err(|e| format!("Failed to create user lists directory: {e}"))?;
+    for (name, initial_content) in [
+        ("ipset-exclude-user.txt", "203.0.113.113/32\r\n"),
+        ("list-general-user.txt", "domain.example.abc\r\n"),
+        ("list-exclude-user.txt", "domain.example.abc\r\n"),
+    ] {
+        let path = lists_dir.join(name);
+        if !path.exists() {
+            std::fs::write(&path, initial_content)
+                .map_err(|e| format!("Failed to create {name}: {e}"))?;
+        }
+    }
+    Ok(())
 }
 
 /// Проверяет, запущен ли winws.exe через tasklist.
@@ -749,95 +785,112 @@ fn get_strategy_from_registry() -> Option<String> {
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-fn check_status_full() -> Result<String, String> {
-    let mut output = String::new();
-
-    // 1. Check Strategy
-    let reg_out = Command::new(system32_tool("reg.exe"))
-        .args([
-            "query",
-            "HKLM\\System\\CurrentControlSet\\Services\\zapret",
-            "/v",
-            "zapret-discord-youtube",
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    if let Ok(out) = reg_out {
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        for line in stdout.lines() {
-            if let Some(pos) = line.find("REG_SZ") {
-                let strategy = line[pos + "REG_SZ".len()..].trim();
-                if !strategy.is_empty() {
-                    output.push_str(&format!(
-                        "Service strategy installed from \"{}\"\n",
-                        strategy
-                    ));
-                }
-                break;
-            }
-        }
-    }
+fn check_status_full(state: State<'_, AppState>) -> Result<SystemStatusReport, String> {
+    // Use the same source of truth as the main screen. Unlike the service
+    // registry, it also knows about a temporary winws launch and its strategy.
+    let current_status = get_zapret_status(state);
 
     // 2. Check zapret service
     let zapret_svc = Command::new(system32_tool("sc.exe"))
         .args(["query", "zapret"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
-    if let Ok(out) = zapret_svc {
+    let zapret_service = if let Ok(out) = zapret_svc {
         let stdout = String::from_utf8_lossy(&out.stdout);
         if stdout.contains("RUNNING") {
-            output.push_str("\"zapret\" service is RUNNING.\n");
+            "running"
         } else if stdout.contains("STOPPED") {
-            output.push_str("\"zapret\" service is STOPPED.\n");
+            "stopped"
         } else if stdout.contains("FAILED 1060") || stdout.contains("1060") {
-            // 1060 means service does not exist
+            "not_installed"
         } else {
-            // Might be start_pending or other
-            output.push_str("\"zapret\" service state is UNKNOWN.\n");
+            "unknown"
         }
-    }
+    } else {
+        "unknown"
+    };
 
     // 3. Check WinDivert service
     let windivert_svc = Command::new(system32_tool("sc.exe"))
         .args(["query", "WinDivert"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
-    if let Ok(out) = windivert_svc {
+    let windivert_service = if let Ok(out) = windivert_svc {
         let stdout = String::from_utf8_lossy(&out.stdout);
         if stdout.contains("RUNNING") {
-            output.push_str("\"WinDivert\" service is RUNNING.\n");
+            "running"
         } else if stdout.contains("STOPPED") {
-            output.push_str("\"WinDivert\" service is STOPPED.\n");
+            "stopped"
+        } else if stdout.contains("FAILED 1060") || stdout.contains("1060") {
+            "not_installed"
+        } else {
+            "unknown"
         }
-    }
+    } else {
+        "unknown"
+    };
 
     // 4. Check bypass (winws.exe)
-    output.push('\n');
     let task = Command::new(system32_tool("tasklist.exe"))
         .args(["/FI", "IMAGENAME eq winws.exe"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
-    if let Ok(out) = task {
+    let bypass_process = if let Ok(out) = task {
         let stdout = String::from_utf8_lossy(&out.stdout).to_lowercase();
         if stdout.contains("winws.exe") {
-            output.push_str("Bypass (winws.exe) is RUNNING.\n");
+            "running"
         } else {
-            output.push_str("Bypass (winws.exe) is NOT running.\n");
+            "stopped"
         }
-    }
-
-    let trimmed = output.trim().to_string();
-    if trimmed.is_empty() {
-        Ok("Zapret service is not installed.".to_string())
     } else {
-        Ok(trimmed)
-    }
+        "unknown"
+    };
+
+    Ok(SystemStatusReport {
+        running: current_status.running,
+        strategy: current_status.strategy,
+        zapret_service,
+        windivert_service,
+        bypass_process,
+    })
 }
 
-/// Список стратегий — имена .bat файлов из binaries/ (без service.bat).
+/// Список стратегий из единого runtime-каталога.
 #[tauri::command]
 fn get_strategies() -> Result<Vec<String>, String> {
-    core_manager().provider().strategies()
+    let dir = find_binaries_dir();
+    let manager = core_manager_at(&dir);
+    CoreInstallation::new(&dir)?.prepare_active(manager.provider())?;
+    manager.provider().strategies()
+}
+
+#[tauri::command]
+fn import_custom_strategy(file_name: String, content: String) -> Result<String, String> {
+    let _operation_guard =
+        CoreOperationGuard::acquire().map_err(|_| "strategy_import_error_busy".to_string())?;
+    let path = std::path::Path::new(&file_name);
+    if path.file_name().and_then(|name| name.to_str()) != Some(file_name.as_str())
+        || !path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("bat"))
+    {
+        return Err("strategy_import_error_invalid_extension".to_string());
+    }
+    let name = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .ok_or_else(|| "strategy_import_error_invalid_name".to_string())?;
+    if !is_safe_strategy_name(name) {
+        return Err("strategy_import_error_invalid_name".to_string());
+    }
+    let manager = core_manager();
+    CoreInstallation::new(manager.provider().paths().root())?.prepare_active(manager.provider())?;
+    if !manager.provider().is_installed() {
+        return Err("strategy_import_error_core_missing".to_string());
+    }
+    manager.provider().import_custom_strategy(name, &content)?;
+    Ok(name.to_owned())
 }
 
 /// Compare strings using natural sort (numbers compared numerically)
@@ -953,7 +1006,7 @@ fn refresh_traffic_filter(state: State<'_, AppState>) {
         state.traffic_monitor.clear_filter();
         return;
     };
-    if let Ok(args) = parse_bat_args(&strategy) {
+    if let Ok(args) = parse_strategy_args(&strategy) {
         state.traffic_monitor.refresh_filter(&args, Some(strategy));
     } else {
         state.traffic_monitor.clear_filter();
@@ -1222,7 +1275,7 @@ fn set_active_fake(fake_type: String, fake_name: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Запускает стратегию по имени .bat файла.
+/// Запускает стратегию по имени из runtime-каталога.
 #[tauri::command]
 fn start_zapret(
     _app: tauri::AppHandle,
@@ -1249,31 +1302,11 @@ fn start_zapret(
         .output();
 
     let dir = find_binaries_dir();
-    let bat_path = dir.join(format!("{}.bat", strategy));
-    if !bat_path.exists() {
-        return Err(format!("Файл стратегии не найден: {}.bat", strategy));
-    }
-
-    // Убеждаемся, что пользовательские списки существуют, иначе winws не запустится
-    let lists_dir = dir.join("lists");
-    if !lists_dir.exists() {
-        let _ = std::fs::create_dir_all(&lists_dir);
-    }
-    let ipset_user = lists_dir.join("ipset-exclude-user.txt");
-    if !ipset_user.exists() {
-        let _ = std::fs::write(&ipset_user, "203.0.113.113/32\r\n");
-    }
-    let list_general_user = lists_dir.join("list-general-user.txt");
-    if !list_general_user.exists() {
-        let _ = std::fs::write(&list_general_user, "domain.example.abc\r\n");
-    }
-    let list_exclude_user = lists_dir.join("list-exclude-user.txt");
-    if !list_exclude_user.exists() {
-        let _ = std::fs::write(&list_exclude_user, "domain.example.abc\r\n");
-    }
+    // Стратегии из каталога, как и прежние BAT-файлы, ожидают эти списки.
+    ensure_strategy_user_lists(&dir)?;
 
     if mode == "service" {
-        let args = parse_bat_args(&strategy)?;
+        let args = parse_strategy_args(&strategy)?;
 
         // Canonicalize winws.exe before writing it into the service binPath in
         // the registry. That way the service points at the *real* executable
@@ -1293,7 +1326,7 @@ fn start_zapret(
 
         // Проверяем что аргументы не пустые
         if args.is_empty() {
-            return Err("Не удалось распарсить аргументы из bat файла".to_string());
+            return Err("Не удалось получить аргументы стратегии".to_string());
         }
 
         // Собираем PowerShell-скрипт, который:
@@ -1366,7 +1399,7 @@ try {{
             return Err("winws.exe not found".to_string());
         }
 
-        let args_str = parse_bat_args(&strategy)?;
+        let args_str = parse_strategy_args(&strategy)?;
         let args = split_arguments(&args_str);
 
         let mut cmd = Command::new(&bin_path);
@@ -1651,7 +1684,7 @@ fn import_backup_file() -> Result<bool, String> {
     }
 }
 
-/// Updates the IPSet list from remote source (same as service.bat)
+/// Updates the IPSet list from the provider's upstream source.
 #[tauri::command]
 async fn update_ipset_list() -> Result<String, String> {
     update_ipset_list_inner()
@@ -2909,6 +2942,40 @@ struct TestResult {
     score: i32,
 }
 
+impl TestResult {
+    fn failed(config: String) -> Self {
+        Self::from_counts(config, 0, 1, 0, 1, 0)
+    }
+
+    fn from_counts(
+        config: String,
+        http_ok: i32,
+        http_error: i32,
+        ping_ok: i32,
+        ping_fail: i32,
+        avg_ping_ms: i32,
+    ) -> Self {
+        let status = if http_error == 0 && ping_fail == 0 {
+            "success"
+        } else if http_ok > http_error {
+            "partial"
+        } else {
+            "failed"
+        };
+        let score = http_ok * 10 + ping_ok - http_error * 20 - ping_fail * 2;
+        Self {
+            config,
+            status: status.to_string(),
+            http_ok,
+            http_error,
+            ping_ok,
+            ping_fail,
+            avg_ping_ms,
+            score,
+        }
+    }
+}
+
 #[derive(serde::Serialize)]
 #[allow(dead_code)]
 struct TestProgress {
@@ -2931,16 +2998,10 @@ struct PrecheckTestsResult {
 /// first-run скачивание стратегий).
 #[tauri::command]
 fn precheck_tests() -> PrecheckTestsResult {
-    let dir = find_binaries_dir();
-    let strategies_count = std::fs::read_dir(&dir)
-        .map(|rd| {
-            rd.filter_map(Result::ok)
-                .filter(|e| {
-                    let name = e.file_name().to_string_lossy().to_ascii_lowercase();
-                    name.ends_with(".bat") && !name.starts_with("service")
-                })
-                .count()
-        })
+    let strategies_count = core_manager()
+        .provider()
+        .strategies()
+        .map(|strategies| strategies.len())
         .unwrap_or(0);
 
     PrecheckTestsResult {
@@ -2987,317 +3048,29 @@ fn load_test_results(app: tauri::AppHandle) -> Option<SavedTestResults> {
 
 /// Cancels a running test process
 #[tauri::command]
-fn cancel_tests(state: State<'_, AppState>) {
-    let mut pid_lock = state.test_process_pid.lock_unpoisoned();
-    if let Some(pid) = pid_lock.take() {
-        // Kill process tree (/T = tree, /F = force)
-        let _ = Command::new(system32_tool("taskkill.exe"))
-            .arg("/F")
-            .arg("/T")
-            .arg("/PID")
-            .arg(pid.to_string())
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
-    }
-    // Remove temp script if it still exists
-    let temp_script = core_manager()
-        .provider()
-        .paths()
-        .utils_dir()
-        .join("test_zapret_ui.ps1");
-    let _ = std::fs::remove_file(&temp_script);
+fn cancel_tests(app: tauri::AppHandle) {
+    strategy_test::cancel(&app);
 }
 
-/// Runs configuration tests with real-time streaming output via Tauri events
+/// Runs strategy checks without BAT or PowerShell scripts.
 #[tauri::command]
 async fn run_tests(
     app: tauri::AppHandle,
     test_type: String,
-    test_mode: String,
+    _test_mode: String,
 ) -> Result<Vec<TestResult>, String> {
     let dir = find_binaries_dir();
+    ensure_strategy_user_lists(&dir)?;
     let manager = core_manager_at(&dir);
-    let ps_script = manager.provider().test_script();
-
-    if !ps_script.exists() {
-        return Err(
-            "Test script not found. Please ensure zapret is properly installed.".to_string(),
-        );
-    }
-
-    let original_content = std::fs::read_to_string(&ps_script)
-        .map_err(|e| format!("Failed to read test script: {}", e))?;
-
-    // Replace interactive function CALLS only (not definitions)
-    let type_val = if test_type == "dpi" {
-        "dpi"
-    } else {
-        "standard"
-    };
-    let modified_content = original_content
-        .replace(
-            "[void][System.Console]::ReadKey($true)",
-            "# UI Mode - skipping ReadKey",
-        )
-        .replace(
-            "$testType = Read-TestType",
-            &format!("$testType = '{}'", type_val),
-        )
-        .replace("$mode = Read-ModeSelection", "$mode = 'all'")
-        .replace(
-            "    $selected = Read-ConfigSelection -allFiles $batFiles",
-            "    $selected = $batFiles",
-        )
-        .replace(
-            "    $batFiles = @($selected)",
-            "    # UI Mode - using all configs",
-        );
-
-    let temp_script = manager
-        .provider()
-        .paths()
-        .utils_dir()
-        .join("test_zapret_ui.ps1");
-    std::fs::write(&temp_script, modified_content)
-        .map_err(|e| format!("Failed to write temp script: {}", e))?;
-
-    let _ = app.emit(
-        "test-progress",
-        serde_json::json!({
-            "line": format!("Starting {} tests ({} configs)...", type_val, test_mode),
-            "kind": "info"
-        }),
-    );
-
-    // Spawn the process and stream output line by line
-    let mut child = std::process::Command::new(powershell_path())
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            temp_script.to_str().unwrap_or(""),
-        ])
-        .current_dir(&dir)
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to spawn test process: {}", e))?;
-
-    // Store PID so cancel_tests / window-close can kill the process
-    {
-        let state = app.state::<AppState>();
-        let mut pid_lock = state.test_process_pid.lock_unpoisoned();
-        *pid_lock = Some(child.id());
-    }
-
-    let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
-    let reader = BufReader::new(stdout);
-
-    let mut all_lines: Vec<String> = Vec::new();
-    let mut current_config: Option<String> = None;
-    // config -> (sum_ms, count)
-    let mut ping_stats: std::collections::HashMap<String, (i64, i64)> =
-        std::collections::HashMap::new();
-
-    // Regex-like match done manually: "  [N/M] name.bat"
-    fn parse_config_header(line: &str) -> Option<(usize, usize, String)> {
-        let trimmed = line.trim_start();
-        let bracket = trimmed.strip_prefix('[')?;
-        let close = bracket.find(']')?;
-        let (nums, rest) = bracket.split_at(close);
-        let rest = rest.strip_prefix("] ")?;
-        let (cur_s, tot_s) = nums.split_once('/')?;
-        let cur: usize = cur_s.parse().ok()?;
-        let tot: usize = tot_s.parse().ok()?;
-        Some((cur, tot, rest.trim().to_string()))
-    }
-
-    // Extract ping in milliseconds from lines like "... | Ping: 45 ms".
-    // Returns None for "Timeout", "n/a", or non-matching lines.
-    fn parse_ping_ms(line: &str) -> Option<i64> {
-        let idx = line.find("Ping:")?;
-        let after = line[idx + "Ping:".len()..].trim_start();
-        if after.starts_with("Timeout") || after.starts_with("n/a") {
-            return None;
-        }
-        let mut digits = String::new();
-        for ch in after.chars() {
-            if ch.is_ascii_digit() {
-                digits.push(ch);
-            } else if !digits.is_empty() {
-                break;
-            } else if !ch.is_whitespace() {
-                return None;
-            }
-        }
-        digits.parse().ok()
-    }
-
-    for raw in reader.lines().map_while(Result::ok) {
-        // Strip ANSI color codes and trim
-        let clean: String = raw.chars().filter(|c| c.is_ascii() || *c == '\n').collect();
-        let line = clean.trim().to_string();
-        if line.is_empty() {
-            continue;
-        }
-
-        all_lines.push(line.clone());
-
-        // Classify the line for coloring in the UI
-        let kind = if line.contains("[ERROR]") || line.contains("[X]") {
-            "error"
-        } else if line.contains("[WARNING]") || line.contains("[WARN]") || line.contains("[?]") {
-            "warning"
-        } else if line.contains("[OK]")
-            || line.contains("Best config:")
-            || line.contains("Best strategy:")
-        {
-            "success"
-        } else if line.contains("---") || line.contains("===") {
-            "separator"
-        } else if line.starts_with("  [") {
-            "config"
-        } else {
-            "info"
-        };
-
-        // Structured event: "[N/M] foo.bat" → test-config-start
-        if line.contains(".bat") {
-            if let Some((cur, tot, name)) = parse_config_header(&line) {
-                current_config = Some(name.clone());
-                let _ = app.emit(
-                    "test-config-start",
-                    serde_json::json!({
-                        "index": cur,
-                        "total": tot,
-                        "name": name,
-                    }),
-                );
-            }
-        }
-
-        // Accumulate per-target ping for the current config. PS1 prints lines
-        // like "  Discord Main  HTTP:OK ... | Ping: 45 ms". Ignore the "=== "
-        // separator and analytics lines.
-        if !line.starts_with('=') && !line.contains(" : HTTP OK:") {
-            if let (Some(cfg), Some(ms)) = (current_config.as_ref(), parse_ping_ms(&line)) {
-                let entry = ping_stats.entry(cfg.clone()).or_insert((0, 0));
-                entry.0 += ms;
-                entry.1 += 1;
-            }
-        }
-
-        // Structured event: "Best config: X"
-        if let Some(rest) = line.strip_prefix("Best config:") {
-            let _ = app.emit("test-best", serde_json::json!({ "config": rest.trim() }));
-        }
-
-        let _ = app.emit(
-            "test-progress",
-            serde_json::json!({
-                "line": line,
-                "kind": kind
-            }),
-        );
-    }
-
-    let _ = child.wait();
-
-    // Clear PID — process finished (or was killed)
-    {
-        let state = app.state::<AppState>();
-        let mut pid_lock = state.test_process_pid.lock_unpoisoned();
-        *pid_lock = None;
-    }
-
-    // Clean up temp script
-    let _ = std::fs::remove_file(&temp_script);
-
-    // Parse analytics from accumulated lines
-    let mut results = Vec::new();
-    let mut in_analytics = false;
-
-    for line in &all_lines {
-        if line.contains("=== ANALYTICS ===") {
-            in_analytics = true;
-            continue;
-        }
-        // Only parse actual analytics data lines: "<config>.bat : HTTP OK: ..."
-        // or "<config>.bat : OK: ..." (DPI). Skip "Best config: ...", separators, etc.
-        if in_analytics
-            && line.contains(".bat")
-            && (line.contains(" : HTTP OK:") || line.contains(" : OK:"))
-        {
-            if let Some(config_name) = line.split(" : ").next() {
-                let config = config_name.trim().to_string();
-                // service.bat is the installer script, not a DPI strategy
-                if config.eq_ignore_ascii_case("service.bat") {
-                    continue;
-                }
-                let http_ok = extract_number(line, "HTTP OK:");
-                let http_error = extract_number(line, "ERR:");
-                let ping_ok = extract_number(line, "Ping OK:");
-                let ping_fail = extract_number(line, "Fail:");
-                let avg_ping_ms = ping_stats
-                    .get(&config)
-                    .filter(|(_, count)| *count > 0)
-                    .map(|(sum, count)| ((sum + count / 2) / count) as i32)
-                    .unwrap_or(0);
-
-                let status = if http_error == 0 && ping_fail == 0 {
-                    "success"
-                } else if http_ok > http_error {
-                    "partial"
-                } else {
-                    "failed"
-                };
-
-                let score = http_ok * 10 + ping_ok - http_error * 20 - ping_fail * 2;
-
-                results.push(TestResult {
-                    config,
-                    status: status.to_string(),
-                    http_ok,
-                    http_error,
-                    ping_ok,
-                    ping_fail,
-                    avg_ping_ms,
-                    score,
-                });
-            }
-        }
-    }
-
-    let _ = app.emit("test-done", serde_json::json!({ "count": results.len() }));
-
-    Ok(results)
-}
-
-/// Вытаскивает первое целое число после указанного префикса. Игнорирует
-/// единицы измерения (например `AvgPing: 45 ms` → 45) и запятые в конце
-/// (`Ping OK: 5,` → 5).
-fn extract_number(text: &str, prefix: &str) -> i32 {
-    let Some(pos) = text.find(prefix) else {
-        return 0;
-    };
-    let after = &text[pos + prefix.len()..];
-    let mut started = false;
-    let mut digits = String::new();
-    for ch in after.chars() {
-        if ch.is_ascii_digit() {
-            digits.push(ch);
-            started = true;
-        } else if started {
-            break;
-        } else if ch == '-' && !started {
-            // not expecting negatives, but tolerate
-            digits.push(ch);
-            started = true;
-        }
-    }
-    digits.parse().unwrap_or(0)
+    let filters = get_filters_status();
+    strategy_test::run(
+        &app,
+        &dir,
+        manager.provider(),
+        &test_type,
+        &filters.game_filter,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -3616,22 +3389,13 @@ pub fn run() {
                         .show();
                 }
 
-                // Kill any running test process when the window is closed
-                let state = window.app_handle().state::<AppState>();
-                let mut pid_lock = state.test_process_pid.lock_unpoisoned();
-                if let Some(pid) = pid_lock.take() {
-                    let _ = Command::new(system32_tool("taskkill.exe"))
-                        .arg("/F")
-                        .arg("/T")
-                        .arg("/PID")
-                        .arg(pid.to_string())
-                        .creation_flags(CREATE_NO_WINDOW)
-                        .output();
-                }
+                // Cancel the native strategy test and stop its winws process.
+                strategy_test::cancel(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![
             get_strategies,
+            import_custom_strategy,
             get_local_version_cmd,
             get_ui_version_cmd,
             get_update_proxy,

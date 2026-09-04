@@ -9,6 +9,7 @@ import { beginRestart, endRestart } from '../lib/restart.js';
 let _strategyValue = '';
 let _allStrategies = [];
 const FAVORITES_KEY = 'zapret.favorites';
+const MAX_CUSTOM_STRATEGY_SIZE = 256 * 1024;
 
 // Injected by status.js to avoid a static import cycle. See setPollStatus.
 let _pollStatus = null;
@@ -231,8 +232,9 @@ export function renderStrategyList() {
   renderGroup(restItems, false);
 }
 
-export async function loadStrategies() {
+export async function loadStrategies(preferredStrategy = '') {
   const sel = $('strategy-select');
+  const previousStrategy = preferredStrategy || getStrategyValue();
   try {
     const strategies = await invoke('get_strategies');
     _allStrategies = Array.isArray(strategies) ? strategies : [];
@@ -255,7 +257,9 @@ export async function loadStrategies() {
       }
     });
 
-    const defaultName = _allStrategies.includes('general') ? 'general' : _allStrategies[0];
+    const defaultName = _allStrategies.includes(previousStrategy)
+      ? previousStrategy
+      : (_allStrategies.includes('general') ? 'general' : _allStrategies[0]);
     setStrategyValue(defaultName, defaultName);
     renderStrategyList();
   } catch (err) {
@@ -263,4 +267,88 @@ export async function loadStrategies() {
     const label = $('strategy-label');
     if (label) label.textContent = t('error') + ': ' + err;
   }
+}
+
+function setCustomStrategyImportStatus(kind, key, params = {}) {
+  const status = $('custom-strategy-import-status');
+  if (!status) return;
+  status.dataset.messageKey = key;
+  status.dataset.strategyName = params.name || '';
+  status.dataset.messageDetails = '';
+  status.textContent = t(key, params);
+  status.className = `mt-3 text-xs leading-relaxed break-words ${kind === 'error' ? 'text-error-dim' : kind === 'success' ? 'text-secondary' : 'text-on-surface-variant/80'}`;
+}
+
+export function refreshCustomStrategyImportTranslation() {
+  const status = $('custom-strategy-import-status');
+  const key = status?.dataset.messageKey;
+  if (!status || !key) return;
+  const message = t(key, { name: status.dataset.strategyName || '' });
+  const details = status.dataset.messageDetails || '';
+  status.textContent = details ? `${message}: ${details}` : message;
+}
+
+function parseImportError(error) {
+  const raw = String(error || 'strategy_import_error_unknown');
+  const separator = raw.indexOf(':');
+  const key = separator === -1 ? raw : raw.slice(0, separator);
+  const translated = t(key);
+  const details = separator === -1 ? '' : raw.slice(separator + 1).trim();
+  if (translated === key) {
+    return { key: 'strategy_import_error_unknown', details: '', message: t('strategy_import_error_unknown') };
+  }
+  return { key, details, message: details ? `${translated}: ${details}` : translated };
+}
+
+export function initCustomStrategyImport() {
+  const button = $('custom-strategy-import-btn');
+  const input = $('custom-strategy-file-input');
+  const label = $('custom-strategy-import-label');
+  if (!button || !input || !label) return;
+
+  button.addEventListener('click', () => {
+    if (!button.disabled) input.click();
+  });
+
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.bat')) {
+      setCustomStrategyImportStatus('error', 'strategy_import_error_invalid_extension');
+      return;
+    }
+    if (file.size === 0 || file.size > MAX_CUSTOM_STRATEGY_SIZE) {
+      setCustomStrategyImportStatus('error', 'strategy_import_error_invalid_content');
+      return;
+    }
+
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    label.textContent = t('custom_strategy_importing');
+    setCustomStrategyImportStatus('info', 'custom_strategy_importing');
+    try {
+      const content = await file.text();
+      const importedName = await invoke('import_custom_strategy', {
+        fileName: file.name,
+        content,
+      });
+      await loadStrategies(importedName);
+      setCustomStrategyImportStatus('success', 'custom_strategy_import_success', { name: importedName });
+    } catch (error) {
+      const status = $('custom-strategy-import-status');
+      if (status) {
+        const localized = parseImportError(error);
+        status.dataset.messageKey = localized.key;
+        status.dataset.strategyName = '';
+        status.dataset.messageDetails = localized.details;
+        status.textContent = localized.message;
+        status.className = 'mt-3 text-xs leading-relaxed break-words text-error-dim';
+      }
+    } finally {
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+      label.textContent = t('custom_strategy_import_button');
+    }
+  });
 }

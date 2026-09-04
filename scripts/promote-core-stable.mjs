@@ -29,5 +29,7 @@ const temporary = `${target}.tmp-${process.pid}`;
 try {
   await pipeline(Readable.from(`${JSON.stringify({ schemaVersion: 1, channel: 'stable', provider: 'flowseal', version, artifacts }, null, 2)}\n`), createWriteStream(temporary, { flags: 'wx' }));
   await rename(temporary, target);
+  // Never leave a detached signature next to content it no longer signs.
+  await rm(`${target}.sig`, { force: true });
 } finally { await rm(temporary, { force: true }); }
-console.log(`Promoted Flowseal ${version} with ${artifacts.length} verified artifact(s). Review the diff before committing.`);
+console.log(`Promoted Flowseal ${version} with ${artifacts.length} verified artifact(s). Sign stable.json before committing.`);

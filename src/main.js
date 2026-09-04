@@ -19,9 +19,11 @@ import { initFilterButtons, pollFilters } from './features/filters.js';
 import { initFakeSelectors, pollFakes } from './features/fakes.js';
 import {
   initStrategyDropdown,
+  initCustomStrategyImport,
   loadStrategies,
   loadCachedTestResults,
   renderStrategyList,
+  refreshCustomStrategyImportTranslation,
 } from './features/strategies.js';
 import { pollStatus } from './features/status.js';
 import { initUserLists } from './features/user-lists.js';
@@ -50,6 +52,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   await loadCachedTestResults();
   await loadStrategies();
   initStrategyDropdown();
+  initCustomStrategyImport();
 
   const binariesReady = await ensureBinariesPresent();
   if (!binariesReady) return;
@@ -126,6 +129,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     pollFilters();
     pollFakes();
     renderStrategyList();
+    refreshCustomStrategyImportTranslation();
     refreshOpenInfoModal();
     refreshTrafficTranslations();
   });

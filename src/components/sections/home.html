@@ -147,20 +147,48 @@
 
     </div><!-- /grid grid-cols-2 -->
 
-    <!-- Fake Replacement Section -->
-    <section class="glass-panel p-6 rounded-3xl border border-outline-variant/10 space-y-4">
-        <div class="flex items-center justify-between px-2 h-6">
-            <div class="flex items-center gap-1.5">
-                <h3 class="font-headline text-xs font-bold uppercase tracking-[0.2em] text-primary/70" data-i18n="fake_packets_title">Фейковые пакеты (UDP)</h3>
-                <button id="fakes-info-btn" class="text-primary/40 hover:text-primary transition-colors flex cursor-pointer">
-                    <span class="material-symbols-outlined text-sm">info</span>
+    <details id="advanced-settings" class="group glass-panel rounded-2xl border border-outline-variant/10 overflow-hidden">
+        <summary class="list-none cursor-pointer select-none px-6 py-5 flex items-center justify-between gap-4 hover:bg-white/[0.025] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60">
+            <span class="flex items-center gap-3 min-w-0">
+                <span class="material-symbols-outlined text-primary/70 text-xl">tune</span>
+                <span class="min-w-0">
+                    <span class="block font-headline text-sm font-bold text-on-surface" data-i18n="advanced_settings">Дополнительные настройки</span>
+                    <span class="block mt-1 text-xs text-on-surface-variant/80" data-i18n="advanced_settings_desc">Тонкая настройка для нестандартных сетей</span>
+                </span>
+            </span>
+            <span class="material-symbols-outlined text-primary/60 transition-transform duration-200 group-open:rotate-180">expand_more</span>
+        </summary>
+
+        <div class="px-6 pb-6 pt-1 border-t border-outline-variant/10">
+            <div class="py-4 border-b border-outline-variant/10">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div class="min-w-0">
+                        <h3 class="font-headline text-sm font-bold text-on-surface" data-i18n="custom_strategies_title">Пользовательские стратегии</h3>
+                        <p class="mt-1 max-w-2xl text-xs leading-relaxed text-on-surface-variant/80" data-i18n="custom_strategies_desc">Импортируйте BAT-стратегию — приложение возьмёт только параметры winws.exe. Стратегия появится в общем списке и сохранится после обновления ядра</p>
+                    </div>
+                    <button id="custom-strategy-import-btn" type="button"
+                        class="min-h-10 shrink-0 self-start sm:self-auto inline-flex items-center justify-center gap-2 rounded-xl bg-primary/15 px-4 py-2.5 text-xs font-bold text-primary hover:bg-primary/25 disabled:cursor-wait disabled:opacity-60 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
+                        <span class="material-symbols-outlined text-lg" aria-hidden="true">upload_file</span>
+                        <span id="custom-strategy-import-label" data-i18n="custom_strategy_import_button">Импортировать BAT</span>
+                    </button>
+                    <input id="custom-strategy-file-input" type="file" accept=".bat,application/x-bat" class="hidden">
+                </div>
+                <p id="custom-strategy-import-status" class="hidden mt-3 text-xs leading-relaxed break-words" role="status" aria-live="polite"></p>
+            </div>
+
+            <div class="flex items-center justify-between gap-4 py-4">
+                <div>
+                    <h3 class="font-headline text-sm font-bold text-on-surface" data-i18n="fake_packets_title">Фейковые пакеты UDP</h3>
+                    <p class="mt-1 text-xs text-on-surface-variant/80" data-i18n="fake_packets_desc">Профили пакетов для голосового чата и игр</p>
+                </div>
+                <button id="fakes-info-btn" type="button" class="w-9 h-9 shrink-0 rounded-xl text-primary/70 hover:text-primary hover:bg-primary/10 transition-colors flex items-center justify-center cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60" data-i18n="information" data-i18n-attr="aria-label" aria-label="Information">
+                    <span class="material-symbols-outlined text-lg">info</span>
                 </button>
             </div>
-        </div>
 
-        <div class="grid grid-cols-2 gap-8 items-start">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
             <!-- Discord UDP Fake Card -->
-            <div class="glass-panel p-5 rounded-2xl border border-primary/10 space-y-4 hover:border-primary/40 transition-colors relative z-20">
+            <div class="p-4 rounded-xl bg-surface-container-high/30 border border-primary/10 space-y-3 relative z-20">
                 <div class="flex items-center gap-3 px-1">
                     <span class="material-symbols-outlined text-primary text-xl">graphic_eq</span>
                     <span class="text-xs font-bold text-on-surface font-headline uppercase tracking-wider" data-i18n="discord_fake_label">Discord UDP (Voice)</span>
@@ -185,7 +213,7 @@
             </div>
 
             <!-- GameFilter UDP Fake Card -->
-            <div class="glass-panel p-5 rounded-2xl border border-primary/10 space-y-4 hover:border-primary/40 transition-colors relative z-20">
+            <div class="p-4 rounded-xl bg-surface-container-high/30 border border-primary/10 space-y-3 relative z-20">
                 <div class="flex items-center gap-3 px-1">
                     <span class="material-symbols-outlined text-secondary text-xl">sports_esports</span>
                     <span class="text-xs font-bold text-on-surface font-headline uppercase tracking-wider" data-i18n="game_fake_label">GameFilter UDP</span>
@@ -208,8 +236,9 @@
                     </div>
                 </div>
             </div>
+            </div>
         </div>
-    </section>
+    </details>
 
     </div>
 </div><!-- /section-home -->
