@@ -28,7 +28,7 @@
 </p>
 
 <p align="center">
-  <img width="900" alt="Главное окно ZAPRET UI" src="https://github.com/user-attachments/assets/b7bcd009-2083-4c84-935c-8fc92640a2b3">
+  <img width="900" alt="Главное окно ZAPRET UI" src="https://github.com/larrriiin/zapret-ui/blob/main/artifacts/zapret-ui-main-26.9.1.png">
 </p>
 
 <!--
