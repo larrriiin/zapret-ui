@@ -1,4 +1,5 @@
 import './styles.css';
+import { initTheme } from './features/theme.js';
 import { mountComponents } from './components/index.js';
 import { $, invoke } from './lib/core.js';
 import { initI18n, toggleLanguage, setLanguage, onLangChange, syncTrayLocalization } from './lib/i18n.js';
@@ -10,7 +11,6 @@ import {
 } from './lib/restart.js';
 
 import { ensureAdminPrivileges } from './features/admin-check.js';
-import { ensureBinariesPresent } from './features/binaries.js';
 import { loadVersions } from './features/versions.js';
 import { initTitlebar } from './features/titlebar.js';
 import { initNavigation, showSection } from './features/navigation.js';
@@ -31,31 +31,40 @@ import { initInfoModals, refreshOpenInfoModal } from './features/info-modals.js'
 import { initUpdates } from './features/updates.js';
 import { initDiagnostics } from './features/diagnostics.js';
 import { initWizard } from './features/wizard.js';
-import { initFirstRun, maybeShowFirstRun } from './features/firstrun.js';
+import { initFirstRun, maybeShowFirstRun, openSetup } from './features/firstrun.js';
 import { initStatusCheck } from './features/status-check.js';
 import { initTrafficMonitor, refreshTrafficTranslations } from './features/traffic.js';
 
 // Mount HTML fragments synchronously so `[data-i18n]` elements are already in
 // the DOM when Tailwind's CDN JIT observer and i18n engine run over them.
 mountComponents();
+initTheme();
 
 
 window.addEventListener('DOMContentLoaded', async () => {
   initI18n();
+  if (new URLSearchParams(location.search).get('setup') === '1') {
+    document.documentElement.dataset.setupWindow = 'true';
+    initFirstRun();
+    const params = new URLSearchParams(location.search);
+    openSetup({ repeat: params.get('repeat') === 'true', clearLists: params.get('clearLists') === 'true' });
+    return;
+  }
   document.addEventListener('contextmenu', (e) => e.preventDefault());
 
   initTitlebar();
 
   const adminOk = await ensureAdminPrivileges();
-  if (!adminOk) return;
+  if (!adminOk) { await invoke('show_app_window', { force: true }); return; }
+
+  initFirstRun();
+  await maybeShowFirstRun();
+  await invoke('show_app_window', { force: false });
 
   await loadCachedTestResults();
   await loadStrategies();
   initStrategyDropdown();
   initCustomStrategyImport();
-
-  const binariesReady = await ensureBinariesPresent();
-  if (!binariesReady) return;
 
   await loadVersions();
 
@@ -65,6 +74,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   syncTrayLocalization();
 
   setInterval(async () => {
+    if (state.setupActive) return;
     await pollStatus();
     await pollFilters();
     await pollFakes();
@@ -79,7 +89,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   initUpdates();
   initDiagnostics();
   initWizard();
-  initFirstRun();
   initStatusCheck();
   initTrafficMonitor();
 
@@ -134,5 +143,4 @@ window.addEventListener('DOMContentLoaded', async () => {
     refreshTrafficTranslations();
   });
 
-  await maybeShowFirstRun();
 });

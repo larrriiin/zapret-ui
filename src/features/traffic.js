@@ -278,7 +278,10 @@ function drawChart() {
   const height = rect.height;
   ctx.clearRect(0, 0, width, height);
 
-  ctx.strokeStyle = 'rgba(65, 71, 91, 0.18)';
+  const palette = getComputedStyle(document.documentElement);
+  const color = (name) => palette.getPropertyValue(`--color-${name}`).trim();
+  ctx.strokeStyle = color('outline-variant');
+  ctx.globalAlpha = 0.25;
   ctx.lineWidth = 1;
   for (let row = 1; row < 4; row += 1) {
     const y = (height / 4) * row;
@@ -288,6 +291,7 @@ function drawChart() {
     ctx.stroke();
   }
 
+  ctx.globalAlpha = 1;
   const values = monitor.history.flatMap((point) => [point.download, point.upload]);
   const max = Math.max(1024, ...values) * 1.12;
   const plot = (key, stroke, fill) => {
@@ -309,13 +313,15 @@ function drawChart() {
     ctx.closePath();
     const gradient = ctx.createLinearGradient(0, 0, 0, height);
     gradient.addColorStop(0, fill);
-    gradient.addColorStop(1, 'rgba(7, 13, 31, 0)');
+    gradient.addColorStop(1, 'transparent');
     ctx.fillStyle = gradient;
     ctx.fill();
   };
-  plot('download', '#53ddfc', 'rgba(83, 221, 252, 0.16)');
-  plot('upload', '#ba9eff', 'rgba(186, 158, 255, 0.13)');
+  plot('download', color('secondary'), `${color('secondary')}29`);
+  plot('upload', color('primary'), `${color('primary')}21`);
 }
+
+document.addEventListener('zapret:theme-changed', drawChart);
 
 function render() {
   setStatus(monitor.snapshot);

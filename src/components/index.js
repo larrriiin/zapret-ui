@@ -15,6 +15,7 @@ import modalRestart from './modals/restart.html?raw';
 import modalUpdate from './modals/update.html?raw';
 import modalLatestVersion from './modals/latest-version.html?raw';
 import modalFirstLaunch from './modals/first-launch.html?raw';
+import modalSetup from './modals/setup.html?raw';
 import modalWizard from './modals/wizard.html?raw';
 import modalStrategiesFirstrun from './modals/strategies-firstrun.html?raw';
 import modalStatus from './modals/status.html?raw';
@@ -49,6 +50,7 @@ export function mountComponents() {
   mount('modals-host', modalUpdate);
   mount('modals-host', modalLatestVersion);
   mount('modals-host', modalFirstLaunch);
+  mount('modals-host', modalSetup);
   mount('modals-host', modalWizard);
   mount('modals-host', modalStrategiesFirstrun);
   mount('modals-host', modalStatus);

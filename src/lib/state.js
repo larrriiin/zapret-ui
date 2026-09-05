@@ -2,6 +2,7 @@
 // and write without relying on globals on `window`. Fields mirror the
 // pre-Vite main.js globals so the refactor is behaviour-preserving.
 export const state = {
+  setupActive: false,
   currentFilters: { game_filter: 'disabled', ipset: 'any' },
   previousGameFilter: 'all',
   previousIPSet: 'any',

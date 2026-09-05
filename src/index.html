@@ -16,13 +16,13 @@
         }
 
         .glass-panel {
-            background: rgba(186, 158, 255, 0.05);
+            background: color-mix(in srgb, var(--color-primary) 5%, transparent);
             backdrop-filter: blur(40px);
         }
 
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #1c253e; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb { background: var(--color-surface-container-highest); border-radius: 10px; }
 
         /* Titlebar */
         #titlebar {
@@ -38,9 +38,9 @@
             bottom: 1.5rem;
             left: 5.5rem;
             right: 1.5rem;
-            background: rgba(18, 22, 38, 0.7);
+            background: color-mix(in srgb, var(--color-popup) 70%, transparent);
             backdrop-filter: blur(20px);
-            border: 1px solid rgba(186, 158, 255, 0.25);
+            border: 1px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
             border-radius: 1.5rem;
             padding: 1rem 2rem;
             display: flex;
@@ -60,44 +60,44 @@
             transition: background 0.15s;
             cursor: pointer;
         }
-        .titlebar-btn:hover { background: rgba(186, 158, 255, 0.12); }
-        .titlebar-btn.close:hover { background: rgba(215, 51, 87, 0.7); }
+        .titlebar-btn:hover { background: color-mix(in srgb, var(--color-primary) 12%, transparent); }
+        .titlebar-btn.close:hover { background: color-mix(in srgb, var(--color-error-dim) 70%, transparent); }
         .titlebar-btn .material-symbols-outlined { font-size: 15px; }
 
         /* Active filter card */
         .card-active {
-            border-color: rgba(186, 158, 255, 0.6) !important;
-            box-shadow: 0 0 16px rgba(186, 158, 255, 0.2);
+            border-color: color-mix(in srgb, var(--color-primary) 60%, transparent) !important;
+            box-shadow: 0 0 16px color-mix(in srgb, var(--color-primary) 20%, transparent);
         }
 
         /* Disabled filter card */
         .card-disabled { cursor: not-allowed !important; }
 
         .toggle-btn { transition: background 0.2s; }
-        .toggle-btn.is-on { background: rgba(186, 158, 255, 0.2); }
-        .toggle-btn.is-off { background: rgba(65, 71, 91, 0.3); }
+        .toggle-btn.is-on { background: color-mix(in srgb, var(--color-primary) 20%, transparent); }
+        .toggle-btn.is-off { background: color-mix(in srgb, var(--color-outline-variant) 30%, transparent); }
         .toggle-thumb { transition: transform 0.2s; }
         .toggle-btn.is-on .toggle-thumb { transform: translateX(24px); }
         .toggle-btn.is-off .toggle-thumb { transform: translateX(0px); }
 
         .nav-active {
-            background: rgba(186, 158, 255, 0.14) !important;
-            color: #ba9eff !important;
+            background: color-mix(in srgb, var(--color-primary) 14%, transparent) !important;
+            color: var(--color-primary) !important;
         }
         .nav-inactive {
-            color: rgba(223, 228, 254, 0.35) !important;
+            color: color-mix(in srgb, var(--color-on-surface) 35%, transparent) !important;
         }
         .nav-inactive:hover {
-            color: rgba(186, 158, 255, 0.75) !important;
-            background: rgba(186, 158, 255, 0.07) !important;
+            color: color-mix(in srgb, var(--color-primary) 75%, transparent) !important;
+            background: color-mix(in srgb, var(--color-primary) 7%, transparent) !important;
         }
         #nav-indicator {
             position: absolute;
             left: 0;
             width: 3px;
             border-radius: 0 3px 3px 0;
-            background: #ba9eff;
-            box-shadow: 0 0 8px #ba9eff99;
+            background: var(--color-primary);
+            box-shadow: 0 0 8px color-mix(in srgb, var(--color-primary) 60%, transparent);
             transition: top 0.25s cubic-bezier(0.4,0,0.2,1), height 0.25s cubic-bezier(0.4,0,0.2,1), opacity 0.2s;
             opacity: 0;
             pointer-events: none;
@@ -129,7 +129,7 @@
         }
         
         .status-lamp.is-off {
-            background: rgba(223, 228, 254, 0.08) !important;
+            background: color-mix(in srgb, var(--color-on-surface) 8%, transparent) !important;
             box-shadow: 0 0 0px transparent !important;
             opacity: 0.35 !important;
             transition: background 1.5s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 1.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 1.5s ease !important;
@@ -142,80 +142,80 @@
         }
 
         @keyframes neon-spark {
-            0% { opacity: 0.1; background: rgba(223, 228, 254, 0.08); box-shadow: none; }
-            10% { opacity: 0.8; background: linear-gradient(90deg, transparent, #ba9eff, transparent); box-shadow: 0 0 15px rgba(186, 158, 255, 0.6); }
-            15% { opacity: 0.2; background: rgba(223, 228, 254, 0.08); box-shadow: none; }
-            25% { opacity: 0.9; background: linear-gradient(90deg, transparent, #53ddfc, transparent); box-shadow: 0 0 25px rgba(83, 221, 252, 0.7); }
-            30% { opacity: 0.3; background: rgba(223, 228, 254, 0.08); box-shadow: none; }
-            45% { opacity: 0.7; background: linear-gradient(90deg, transparent, #ba9eff, transparent); box-shadow: 0 0 15px rgba(186, 158, 255, 0.5); }
-            50% { opacity: 0.2; background: rgba(223, 228, 254, 0.08); box-shadow: none; }
-            65% { opacity: 0.95; background: linear-gradient(90deg, transparent, #53ddfc, #ba9eff, transparent); box-shadow: 0 0 35px rgba(186, 158, 255, 0.8), 0 0 20px rgba(83, 221, 252, 0.5); }
-            70% { opacity: 0.5; background: rgba(223, 228, 254, 0.08); box-shadow: none; }
-            85% { opacity: 1; background: linear-gradient(90deg, transparent, #ba9eff, transparent); box-shadow: 0 0 35px rgba(186, 158, 255, 0.9); }
-            100% { opacity: 1; background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #a27aff 70%, transparent 100%); box-shadow: 0 0 20px rgba(186, 158, 255, 0.8), 0 0 35px rgba(162, 122, 255, 0.4); }
+            0% { opacity: 0.1; background: color-mix(in srgb, var(--color-on-surface) 8%, transparent); box-shadow: none; }
+            10% { opacity: 0.8; background: linear-gradient(90deg, transparent, var(--color-primary), transparent); box-shadow: 0 0 15px color-mix(in srgb, var(--color-primary) 60%, transparent); }
+            15% { opacity: 0.2; background: color-mix(in srgb, var(--color-on-surface) 8%, transparent); box-shadow: none; }
+            25% { opacity: 0.9; background: linear-gradient(90deg, transparent, var(--color-secondary), transparent); box-shadow: 0 0 25px color-mix(in srgb, var(--color-secondary) 70%, transparent); }
+            30% { opacity: 0.3; background: color-mix(in srgb, var(--color-on-surface) 8%, transparent); box-shadow: none; }
+            45% { opacity: 0.7; background: linear-gradient(90deg, transparent, var(--color-primary), transparent); box-shadow: 0 0 15px color-mix(in srgb, var(--color-primary) 50%, transparent); }
+            50% { opacity: 0.2; background: color-mix(in srgb, var(--color-on-surface) 8%, transparent); box-shadow: none; }
+            65% { opacity: 0.95; background: linear-gradient(90deg, transparent, var(--color-secondary), var(--color-primary), transparent); box-shadow: 0 0 35px color-mix(in srgb, var(--color-primary) 80%, transparent), 0 0 20px color-mix(in srgb, var(--color-secondary) 50%, transparent); }
+            70% { opacity: 0.5; background: color-mix(in srgb, var(--color-on-surface) 8%, transparent); box-shadow: none; }
+            85% { opacity: 1; background: linear-gradient(90deg, transparent, var(--color-primary), transparent); box-shadow: 0 0 35px color-mix(in srgb, var(--color-primary) 90%, transparent); }
+            100% { opacity: 1; background: linear-gradient(90deg, transparent 0%, var(--color-primary) 30%, var(--color-primary) 70%, transparent 100%); box-shadow: 0 0 20px color-mix(in srgb, var(--color-primary) 80%, transparent), 0 0 35px color-mix(in srgb, var(--color-primary) 40%, transparent); }
         }
 
         @keyframes neon-glow {
             /* Steady Purple state */
             0%, 25%, 50%, 70%, 100% {
-                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
-                box-shadow: 0 0 18px rgba(186, 158, 255, 0.65), 0 0 28px rgba(132, 85, 239, 0.35);
+                background: linear-gradient(90deg, transparent 0%, var(--color-primary) 30%, var(--color-primary-dim) 70%, transparent 100%);
+                box-shadow: 0 0 18px color-mix(in srgb, var(--color-primary) 65%, transparent), 0 0 28px color-mix(in srgb, var(--color-primary-dim) 35%, transparent);
                 opacity: 1;
             }
             12%, 37%, 62% {
-                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
-                box-shadow: 0 0 26px rgba(186, 158, 255, 0.9), 0 0 40px rgba(162, 122, 255, 0.45);
+                background: linear-gradient(90deg, transparent 0%, var(--color-primary) 30%, var(--color-primary-dim) 70%, transparent 100%);
+                box-shadow: 0 0 26px color-mix(in srgb, var(--color-primary) 90%, transparent), 0 0 40px color-mix(in srgb, var(--color-primary) 45%, transparent);
                 opacity: 1;
             }
 
             /* 40%: single realistic quick neon double-flicker */
             40% {
-                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
-                box-shadow: 0 0 6px rgba(186, 158, 255, 0.25), 0 0 10px rgba(132, 85, 239, 0.1);
+                background: linear-gradient(90deg, transparent 0%, var(--color-primary) 30%, var(--color-primary-dim) 70%, transparent 100%);
+                box-shadow: 0 0 6px color-mix(in srgb, var(--color-primary) 25%, transparent), 0 0 10px color-mix(in srgb, var(--color-primary-dim) 10%, transparent);
                 opacity: 0.55;
             }
             40.4% {
-                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
-                box-shadow: 0 0 22px rgba(186, 158, 255, 0.8);
+                background: linear-gradient(90deg, transparent 0%, var(--color-primary) 30%, var(--color-primary-dim) 70%, transparent 100%);
+                box-shadow: 0 0 22px color-mix(in srgb, var(--color-primary) 80%, transparent);
                 opacity: 0.95;
             }
             40.8% {
-                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
-                box-shadow: 0 0 8px rgba(186, 158, 255, 0.35);
+                background: linear-gradient(90deg, transparent 0%, var(--color-primary) 30%, var(--color-primary-dim) 70%, transparent 100%);
+                box-shadow: 0 0 8px color-mix(in srgb, var(--color-primary) 35%, transparent);
                 opacity: 0.65;
             }
             41.5% {
-                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
-                box-shadow: 0 0 18px rgba(186, 158, 255, 0.65);
+                background: linear-gradient(90deg, transparent 0%, var(--color-primary) 30%, var(--color-primary-dim) 70%, transparent 100%);
+                box-shadow: 0 0 18px color-mix(in srgb, var(--color-primary) 65%, transparent);
                 opacity: 1;
             }
 
             /* 75% to 88%: Slow rare drift to cyan/blue and back */
             75% {
-                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
-                box-shadow: 0 0 18px rgba(186, 158, 255, 0.65);
+                background: linear-gradient(90deg, transparent 0%, var(--color-primary) 30%, var(--color-primary-dim) 70%, transparent 100%);
+                box-shadow: 0 0 18px color-mix(in srgb, var(--color-primary) 65%, transparent);
                 opacity: 1;
             }
             82% {
-                background: linear-gradient(90deg, transparent 0%, #ba9eff 15%, #53ddfc 80%, transparent 100%);
-                box-shadow: 0 0 24px rgba(186, 158, 255, 0.65), 0 0 35px rgba(83, 221, 252, 0.5);
+                background: linear-gradient(90deg, transparent 0%, var(--color-primary) 15%, var(--color-secondary) 80%, transparent 100%);
+                box-shadow: 0 0 24px color-mix(in srgb, var(--color-primary) 65%, transparent), 0 0 35px color-mix(in srgb, var(--color-secondary) 50%, transparent);
                 opacity: 1;
             }
             88% {
-                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
-                box-shadow: 0 0 18px rgba(186, 158, 255, 0.65);
+                background: linear-gradient(90deg, transparent 0%, var(--color-primary) 30%, var(--color-primary-dim) 70%, transparent 100%);
+                box-shadow: 0 0 18px color-mix(in srgb, var(--color-primary) 65%, transparent);
                 opacity: 1;
             }
             
             /* 90%: a quick micro-flicker while returning to purple */
             90% {
-                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
-                box-shadow: 0 0 5px rgba(186, 158, 255, 0.2);
+                background: linear-gradient(90deg, transparent 0%, var(--color-primary) 30%, var(--color-primary-dim) 70%, transparent 100%);
+                box-shadow: 0 0 5px color-mix(in srgb, var(--color-primary) 20%, transparent);
                 opacity: 0.5;
             }
             90.4% {
-                background: linear-gradient(90deg, transparent 0%, #ba9eff 30%, #8455ef 70%, transparent 100%);
-                box-shadow: 0 0 18px rgba(186, 158, 255, 0.65);
+                background: linear-gradient(90deg, transparent 0%, var(--color-primary) 30%, var(--color-primary-dim) 70%, transparent 100%);
+                box-shadow: 0 0 18px color-mix(in srgb, var(--color-primary) 65%, transparent);
                 opacity: 1;
             }
         }
@@ -226,7 +226,7 @@
 
     <!-- Custom title bar -->
     <div id="titlebar" class="fixed top-0 left-0 right-0 flex items-stretch z-[9999]"
-        style="background:#070d1f;">
+        style="background:var(--color-background);">
         <div data-tauri-drag-region class="flex-1 flex items-center px-4 gap-2">
             <span class="material-symbols-outlined text-primary" style="font-size:16px;">blur_on</span>
             <span class="font-headline text-xs font-bold uppercase tracking-widest text-primary/60">ZAPRET_</span>
@@ -244,7 +244,7 @@
 
     <!-- Close menu (right-click on close button) -->
     <div id="tb-close-menu" class="hidden fixed z-[10000] rounded-xl border border-primary/20 overflow-hidden shadow-2xl py-1"
-        style="background:#0d1225; min-width: 200px;">
+        style="background:var(--color-popup); min-width: 200px;">
         <button id="tb-close-menu-tray" class="w-full text-left px-4 py-2 text-xs font-headline text-on-surface hover:bg-primary/10 flex items-center gap-2">
             <span class="material-symbols-outlined text-sm text-primary/60">keyboard_arrow_down</span>
             <span data-i18n="close_menu_tray">Minimize to tray</span>
@@ -257,10 +257,10 @@
 
     <aside
         class="fixed top-[30px] bottom-3 left-2 w-[72px] flex flex-col py-5 items-center z-50 border border-outline-variant/10 rounded-xl shadow-2xl overflow-hidden"
-        style="background: #0a0e1c;">
+        style="background: var(--color-sidebar);">
         <!-- Sliding active indicator bar -->
         <div id="nav-indicator"></div>
-        <div class="text-[#ba9eff] font-black mt-3 mb-5">
+        <div class="text-primary font-black mt-3 mb-5">
             <span class="material-symbols-outlined" style="font-variation-settings: 'opsz' 40; font-size:28px;">blur_on</span>
         </div>
         <nav class="flex flex-col gap-4 w-full items-center flex-1">
@@ -301,9 +301,9 @@
     </aside>
 
     <header
-        class="fixed top-[42px] right-3 left-[88px] flex justify-between items-center px-6 h-16 z-40 rounded-3xl" style="background: rgba(10, 14, 28, 0.75); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);">
+        class="fixed top-[42px] right-3 left-[88px] flex justify-between items-center px-6 h-16 z-40 rounded-3xl" style="background: color-mix(in srgb, var(--color-sidebar) 90%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);">
         <div class="flex flex-col">
-            <span class="text-[#ba9eff] font-headline text-lg font-bold uppercase tracking-widest">ZAPRET_</span>
+            <span class="text-primary font-headline text-lg font-bold uppercase tracking-widest">ZAPRET_</span>
             <span id="header-status"
                 class="text-[10px] text-error-dim font-bold uppercase tracking-[0.2em] opacity-80"><span data-i18n="status_label">Status</span>:
                 <span data-i18n="status_disconnected">Disconnected</span></span>

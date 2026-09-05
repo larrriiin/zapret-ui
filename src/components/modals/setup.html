@@ -1,0 +1,76 @@
+<dialog id="setup-dialog" class="setup-dialog" aria-labelledby="setup-title">
+    <div class="setup-shell">
+        <header class="setup-header">
+            <div class="setup-drag-region" data-tauri-drag-region>
+                <span class="setup-brand" data-tauri-drag-region><span class="material-symbols-outlined" aria-hidden="true">blur_on</span> ZAPRET_</span>
+                <span class="setup-window-title" data-tauri-drag-region data-i18n="first_launch_title">First Time Setup</span>
+            </div>
+            <div class="setup-window-controls">
+                <button id="setup-minimize" class="setup-window-button" type="button" data-i18n="minimize" data-i18n-attr="aria-label" title="Minimize"><span class="material-symbols-outlined" aria-hidden="true">remove</span></button>
+                <button id="setup-close" class="setup-window-button setup-window-close" type="button" data-i18n="close" data-i18n-attr="aria-label" title="Close"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
+            </div>
+        </header>
+        <ol class="setup-steps" aria-label="Setup" data-i18n="setup_steps" data-i18n-attr="aria-label">
+            <li data-setup-step="0" data-i18n="theme_title">Appearance</li>
+            <li data-setup-step="1" data-i18n="setup_prepare">Preparation</li>
+            <li data-setup-step="2" data-i18n="setup_test">Testing</li>
+            <li data-setup-step="3" data-i18n="setup_finish">Done</li>
+        </ol>
+        <div id="setup-body" class="setup-body">
+            <h2 id="setup-title" tabindex="-1"></h2>
+            <p id="setup-description" class="setup-description"></p>
+            <section data-setup-panel="0" aria-labelledby="setup-title"><div id="setup-appearance"></div></section>
+            <section data-setup-panel="1" hidden aria-labelledby="setup-title">
+                <div class="setup-illustration" aria-hidden="true"><span class="material-symbols-outlined">download</span></div>
+                <p class="setup-note" data-i18n="setup_prepare_note">The app checks the core and downloads missing components</p>
+            </section>
+            <section data-setup-panel="2" hidden aria-labelledby="setup-title">
+                <div id="setup-test-intro">
+                    <div class="setup-illustration" aria-hidden="true"><span class="material-symbols-outlined">network_check</span></div>
+                    <p class="setup-note" data-i18n="setup_test_note">Tests may take several minutes. Zapret will stop during testing; your connection may be interrupted</p>
+                </div>
+                <div id="setup-result" class="setup-result" hidden>
+                    <span class="setup-result-label" data-i18n="setup_best">Best test result</span>
+                    <strong id="setup-best-name"></strong>
+                    <p id="setup-best-meta"></p>
+                    <fieldset class="setup-run-mode">
+                        <legend data-i18n="setup_run_mode">Run mode</legend>
+                        <label><input type="radio" name="setup-mode" value="service" checked><span data-i18n="setup_service">With Windows</span></label>
+                        <label><input type="radio" name="setup-mode" value="temporary"><span data-i18n="setup_temporary">Until stopped</span></label>
+                    </fieldset>
+                    <p class="setup-note" data-i18n="setup_test_limit">Successful checks do not guarantee that every video or voice call will work</p>
+                </div>
+            </section>
+            <section data-setup-panel="3" hidden aria-labelledby="setup-title">
+                <div class="setup-illustration setup-success" aria-hidden="true"><span class="material-symbols-outlined">check_circle</span></div>
+                <p id="setup-summary" class="setup-note"></p>
+            </section>
+            <div id="setup-progress" class="setup-progress" hidden>
+                <p id="setup-progress-label" role="status" aria-live="polite"></p>
+                <progress id="setup-progress-bar" max="100" value="0" data-i18n="setup_progress" data-i18n-attr="aria-label"></progress>
+                <p id="setup-progress-detail"></p>
+            </div>
+            <p id="setup-error" class="setup-error" role="alert" hidden></p>
+        </div>
+        <footer class="setup-footer">
+            <button id="setup-back" type="button" class="setup-button setup-secondary" data-i18n="setup_back">Back</button>
+            <button id="setup-skip" type="button" class="setup-button setup-secondary" data-i18n="setup_skip">Test later</button>
+            <button id="setup-next" type="button" class="setup-button setup-primary"></button>
+        </footer>
+    </div>
+</dialog>
+
+<dialog id="setup-confirm" class="setup-dialog setup-confirm" aria-labelledby="setup-confirm-title">
+    <div class="setup-shell">
+        <div class="setup-body">
+            <h2 id="setup-confirm-title" data-i18n="setup_restart_title">Set up again?</h2>
+            <p class="setup-description" data-i18n="setup_restart_confirm">The wizard will help you choose the appearance and find a strategy again. During preparation, Zapret stops and network filters return to defaults</p>
+            <label class="setup-delete-label"><input id="setup-delete-lists" type="checkbox"><span data-i18n="setup_delete_lists">Delete my site and IP lists</span></label>
+            <p class="setup-note" data-i18n="setup_keep_lists">Leave unchecked to keep your lists and exclusions</p>
+        </div>
+        <footer class="setup-footer">
+            <button id="setup-confirm-cancel" type="button" class="setup-button setup-secondary" data-i18n="cancel">Cancel</button>
+            <button id="setup-confirm-start" type="button" class="setup-button setup-primary" data-i18n="setup_restart">Set up again</button>
+        </footer>
+    </div>
+</dialog>

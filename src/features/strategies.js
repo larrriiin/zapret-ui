@@ -165,7 +165,7 @@ export function renderStrategyList() {
 
       const icon = document.createElement('span');
       icon.className = 'material-symbols-outlined text-sm item-icon';
-      icon.style.color = isSelected ? '#ba9eff' : '';
+      icon.style.color = isSelected ? 'var(--color-primary)' : '';
       icon.style.opacity = isSelected ? '1' : '0.3';
       icon.textContent = 'chevron_right';
       item.appendChild(icon);
@@ -194,7 +194,7 @@ export function renderStrategyList() {
       const starIcon = document.createElement('span');
       starIcon.className = 'material-symbols-outlined text-sm';
       starIcon.textContent = favs.has(name) ? 'star' : 'star_outline';
-      starIcon.style.color = favs.has(name) ? '#ffc857' : '';
+      starIcon.style.color = favs.has(name) ? 'var(--color-warning)' : '';
       star.appendChild(starIcon);
       star.addEventListener('click', (e) => {
         e.stopPropagation();

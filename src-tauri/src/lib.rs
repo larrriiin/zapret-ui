@@ -3163,6 +3163,66 @@ fn graceful_exit(app: &tauri::AppHandle) {
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
+#[tauri::command]
+async fn open_setup_window(
+    app: tauri::AppHandle,
+    repeat: bool,
+    clear_lists: bool,
+) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("setup") {
+        window.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    let url = format!("index.html?setup=1&repeat={repeat}&clearLists={clear_lists}");
+    tauri::WebviewWindowBuilder::new(&app, "setup", tauri::WebviewUrl::App(url.into()))
+        .title("Zapret — Setup")
+        .inner_size(660.0, 660.0)
+        .decorations(false)
+        .resizable(false)
+        .maximizable(false)
+        .center()
+        .visible(false)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn setup_window_ready(app: tauri::AppHandle) -> Result<(), String> {
+    let setup = app
+        .get_webview_window("setup")
+        .ok_or("Setup window is missing")?;
+    setup.show().map_err(|e| e.to_string())?;
+    if let Some(main) = app.get_webview_window("main") {
+        main.hide().map_err(|e| e.to_string())?;
+    }
+    setup.set_focus().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn finish_setup_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(setup) = app.get_webview_window("setup") {
+        setup.destroy().map_err(|e| e.to_string())?;
+    }
+    app.emit_to("main", "setup-finished", ())
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn show_app_window(app: tauri::AppHandle, force: bool) -> Result<(), String> {
+    if app.get_webview_window("setup").is_some()
+        || (!force && std::env::args().any(|arg| arg == "--autostart"))
+    {
+        return Ok(());
+    }
+    if let Some(main) = app.get_webview_window("main") {
+        main.show().map_err(|e| e.to_string())?;
+        main.set_focus().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(windows)]
@@ -3177,17 +3237,20 @@ pub fn run() {
             Some(vec!["--autostart"]),
         ))
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            let _ = app.get_webview_window("main").map(|w| {
-                let _ = w.show();
-                let _ = w.unminimize();
-                let _ = w.set_focus();
+            let _ = app
+                .get_webview_window("setup")
+                .or_else(|| app.get_webview_window("main"))
+                .map(|w| {
+                    let _ = w.show();
+                    let _ = w.unminimize();
+                    let _ = w.set_focus();
 
-                let state = app.state::<AppState>();
-                let tray_opt = state.tray_handle.lock_unpoisoned().clone();
-                if let Some(tray) = tray_opt {
-                    let _ = tray.set_visible(false);
-                }
-            });
+                    let state = app.state::<AppState>();
+                    let tray_opt = state.tray_handle.lock_unpoisoned().clone();
+                    if let Some(tray) = tray_opt {
+                        let _ = tray.set_visible(false);
+                    }
+                });
         }))
         .manage(AppState {
             active_strategy: Mutex::new(None),
@@ -3268,7 +3331,10 @@ pub fn run() {
                             graceful_exit(app);
                         }
                         "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
+                            if let Some(window) = app
+                                .get_webview_window("setup")
+                                .or_else(|| app.get_webview_window("main"))
+                            {
                                 let _ = window.show();
                                 let _ = window.set_focus();
                                 // Скрываем иконку при разворачивании
@@ -3318,7 +3384,10 @@ pub fn run() {
                             ..
                         } => {
                             let app = tray.app_handle();
-                            if let Some(window) = app.get_webview_window("main") {
+                            if let Some(window) = app
+                                .get_webview_window("setup")
+                                .or_else(|| app.get_webview_window("main"))
+                            {
                                 let _ = window.show();
                                 let _ = window.set_focus();
                                 // Скрываем иконку при разворачивании
@@ -3359,6 +3428,11 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "setup" {
+                    api.prevent_close();
+                    let _ = window.emit("setup-close-requested", ());
+                    return;
+                }
                 window.hide().unwrap();
                 api.prevent_close();
 
@@ -3394,6 +3468,10 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            open_setup_window,
+            setup_window_ready,
+            finish_setup_window,
+            show_app_window,
             get_strategies,
             import_custom_strategy,
             get_local_version_cmd,
