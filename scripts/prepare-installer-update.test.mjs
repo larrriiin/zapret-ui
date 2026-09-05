@@ -67,10 +67,12 @@ test('workflow CLI creates the missing latest.json from local signed artifacts',
   await writeFile(msi, 'test package');
   await writeFile(`${msi}.sig`, 'bXNp');
   execFileSync(process.execPath, [fileURLToPath(new URL('./prepare-installer-update.mjs', import.meta.url)), output, installer, '--from-bundle', bundle], {
-    env: { ...process.env, GITHUB_REPOSITORY: options.repository, GITHUB_REF_NAME: `v${version}` },
+    // A manual run uses a branch ref; release URLs must use the requested tag.
+    env: { ...process.env, GITHUB_REPOSITORY: options.repository, GITHUB_REF_NAME: 'main', RELEASE_TAG: `v${version}` },
   });
   const result = JSON.parse(await readFile(output, 'utf8'));
   assert.equal(result.version, version);
+  assert.ok(result.platforms['windows-x86_64'].url.includes(`/download/v${version}/`));
   assert.equal(Object.keys(result.platforms).length, 3);
   assert.ok(result.platforms['windows-x86_64'].url.endsWith(path.basename(installer)));
 });

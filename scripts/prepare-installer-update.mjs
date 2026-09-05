@@ -67,7 +67,7 @@ async function main() {
     signature,
     assetName: path.basename(installerPath),
     repository: process.env.GITHUB_REPOSITORY,
-    tag: process.env.GITHUB_REF_NAME,
+    tag: process.env.RELEASE_TAG || process.env.GITHUB_REF_NAME,
   };
   let result;
   if (mode === '--from-bundle' && bundleDirectory) {

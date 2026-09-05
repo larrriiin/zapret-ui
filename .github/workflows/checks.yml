@@ -19,6 +19,8 @@ jobs:
         run: node scripts/check-versions.mjs
       - name: Verify branded updater manifest
         run: node --test scripts/prepare-installer-update.test.mjs
+      - name: Verify manual release selection
+        run: node --test scripts/resolve-release.test.mjs
       - name: Test Flowseal version comparison
         run: npm run test:flowseal-version
       - name: Verify UI translations
