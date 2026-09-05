@@ -34,6 +34,11 @@ jobs:
           shared-key: 'zapret-ui-rust-cache'
       - name: install frontend dependencies
         run: npm install
+      - name: Test branded updater compatibility
+        shell: powershell
+        run: |
+          ./scripts/test-installer.ps1
+          node --test scripts/prepare-installer-update.test.mjs
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -42,5 +47,27 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "Zapret-UI ${{ github.ref_name }}"
           releaseBody: "See the assets below for the latest installers and update artifacts."
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
+      - name: Build branded Windows installer
+        shell: powershell
+        run: ./scripts/build-installer.ps1
+      - name: Sign and connect branded Windows updater
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Get-Item artifacts/installer/*-branded-setup.exe
+          node node_modules/@tauri-apps/cli/tauri.js signer sign $installer.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to sign branded updater.' }
+          gh release download $env:GITHUB_REF_NAME --pattern latest.json --dir artifacts/installer --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to download updater manifest.' }
+          node scripts/prepare-installer-update.mjs artifacts/installer/latest.json $installer.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to prepare branded updater manifest.' }
+          gh release upload $env:GITHUB_REF_NAME $installer.FullName "$($installer.FullName).sig" --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to upload branded updater.' }
+          gh release upload $env:GITHUB_REF_NAME artifacts/installer/latest.json --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to upload updater manifest.' }
+          gh release edit $env:GITHUB_REF_NAME --draft=false
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to publish completed release.' }

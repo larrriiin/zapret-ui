@@ -1,0 +1,126 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ZAPRET — Установка" Width="720" Height="520" WindowStartupLocation="CenterScreen"
+        WindowStyle="None" ResizeMode="NoResize" Background="#070D1F" Foreground="#DFE4FE"
+        FontFamily="pack://application:,,,/fonts/#Inter" FontSize="14" UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display" TextOptions.TextRenderingMode="Grayscale">
+  <Window.Resources>
+    <Style TargetType="Button">
+      <Setter Property="Background" Value="#171F36"/><Setter Property="Foreground" Value="#DFE4FE"/>
+      <Setter Property="Padding" Value="18,12"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="BorderThickness" Value="0"/><Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+        <Border x:Name="Surface" Background="{TemplateBinding Background}" CornerRadius="10" BorderThickness="1" BorderBrush="Transparent" Padding="{TemplateBinding Padding}">
+          <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.85"/></Trigger>
+          <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.7"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="BorderBrush" Value="#53DDFC"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Surface" Property="Opacity" Value="0.4"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="RadioButton">
+      <Setter Property="Foreground" Value="#DFE4FE"/><Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Margin" Value="0,0,24,0"/><Setter Property="Padding" Value="6,0,0,0"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
+        <Border x:Name="Focus" BorderThickness="1" BorderBrush="Transparent" Padding="2,5" CornerRadius="4">
+          <StackPanel Orientation="Horizontal">
+            <Grid Width="16" Height="16" Margin="0,0,8,0">
+              <Ellipse x:Name="Ring" Stroke="#A5AAC2" StrokeThickness="1.5"/>
+              <Ellipse x:Name="Dot" Fill="#BA9EFF" Width="8" Height="8" Visibility="Collapsed"/>
+            </Grid>
+            <ContentPresenter VerticalAlignment="Center"/>
+          </StackPanel>
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsChecked" Value="True"><Setter TargetName="Dot" Property="Visibility" Value="Visible"/><Setter TargetName="Ring" Property="Stroke" Value="#BA9EFF"/></Trigger>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Ring" Property="Stroke" Value="#BA9EFF"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Focus" Property="BorderBrush" Value="#53DDFC"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="Background" Value="#10162A"/><Setter Property="Foreground" Value="#DFE4FE"/>
+      <Setter Property="CaretBrush" Value="#BA9EFF"/><Setter Property="SelectionBrush" Value="#8455EF"/>
+      <Setter Property="BorderBrush" Value="#41475B"/><Setter Property="Padding" Value="12,11"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Style.Triggers><Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="BorderBrush" Value="#BA9EFF"/></Trigger></Style.Triggers>
+    </Style>
+  </Window.Resources>
+  <Border BorderThickness="1" BorderBrush="#28314B" Background="#070D1F">
+    <Grid>
+      <Grid.RowDefinitions><RowDefinition Height="58"/><RowDefinition Height="*"/><RowDefinition Height="86"/></Grid.RowDefinitions>
+      <Border x:Name="TitleBar" Background="#0A0E1C" Padding="26,0,14,0">
+        <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <Image x:Name="BrandIcon" Width="24" Height="24" Margin="0,0,12,0"/>
+            <TextBlock Text="ZAPRET_" Foreground="#BA9EFF" FontSize="15" FontWeight="Bold" VerticalAlignment="Center"/>
+            <TextBlock x:Name="VersionLabel" Foreground="#A5AAC2" Margin="18,0,0,0" FontSize="12" VerticalAlignment="Center"/>
+          </StackPanel>
+          <StackPanel Grid.Column="1" Orientation="Horizontal">
+            <Button x:Name="MinimizeButton" Width="38" Height="34" Padding="10" Background="Transparent" AutomationProperties.Name="Свернуть"><Path Data="M0,5 H12" Stroke="#A5AAC2" StrokeThickness="1.5"/></Button>
+            <Button x:Name="CloseButton" Width="38" Height="34" Padding="10" Background="Transparent" AutomationProperties.Name="Закрыть"><Path Data="M0,0 L10,10 M10,0 L0,10" Stroke="#A5AAC2" StrokeThickness="1.5"/></Button>
+          </StackPanel>
+        </Grid>
+      </Border>
+      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <Grid Margin="40,26,40,16">
+        <Grid.RowDefinitions><RowDefinition Height="30"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Top" AutomationProperties.Name="Этапы установки">
+          <TextBlock x:Name="Step1" Text="Подготовка" Foreground="#BA9EFF" FontSize="12" FontWeight="SemiBold"/>
+          <Border Width="30" Height="1" Background="#41475B" Margin="14,0"/>
+          <TextBlock x:Name="Step2" Text="Установка" Foreground="#A5AAC2" FontSize="12"/>
+          <Border Width="30" Height="1" Background="#41475B" Margin="14,0"/>
+          <TextBlock x:Name="Step3" Text="Готово" Foreground="#A5AAC2" FontSize="12"/>
+        </StackPanel>
+        <Grid Grid.Row="1">
+          <StackPanel x:Name="SetupPanel">
+            <TextBlock x:Name="Heading" Text="Установим ZAPRET" FontSize="30" FontWeight="SemiBold" Margin="0,8,0,10"/>
+            <TextBlock Text="Выберите, где будет установлено приложение." TextWrapping="Wrap" Foreground="#A5AAC2" Margin="0,0,24,24"/>
+            <WrapPanel Orientation="Horizontal" Margin="0,0,0,20">
+              <RadioButton x:Name="CurrentUser" Content="Только для меня" IsChecked="True" GroupName="Scope"/>
+              <RadioButton x:Name="AllUsers" Content="Для всех пользователей" GroupName="Scope"/>
+            </WrapPanel>
+            <Label Content="Папка установки" Target="{Binding ElementName=InstallPath}" Foreground="#A5AAC2" Padding="0" Margin="0,0,0,8" FontSize="12"/>
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <TextBox x:Name="InstallPath" AutomationProperties.Name="Папка установки"/>
+              <Button x:Name="BrowseButton" Grid.Column="1" Content="Изменить" Margin="10,0,0,0"/>
+            </Grid>
+            <TextBlock x:Name="ScopeNote" Foreground="#A5AAC2" TextWrapping="Wrap" FontSize="12" Margin="0,12,0,0" LineHeight="18"/>
+          </StackPanel>
+          <StackPanel x:Name="ProgressPanel" Visibility="Collapsed" VerticalAlignment="Center">
+            <TextBlock x:Name="ProgressHeading" Text="Устанавливаем ZAPRET" FontSize="30" FontWeight="SemiBold" Margin="0,0,0,12"/>
+            <TextBlock x:Name="ProgressDescription" Text="Это окно закроется только после завершения установки." Foreground="#A5AAC2" TextWrapping="Wrap"/>
+            <ProgressBar x:Name="Progress" Height="5" Margin="0,32,0,18" IsIndeterminate="True" Foreground="#BA9EFF" Background="#171F36" BorderThickness="0" AutomationProperties.Name="Идёт установка"/>
+            <TextBlock x:Name="ProgressText" Text="Подготавливаем файлы…" Foreground="#A5AAC2" TextWrapping="Wrap" LineHeight="21"/>
+          </StackPanel>
+          <StackPanel x:Name="DonePanel" Visibility="Collapsed" VerticalAlignment="Center">
+            <Border Width="56" Height="56" Background="#171F36" CornerRadius="16" HorizontalAlignment="Left" Margin="0,0,0,20">
+              <Path Data="M0,10 L8,18 L25,0" Stroke="#53DDFC" StrokeThickness="2.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <TextBlock Text="Всё готово" FontSize="32" FontWeight="SemiBold" Margin="0,0,0,12"/>
+            <TextBlock x:Name="DoneText" Text="ZAPRET установлен. Можно переходить к настройке." Foreground="#A5AAC2" TextWrapping="Wrap" LineHeight="22"/>
+          </StackPanel>
+          <StackPanel x:Name="ErrorPanel" Visibility="Collapsed" VerticalAlignment="Center">
+            <TextBlock Text="Установка не завершена" FontSize="28" FontWeight="SemiBold" Margin="0,0,0,16"/>
+            <TextBlock x:Name="ErrorText" Foreground="#DFE4FE" TextWrapping="Wrap" LineHeight="22"/>
+            <TextBox x:Name="ErrorDetail" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="85" VerticalScrollBarVisibility="Auto" FontSize="11" Margin="0,18,0,0" AutomationProperties.Name="Подробности ошибки"/>
+          </StackPanel>
+        </Grid>
+      </Grid>
+      </ScrollViewer>
+      <Border Grid.Row="2" BorderBrush="#28314B" BorderThickness="0,1,0,0" Padding="40,18">
+        <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <TextBlock x:Name="FooterNote" Text="После установки поможем с первой настройкой." Foreground="#A5AAC2" FontSize="11" MaxWidth="310" TextWrapping="Wrap" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+          <StackPanel Grid.Column="1" Orientation="Horizontal">
+            <Button x:Name="SecondaryButton" Content="Закрыть" Visibility="Collapsed" Background="Transparent" Margin="0,0,10,0"/>
+            <Button x:Name="PrimaryButton" Content="Установить" Background="#BA9EFF" Foreground="#39008C" MinWidth="146" IsDefault="True"/>
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Grid>
+  </Border>
+</Window>

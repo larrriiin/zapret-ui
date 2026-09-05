@@ -4,6 +4,9 @@
   "version": "26.9.2",
   "type": "module",
   "scripts": {
+    "installer:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1",
+    "installer:preview": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -Preview",
+    "test:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-installer.ps1",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",

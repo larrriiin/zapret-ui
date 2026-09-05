@@ -17,6 +17,8 @@ jobs:
           node-version: 20
       - name: Verify version strings are in sync
         run: node scripts/check-versions.mjs
+      - name: Verify branded updater manifest
+        run: node --test scripts/prepare-installer-update.test.mjs
       - name: Test Flowseal version comparison
         run: npm run test:flowseal-version
       - name: Verify UI translations
