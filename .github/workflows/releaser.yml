@@ -49,6 +49,8 @@ jobs:
           releaseBody: "See the assets below for the latest installers and update artifacts."
           releaseDraft: true
           prerelease: false
+          # The final manifest is generated below from this run's signed bundles.
+          uploadUpdaterJson: false
       - name: Build branded Windows installer
         shell: powershell
         run: ./scripts/build-installer.ps1
@@ -61,9 +63,7 @@ jobs:
           $installer = Get-Item artifacts/installer/*-branded-setup.exe
           node node_modules/@tauri-apps/cli/tauri.js signer sign $installer.FullName
           if ($LASTEXITCODE -ne 0) { throw 'Failed to sign branded updater.' }
-          gh release download $env:GITHUB_REF_NAME --pattern latest.json --dir artifacts/installer --clobber
-          if ($LASTEXITCODE -ne 0) { throw 'Failed to download updater manifest.' }
-          node scripts/prepare-installer-update.mjs artifacts/installer/latest.json $installer.FullName
+          node scripts/prepare-installer-update.mjs artifacts/installer/latest.json $installer.FullName --from-bundle src-tauri/target/release/bundle
           if ($LASTEXITCODE -ne 0) { throw 'Failed to prepare branded updater manifest.' }
           gh release upload $env:GITHUB_REF_NAME $installer.FullName "$($installer.FullName).sig" --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Failed to upload branded updater.' }
