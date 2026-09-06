@@ -30,16 +30,15 @@ async function withTimeout(promise, timeoutMs) {
 
 async function downloadAndInstallUIUpdate(event, updateObj) {
   if (!updateObj) return;
+  const btn = event.currentTarget;
   try {
-    const btn = event.target;
     btn.disabled = true;
-    btn.innerHTML = `<span class="material-symbols-outlined text-[10px] animate-spin">refresh</span> ${t('downloading_installing')}`;
+    btn.innerHTML = `<span class="material-symbols-outlined text-sm animate-spin" aria-hidden="true">refresh</span><span>${t('downloading_installing')}</span>`;
     await updateObj.downloadAndInstall();
     btn.innerHTML = t('update_installed_restarting');
   } catch (err) {
     console.error('UI update failed:', err);
     alert(`${t('ui_update_failed')}: ${err}`);
-    const btn = event.target;
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = t('update_now');
@@ -264,7 +263,7 @@ function showDualUpdateModal(data, manual = false) {
             </div>
             <div class="flex flex-col items-end gap-3">
               ${uiStatus}
-              ${data.ui.available ? `<button id="modal-update-ui-btn" class="px-4 py-2 bg-primary/20 hover:bg-primary/30 border border-primary/20 rounded-xl text-[10px] font-black text-primary uppercase transition-all active:scale-95 shadow-lg shadow-primary/5">${t('update_now')}</button>` : ''}
+              ${data.ui.available ? `<button id="modal-update-ui-btn" class="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-primary/20 hover:bg-primary/30 border border-primary/20 rounded-xl text-[10px] font-black text-primary uppercase transition-all active:scale-95 shadow-lg shadow-primary/5">${t('update_now')}</button>` : ''}
             </div>
           </div>
 

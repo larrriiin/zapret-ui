@@ -19,7 +19,7 @@ const original = {
 };
 test('legacy and current EXE clients receive the signed native NSIS; MSI and other platforms are preserved', () => {
   const result = prepareManifest(original, options);
-  assert.equal(result.platforms['windows-x86_64'].url, 'https://github.com/owner/zapret-ui/releases/download/v26.9.2/ZAPRET%20UI_26.9.2_x64-setup.exe');
+  assert.equal(result.platforms['windows-x86_64'].url, 'https://github.com/owner/zapret-ui/releases/download/v26.9.2/ZAPRET.UI_26.9.2_x64-setup.exe');
   assert.equal(result.platforms['windows-x86_64'].signature, 'dGVzdA==');
   assert.deepEqual(result.platforms['windows-x86_64'], result.platforms['windows-x86_64-nsis']);
   assert.deepEqual(result.platforms['windows-x86_64-msi'], original.platforms['windows-x86_64-msi']);
@@ -41,7 +41,7 @@ test('creates latest.json data without a pre-existing manifest and retains the s
   assert.equal(result.platforms['windows-x86_64'].signature, 'dGVzdA==');
   assert.deepEqual(result.platforms['windows-x86_64-nsis'], result.platforms['windows-x86_64']);
   assert.equal(result.platforms['windows-x86_64-msi'].signature, 'bXNp');
-  assert.ok(result.platforms['windows-x86_64-msi'].url.endsWith(`/${encodeURIComponent(msiName)}`));
+  assert.ok(result.platforms['windows-x86_64-msi'].url.endsWith('/ZAPRET.UI_26.9.2_x64_en-US.msi'));
 });
 test('fails before publication if required MSI or its signature is missing', async t => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'zapret-manifest-'));
@@ -74,7 +74,7 @@ test('workflow CLI creates the missing latest.json from local signed artifacts',
   assert.equal(result.version, version);
   assert.ok(result.platforms['windows-x86_64'].url.includes(`/download/v${version}/`));
   assert.equal(Object.keys(result.platforms).length, 3);
-  assert.ok(result.platforms['windows-x86_64'].url.endsWith(encodeURIComponent(path.basename(installer))));
+  assert.ok(result.platforms['windows-x86_64'].url.endsWith(`/ZAPRET.UI_${version}_x64-setup.exe`));
 });
 test('does not prepare an update with mismatched version, missing signature or wrong release', () => {
   for (const patch of [{ version: '26.9.3' }, { signature: '' }, { tag: 'v0.0.1' }, { repository: '../repo' }, { assetName: 'app.msi' }, { assetName: 'ZAPRET_26.9.2_x64-branded-setup.exe' }, { assetName: 'ZAPRET_26.9.1_x64-setup.exe' }]) {

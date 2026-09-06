@@ -2,6 +2,15 @@ import { readFile, writeFile, rename, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+function githubReleaseAssetName(name) {
+  // GitHub normalizes spaces in uploaded release asset names to periods.
+  return name.replaceAll(' ', '.');
+}
+
+function githubReleaseAssetUrl(repository, tag, assetName) {
+  return `https://github.com/${repository}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(githubReleaseAssetName(assetName))}`;
+}
+
 export function prepareManifest(manifest, { version, signature, assetName, repository, tag }) {
   if (manifest.version?.replace(/^v/, '') !== version) throw new Error('Updater manifest version does not match the installer.');
   if (tag !== `v${version}` && tag !== version) throw new Error('Release tag does not match the installer version.');
@@ -12,7 +21,7 @@ export function prepareManifest(manifest, { version, signature, assetName, repos
     throw new Error('Manifest has no supported Windows EXE target.');
   }
   const update = {
-    url: `https://github.com/${repository}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(assetName)}`,
+    url: githubReleaseAssetUrl(repository, tag, assetName),
     signature: signature.trim(),
   };
   return {
@@ -50,7 +59,7 @@ export async function createManifestFromBundle(bundleDirectory, options, { requi
     const signature = (await readFile(path.join(msiDirectory, `${name}.sig`), 'utf8')).trim();
     if (!signature || !/^[A-Za-z0-9+/=\r\n]+$/.test(signature)) throw new Error('Missing or invalid MSI updater signature.');
     result.platforms['windows-x86_64-msi'] = {
-      url: `https://github.com/${options.repository}/releases/download/${encodeURIComponent(options.tag)}/${encodeURIComponent(name)}`,
+      url: githubReleaseAssetUrl(options.repository, options.tag, name),
       signature,
     };
   }

@@ -71,7 +71,7 @@ jobs:
         with:
           releaseId: ${{ steps.release.outputs.release_id }}
           tagName: ${{ env.RELEASE_TAG }}
-          releaseName: "Zapret-UI ${{ env.RELEASE_TAG }}"
+          releaseName: "ZAPRET UI ${{ env.RELEASE_TAG }}"
           releaseBody: |
             See the assets below for the latest installers and update artifacts.
 
@@ -117,5 +117,13 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw 'Failed to retire obsolete wrapper asset.' }
             }
           }
-          gh release edit $env:RELEASE_TAG --draft=false
-          if ($LASTEXITCODE -ne 0) { throw 'Failed to publish completed release.' }
+          # tauri-action does not update the title or body when releaseId points
+          # to an existing release, so synchronize both fields explicitly.
+          $releaseTitle = "ZAPRET UI $env:RELEASE_TAG"
+          $releaseNotes = @(
+            'See the assets below for the latest installers and update artifacts.',
+            '',
+            '[Code signing policy](https://github.com/larrriiin/zapret-ui/blob/main/CODE_SIGNING.md)'
+          ) -join [Environment]::NewLine
+          gh release edit $env:RELEASE_TAG --title $releaseTitle --notes $releaseNotes --draft=false
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to update and publish the completed release.' }

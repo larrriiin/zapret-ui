@@ -1,7 +1,5 @@
 #!/usr/bin/env node
-// Propagates a single version string to package.json, Cargo.toml and
-// tauri.conf.json. `version.txt` is left alone — build.rs already rewrites
-// it from tauri.conf.json on every Windows build.
+// Propagates a single version string to every application-version source.
 //
 // Usage:
 //   npm run set-version 2026.6.1
@@ -31,17 +29,16 @@ if (!/^\d+(\.\d+){2,3}(-[0-9A-Za-z.-]+)?$/.test(version)) {
   process.exit(1);
 }
 
-function updateJson(path, mutate) {
+function prepareJson(path, mutate) {
   const raw = readFileSync(path, "utf8");
   const trailingNewline = raw.endsWith("\n");
   const indent = raw.match(/^\s*\n*\{\n( +)"/)?.[1] ?? "  ";
   const obj = JSON.parse(raw);
   mutate(obj);
-  const out = JSON.stringify(obj, null, indent) + (trailingNewline ? "\n" : "");
-  writeFileSync(path, out);
+  return JSON.stringify(obj, null, indent) + (trailingNewline ? "\n" : "");
 }
 
-function updateCargoToml(path, newVersion) {
+function prepareCargoToml(path, newVersion) {
   const lines = readFileSync(path, "utf8").split(/\r?\n/);
   let inPackage = false;
   let changed = false;
@@ -64,23 +61,46 @@ function updateCargoToml(path, newVersion) {
   if (!changed) {
     throw new Error(`Could not find [package].version in ${path}`);
   }
-  writeFileSync(path, lines.join("\n"));
+  return lines.join("\n");
+}
+
+function prepareCargoLock(path, newVersion) {
+  const raw = readFileSync(path, "utf8");
+  const pattern = /(\[\[package\]\]\r?\nname = "zapret-ui"\r?\nversion = ")[^"]+(".*)/;
+  if (!pattern.test(raw)) {
+    throw new Error(`Could not find the zapret-ui package version in ${path}`);
+  }
+  return raw.replace(pattern, `$1${newVersion}$2`);
 }
 
 const pkgPath = resolve(repo, "package.json");
+const pkgLockPath = resolve(repo, "package-lock.json");
 const tauriPath = resolve(repo, "src-tauri/tauri.conf.json");
 const cargoPath = resolve(repo, "src-tauri/Cargo.toml");
+const cargoLockPath = resolve(repo, "src-tauri/Cargo.lock");
+const versionTxtPath = resolve(repo, "version.txt");
 
-updateJson(pkgPath, (o) => {
-  o.version = version;
-});
-updateJson(tauriPath, (o) => {
-  o.version = version;
-});
-updateCargoToml(cargoPath, version);
+const updates = [
+  [pkgPath, prepareJson(pkgPath, (o) => { o.version = version; })],
+  [pkgLockPath, prepareJson(pkgLockPath, (o) => {
+    o.version = version;
+    if (!o.packages?.[""]) throw new Error(`Could not find the root package in ${pkgLockPath}`);
+    o.packages[""].version = version;
+  })],
+  [tauriPath, prepareJson(tauriPath, (o) => { o.version = version; })],
+  [cargoPath, prepareCargoToml(cargoPath, version)],
+  [cargoLockPath, prepareCargoLock(cargoLockPath, version)],
+  [versionTxtPath, version],
+];
+
+// Validate every input before writing any output, so malformed metadata cannot
+// leave the repository with only part of the version bump applied.
+for (const [path, contents] of updates) writeFileSync(path, contents);
 
 console.log(`Set version to ${version} in:`);
 console.log(`  package.json`);
+console.log(`  package-lock.json`);
 console.log(`  src-tauri/Cargo.toml`);
+console.log(`  src-tauri/Cargo.lock`);
 console.log(`  src-tauri/tauri.conf.json`);
-console.log(`\nNext: \`cargo build\` will refresh Cargo.lock and version.txt.`);
+console.log(`  version.txt`);
