@@ -14,6 +14,20 @@ import { loadStrategies } from './strategies.js';
 
 let currentUpdateObject = null;
 
+async function withTimeout(promise, timeoutMs) {
+  let timeoutId;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('Timeout')), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function downloadAndInstallUIUpdate(event, updateObj) {
   if (!updateObj) return;
   try {
@@ -123,7 +137,7 @@ async function downloadAndInstallCoreUpdate(useProxy = false, customProxy = null
   }
 }
 
-function showProxyFallbackModal(errStr, onTryProxy, onCustomProxy, onRetryNoProxy, isCustomProxyStage = false) {
+function showProxyFallbackModal(errStr, onTryProxy, onCustomProxy, onRetryNoProxy, isCustomProxyStage = false, operation = 'download') {
   const oldModal = $('proxy-fallback-modal');
   if (oldModal) oldModal.remove();
 
@@ -133,23 +147,26 @@ function showProxyFallbackModal(errStr, onTryProxy, onCustomProxy, onRetryNoProx
   
   let content = '';
   if (!isCustomProxyStage) {
+    const errorTitle = operation === 'check' ? t('update_check_error_title') : t('download_error_title');
+    const errorDescription = operation === 'check' ? t('update_check_error_desc') : t('download_error_desc');
     content = `
       <div class="bg-surface-container-high border border-outline-variant/30 rounded-3xl p-8 max-w-md w-full shadow-2xl animate-scale-in">
-        <h3 class="font-headline text-xl font-black text-error mb-4">${t('download_error_title')}</h3>
-        <p class="text-on-surface-variant text-sm mb-6">${t('download_error_desc')}</p>
-        <p class="text-[10px] text-error-dim font-mono bg-error/10 p-2 rounded mb-6 break-words max-h-32 overflow-y-auto">${errStr}</p>
+        <h3 class="font-headline text-xl font-black text-error mb-4">${errorTitle}</h3>
+        <p class="text-on-surface-variant text-sm mb-6">${errorDescription}</p>
+        <p data-proxy-error class="text-[10px] text-error-dim font-mono bg-error/10 p-2 rounded mb-6 break-words max-h-32 overflow-y-auto"></p>
         <div class="flex flex-col gap-3">
           <button id="proxy-btn-vpn" class="w-full px-4 py-3 bg-white/5 hover:bg-white/10 text-on-surface rounded-xl font-bold transition-all uppercase text-xs tracking-wider">${t('vpn_enabled')}</button>
-          <button id="proxy-btn-proxy" class="w-full px-4 py-3 bg-secondary/20 hover:bg-secondary/30 text-secondary border border-secondary/20 rounded-xl font-black transition-all uppercase text-xs tracking-wider shadow-lg shadow-secondary/5">${t('via_proxy')}</button>
+          <button id="proxy-btn-proxy" class="w-full px-4 py-3 bg-secondary/20 hover:bg-secondary/30 text-secondary border border-secondary/20 rounded-xl font-black transition-all uppercase text-xs tracking-wider shadow-lg shadow-secondary/5">${t('via_project_proxy')}</button>
           <button id="proxy-btn-close" class="w-full px-4 py-3 mt-2 text-on-surface-variant rounded-xl font-bold hover:bg-white/5 transition-all uppercase text-xs tracking-widest">${t('close')}</button>
         </div>
       </div>
     `;
   } else {
+    const proxyErrorDescription = operation === 'check' ? t('update_check_proxy_failed_desc') : t('proxy_failed_desc');
     content = `
       <div class="bg-surface-container-high border border-outline-variant/30 rounded-3xl p-8 max-w-md w-full shadow-2xl animate-scale-in">
         <h3 class="font-headline text-xl font-black text-error mb-4">${t('proxy_failed_title')}</h3>
-        <p class="text-on-surface-variant text-sm mb-4">${t('proxy_failed_desc')}</p>
+        <p class="text-on-surface-variant text-sm mb-4">${proxyErrorDescription}</p>
         <input type="text" id="custom-proxy-input" placeholder="socks5://user:pass@ip:port" class="w-full bg-background border border-outline-variant/30 rounded-xl px-4 py-3 text-sm text-on-surface mb-6 focus:outline-none focus:border-primary transition-colors">
         <div class="flex flex-col gap-3">
           <button id="proxy-btn-custom" class="w-full px-4 py-3 bg-secondary/20 hover:bg-secondary/30 text-secondary border border-secondary/20 rounded-xl font-black transition-all uppercase text-xs tracking-wider shadow-lg shadow-secondary/5">${t('download')}</button>
@@ -160,6 +177,8 @@ function showProxyFallbackModal(errStr, onTryProxy, onCustomProxy, onRetryNoProx
   }
 
   modal.innerHTML = content;
+  const errorDetails = modal.querySelector('[data-proxy-error]');
+  if (errorDetails) errorDetails.textContent = String(errStr);
   document.body.appendChild(modal);
 
   modal.querySelector('#proxy-btn-close')?.addEventListener('click', () => modal.remove());
@@ -174,7 +193,7 @@ function showProxyFallbackModal(errStr, onTryProxy, onCustomProxy, onRetryNoProx
       btn.innerHTML = `<span class="material-symbols-outlined text-sm animate-spin">refresh</span> ${t('loading')}`;
       onTryProxy().then(() => modal.remove()).catch(err => {
         modal.remove();
-        showProxyFallbackModal(err, onTryProxy, onCustomProxy, onRetryNoProxy, true);
+        showProxyFallbackModal(err, onTryProxy, onCustomProxy, onRetryNoProxy, true, operation);
       });
     });
   } else {
@@ -281,27 +300,19 @@ function showDualUpdateModal(data, manual = false) {
   });
 }
 
-async function checkUIUpdateWithFallback() {
+export async function checkUIUpdate(useProxy = false, customProxy = null) {
   const { check } = getUpdater();
-  const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), ms));
-  
-  try {
-    return await Promise.race([check(), timeout(5000)]);
-  } catch (err) {
-    console.warn('UI update check failed/timed out without proxy, trying with proxy:', err);
-    try {
-      const proxyUrl = await invoke('get_update_proxy');
-      if (proxyUrl) {
-        return await Promise.race([check({ proxy: proxyUrl }), timeout(8000)]);
-      }
-    } catch (proxyErr) {
-      console.error('UI update check failed/timed out with proxy too:', proxyErr);
-    }
+
+  if (!useProxy) return withTimeout(check(), 5000);
+
+  const proxyUrl = customProxy || await invoke('get_update_proxy');
+  if (!proxyUrl) {
+    throw new Error('No update proxy is configured');
   }
-  return null;
+  return withTimeout(check({ proxy: proxyUrl }), 8000);
 }
 
-async function checkForUpdates(manual = false) {
+export async function checkForUpdates(manual = false, useProxy = false, customProxy = null, promptOnFailure = true) {
   if (!window.__TAURI__) return;
   const checkUpdatesBtn = $('check-updates-btn');
 
@@ -313,14 +324,8 @@ async function checkForUpdates(manual = false) {
   try {
     const uiLocalVersion = await invoke('get_ui_version_cmd');
     const [uiUpdate, coreInfo] = await Promise.all([
-      checkUIUpdateWithFallback(),
-      invoke('get_core_update_info', { useProxy: false, customProxy: null }).catch(async (err) => {
-        try {
-          return await invoke('get_core_update_info', { useProxy: true, customProxy: null });
-        } catch {
-          return { status: 'unknown', currentVersion: 'Unknown', stableVersion: 'Error', updateAvailable: false };
-        }
-      }),
+      checkUIUpdate(useProxy, customProxy),
+      invoke('get_core_update_info', { useProxy, customProxy }),
     ]);
 
     const hasUIUpdate = !!uiUpdate;
@@ -334,8 +339,19 @@ async function checkForUpdates(manual = false) {
       }, manual);
     }
   } catch (err) {
-    console.error('Error checking for updates:', err);
-    if (manual) showDualUpdateModal(null, true);
+    console.warn(`Update check failed${useProxy ? ' with proxy' : ' directly'}:`, err);
+    if (manual && promptOnFailure) {
+      showProxyFallbackModal(
+        err,
+        () => checkForUpdates(true, true, null, false),
+        (proxy) => checkForUpdates(true, true, proxy, false),
+        () => checkForUpdates(true, false, null, true),
+        false,
+        'check',
+      );
+    } else if (manual) {
+      throw err;
+    }
   } finally {
     if (manual && checkUpdatesBtn) {
       checkUpdatesBtn.disabled = false;

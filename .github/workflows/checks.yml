@@ -25,3 +25,5 @@ jobs:
         run: npm run test:flowseal-version
       - name: Verify UI translations
         run: npm run test:i18n
+      - name: Verify update proxy privacy
+        run: npm run test:update-privacy

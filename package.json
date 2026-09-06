@@ -1,7 +1,7 @@
 {
   "name": "zapret-ui",
   "private": true,
-  "version": "26.9.5",
+  "version": "26.9.6",
   "type": "module",
   "scripts": {
     "installer:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1",
@@ -15,6 +15,7 @@
     "check-versions": "node scripts/check-versions.mjs",
     "test:flowseal-version": "node --test scripts/flowseal-version.test.mjs",
     "test:i18n": "node --test scripts/i18n.test.mjs",
+    "test:update-privacy": "node --test scripts/update-check-privacy.test.mjs",
     "test:status": "node --test scripts/status-check.test.mjs",
     "sign-core-channel": "tauri signer sign core-channel/stable.json",
     "set-version": "node scripts/set-version.mjs",
