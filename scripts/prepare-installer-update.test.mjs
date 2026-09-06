@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 
-const options = { version: '26.9.2', tag: 'v26.9.2', signature: 'dGVzdA==\n', repository: 'owner/zapret-ui', assetName: 'ZAPRET_26.9.2_x64-branded-setup.exe' };
+const options = { version: '26.9.2', tag: 'v26.9.2', signature: 'dGVzdA==\n', repository: 'owner/zapret-ui', assetName: 'ZAPRET_26.9.2_x64-setup.exe' };
 const original = {
   version: '26.9.2', notes: 'Release notes', pub_date: '2026-09-05T00:00:00Z',
   platforms: {
@@ -17,9 +17,9 @@ const original = {
     'linux-x86_64': { url: 'app.AppImage', signature: 'linux' },
   },
 };
-test('legacy and current EXE clients receive the signed wrapper; MSI and other platforms are preserved', () => {
+test('legacy and current EXE clients receive the signed native NSIS; MSI and other platforms are preserved', () => {
   const result = prepareManifest(original, options);
-  assert.equal(result.platforms['windows-x86_64'].url, 'https://github.com/owner/zapret-ui/releases/download/v26.9.2/ZAPRET_26.9.2_x64-branded-setup.exe');
+  assert.equal(result.platforms['windows-x86_64'].url, 'https://github.com/owner/zapret-ui/releases/download/v26.9.2/ZAPRET_26.9.2_x64-setup.exe');
   assert.equal(result.platforms['windows-x86_64'].signature, 'dGVzdA==');
   assert.deepEqual(result.platforms['windows-x86_64'], result.platforms['windows-x86_64-nsis']);
   assert.deepEqual(result.platforms['windows-x86_64-msi'], original.platforms['windows-x86_64-msi']);
@@ -58,7 +58,7 @@ test('workflow CLI creates the missing latest.json from local signed artifacts',
   t.after(() => rm(directory, { recursive: true, force: true }));
   const { version } = JSON.parse(await readFile(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8'));
   const bundle = path.join(directory, 'bundle');
-  const installer = path.join(directory, `ZAPRET_${version}_x64-branded-setup.exe`);
+  const installer = path.join(directory, `ZAPRET_${version}_x64-setup.exe`);
   const output = path.join(directory, 'latest.json');
   await mkdir(path.join(bundle, 'msi'), { recursive: true });
   await writeFile(installer, 'test package');
@@ -77,7 +77,7 @@ test('workflow CLI creates the missing latest.json from local signed artifacts',
   assert.ok(result.platforms['windows-x86_64'].url.endsWith(path.basename(installer)));
 });
 test('does not prepare an update with mismatched version, missing signature or wrong release', () => {
-  for (const patch of [{ version: '26.9.3' }, { signature: '' }, { tag: 'v0.0.1' }, { repository: '../repo' }, { assetName: 'app.msi' }]) {
+  for (const patch of [{ version: '26.9.3' }, { signature: '' }, { tag: 'v0.0.1' }, { repository: '../repo' }, { assetName: 'app.msi' }, { assetName: 'ZAPRET_26.9.2_x64-branded-setup.exe' }, { assetName: 'ZAPRET_26.9.1_x64-setup.exe' }]) {
     assert.throws(() => prepareManifest(original, { ...options, ...patch }));
   }
   assert.throws(() => prepareManifest({ version: '26.9.2', platforms: { 'linux-x86_64': {} } }, options));

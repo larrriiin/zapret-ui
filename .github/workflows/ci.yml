@@ -28,17 +28,17 @@ jobs:
           
       - name: install frontend dependencies
         run: npm install
-      - name: Test installer engine
-        shell: powershell
-        run: ./scripts/test-installer.ps1
-      - name: Compile installer preview
-        shell: powershell
-        run: ./scripts/build-installer.ps1 -Preview
+      - name: Test installer updater
+        run: npm run test:installer
         
       # We simply build the app to generate and save the cache for future tags.
       # No signing or release steps are needed here.
-      - name: Build to populate cache
+      - name: Build native NSIS and populate cache
+        shell: powershell
         env:
           ZAPRET_UPDATE_PROXY: ${{ secrets.ZAPRET_UPDATE_PROXY }}
         run: |
-          npx tauri build --no-bundle
+          ./scripts/build-installer.ps1 -Unsigned
+      - name: Compile safe installer preview
+        shell: powershell
+        run: ./scripts/preview-installer.ps1

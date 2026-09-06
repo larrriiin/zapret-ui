@@ -1,0 +1,7 @@
+; Compile-time Modern UI settings only. Tauri owns installation and updates.
+!define MUI_BGCOLOR "070D1F"
+!define MUI_TEXTCOLOR "DFE4FE"
+!define MUI_INSTFILESPAGE_COLORS "DFE4FE 070D1F"
+!define MUI_HEADERIMAGE_RIGHT
+!define MUI_WELCOMEFINISHPAGE_BITMAP_NOSTRETCH
+!define MUI_HEADERIMAGE_BITMAP_NOSTRETCH

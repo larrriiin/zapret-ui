@@ -7,7 +7,7 @@ export function prepareManifest(manifest, { version, signature, assetName, repos
   if (tag !== `v${version}` && tag !== version) throw new Error('Release tag does not match the installer version.');
   if (!/^[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*$/.test(repository)) throw new Error('Invalid GitHub repository.');
   if (!signature?.trim() || !/^[A-Za-z0-9+/=\r\n]+$/.test(signature.trim())) throw new Error('Missing or invalid updater signature.');
-  if (!assetName.endsWith('_x64-branded-setup.exe') || path.basename(assetName) !== assetName) throw new Error('Expected the branded x64 EXE.');
+  if (!assetName.endsWith(`_${version}_x64-setup.exe`) || path.basename(assetName) !== assetName) throw new Error('Expected the native NSIS x64 EXE matching the release version.');
   if (!manifest.platforms || !Object.keys(manifest.platforms).some(key => /^windows-x86_64(?:-nsis)?$/.test(key))) {
     throw new Error('Manifest has no supported Windows EXE target.');
   }
@@ -59,7 +59,7 @@ export async function createManifestFromBundle(bundleDirectory, options, { requi
 
 async function main() {
   const [manifestPath, installerPath, mode, bundleDirectory] = process.argv.slice(2);
-  if (!manifestPath || !installerPath) throw new Error('Usage: node scripts/prepare-installer-update.mjs <latest.json> <branded.exe>');
+  if (!manifestPath || !installerPath) throw new Error('Usage: node scripts/prepare-installer-update.mjs <latest.json> <nsis-setup.exe>');
   const config = JSON.parse(await readFile(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8'));
   const signature = await readFile(`${installerPath}.sig`, 'utf8');
   const options = {

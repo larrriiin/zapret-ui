@@ -55,10 +55,9 @@ jobs:
           shared-key: 'zapret-ui-rust-cache'
       - name: install frontend dependencies
         run: npm install
-      - name: Test branded updater compatibility
+      - name: Test updater compatibility
         shell: powershell
         run: |
-          ./scripts/test-installer.ps1
           node --test scripts/prepare-installer-update.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Updater manifest tests failed.' }
           node --test scripts/resolve-release.test.mjs
@@ -75,23 +74,30 @@ jobs:
           prerelease: ${{ steps.release.outputs.prerelease }}
           # The final manifest is generated below from this run's signed bundles.
           uploadUpdaterJson: false
-      - name: Build branded Windows installer
-        shell: powershell
-        run: ./scripts/build-installer.ps1
-      - name: Sign and connect branded Windows updater
+      - name: Connect native NSIS updater
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = Get-Item artifacts/installer/*-branded-setup.exe
-          node node_modules/@tauri-apps/cli/tauri.js signer sign $installer.FullName
-          if ($LASTEXITCODE -ne 0) { throw 'Failed to sign branded updater.' }
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $installer = Get-Item "src-tauri/target/release/bundle/nsis/ZAPRET_${version}_x64-setup.exe"
+          New-Item -ItemType Directory -Force artifacts/installer | Out-Null
           node scripts/prepare-installer-update.mjs artifacts/installer/latest.json $installer.FullName --from-bundle src-tauri/target/release/bundle
-          if ($LASTEXITCODE -ne 0) { throw 'Failed to prepare branded updater manifest.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to prepare NSIS updater manifest.' }
           gh release upload $env:RELEASE_TAG $installer.FullName "$($installer.FullName).sig" --clobber
-          if ($LASTEXITCODE -ne 0) { throw 'Failed to upload branded updater.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to upload NSIS updater.' }
           gh release upload $env:RELEASE_TAG artifacts/installer/latest.json --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Failed to upload updater manifest.' }
+          # Only retire the obsolete wrapper after its native replacement and
+          # manifest are available, including when rebuilding an existing release.
+          $assets = gh release view $env:RELEASE_TAG --json assets --jq '.assets[].name'
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to list release assets.' }
+          foreach ($legacy in @("ZAPRET_${version}_x64-branded-setup.exe", "ZAPRET_${version}_x64-branded-setup.exe.sig")) {
+            if ($assets -contains $legacy) {
+              gh release delete-asset $env:RELEASE_TAG $legacy --yes
+              if ($LASTEXITCODE -ne 0) { throw 'Failed to retire obsolete wrapper asset.' }
+            }
+          }
           gh release edit $env:RELEASE_TAG --draft=false
           if ($LASTEXITCODE -ne 0) { throw 'Failed to publish completed release.' }

@@ -5852,7 +5852,7 @@ dependencies = [
 
 [[package]]
 name = "zapret-ui"
-version = "26.9.4"
+version = "26.9.5"
 dependencies = [
  "base64 0.23.1",
  "futures-util",

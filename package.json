@@ -1,12 +1,13 @@
 {
   "name": "zapret-ui",
   "private": true,
-  "version": "26.9.4",
+  "version": "26.9.5",
   "type": "module",
   "scripts": {
     "installer:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1",
-    "installer:preview": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -Preview",
-    "test:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-installer.ps1",
+    "installer:assets": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-installer-assets.ps1",
+    "installer:preview": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/preview-installer.ps1",
+    "test:installer": "node --test scripts/prepare-installer-update.test.mjs scripts/resolve-release.test.mjs",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
