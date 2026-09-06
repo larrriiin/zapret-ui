@@ -62,6 +62,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Updater manifest tests failed.' }
           node --test scripts/resolve-release.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Release selection tests failed.' }
+          node --test scripts/installer-identity.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Installer identity migration tests failed.' }
           node --test scripts/update-check-privacy.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Update proxy privacy tests failed.' }
       - uses: tauri-apps/tauri-action@v1

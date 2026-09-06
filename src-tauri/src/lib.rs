@@ -543,6 +543,113 @@ fn elevate_if_needed() {
     }
 }
 
+fn replace_path_case_insensitive(value: &str, old_path: &str, new_path: &str) -> Option<String> {
+    if old_path.is_empty() {
+        return None;
+    }
+    let mut result = value.to_string();
+    let needle = old_path.to_ascii_lowercase();
+    let mut offset = 0;
+    let mut replaced = false;
+    loop {
+        let lowercase = result.to_ascii_lowercase();
+        let Some(relative) = lowercase[offset..].find(&needle) else {
+            break;
+        };
+        let start = offset + relative;
+        let end = start + old_path.len();
+        result.replace_range(start..end, new_path);
+        offset = start + new_path.len();
+        replaced = true;
+    }
+    replaced.then_some(result)
+}
+
+#[cfg(windows)]
+fn zapret_service_image_path() -> Option<String> {
+    let output = Command::new(system32_tool("reg.exe"))
+        .args([
+            "query",
+            "HKLM\\SYSTEM\\CurrentControlSet\\Services\\zapret",
+            "/v",
+            "ImagePath",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout.lines().find_map(|line| {
+        ["REG_EXPAND_SZ", "REG_SZ"].iter().find_map(|kind| {
+            line.find(kind)
+                .map(|position| line[position + kind.len()..].trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+    })
+}
+
+#[cfg(windows)]
+fn migrate_renamed_install_service_path() -> Result<(), String> {
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    let current_root = executable
+        .parent()
+        .ok_or_else(|| "Application executable has no parent directory".to_string())?;
+    let is_legacy_root = current_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("ZAPRET"));
+    if !is_legacy_root {
+        return Ok(());
+    }
+    let renamed_root = current_root
+        .parent()
+        .ok_or_else(|| "Application directory has no parent".to_string())?
+        .join("ZAPRET UI");
+    let Some(image_path) = zapret_service_image_path() else {
+        return Ok(());
+    };
+    let Some(updated_path) = replace_path_case_insensitive(
+        &image_path,
+        &renamed_root.to_string_lossy(),
+        &current_root.to_string_lossy(),
+    ) else {
+        return Ok(());
+    };
+
+    let was_running = is_zapret_service_running();
+    let status = Command::new(system32_tool("sc.exe"))
+        .args(["config", "zapret", "binPath=", &updated_path])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map_err(|error| format!("Failed to update zapret service path: {error}"))?;
+    if !status.success() {
+        return Err("Failed to update zapret service path".to_string());
+    }
+    if was_running {
+        let _ = Command::new(system32_tool("sc.exe"))
+            .args(["stop", "zapret"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+        for _ in 0..50 {
+            if !is_zapret_service_running() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let status = Command::new(system32_tool("sc.exe"))
+            .args(["start", "zapret"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+            .map_err(|error| format!("Failed to restart migrated zapret service: {error}"))?;
+        if !status.success() {
+            return Err("Failed to restart migrated zapret service".to_string());
+        }
+    }
+    Ok(())
+}
+
 fn get_local_version() -> String {
     core_manager().provider().local_version()
 }
@@ -2121,7 +2228,26 @@ impl Drop for OwnedDirectoryCleanup {
 
 #[cfg(test)]
 mod temporary_cleanup_tests {
-    use super::{restart_context, CoreOperationGuard, OwnedDirectoryCleanup, ZapretStatus};
+    use super::{
+        replace_path_case_insensitive, restart_context, CoreOperationGuard, OwnedDirectoryCleanup,
+        ZapretStatus,
+    };
+
+    #[test]
+    fn renamed_install_paths_are_rewritten_case_insensitively() {
+        let value = r#""C:\Program Files\ZAPRET UI\binaries\bin\winws.exe" --hostlist="C:\Program Files\Zapret UI\binaries\lists\user.txt""#;
+        let updated = replace_path_case_insensitive(
+            value,
+            r"C:\Program Files\ZAPRET UI",
+            r"C:\Program Files\Zapret",
+        )
+        .unwrap();
+        assert_eq!(
+            updated.matches(r"C:\Program Files\Zapret\binaries").count(),
+            2
+        );
+        assert!(!updated.to_ascii_lowercase().contains("zapret ui"));
+    }
 
     #[test]
     fn restart_context_preserves_service_and_temporary_modes() {
@@ -3226,7 +3352,12 @@ fn show_app_window(app: tauri::AppHandle, force: bool) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(windows)]
-    elevate_if_needed();
+    {
+        elevate_if_needed();
+        if let Err(error) = migrate_renamed_install_service_path() {
+            eprintln!("Cannot migrate renamed zapret service path: {error}");
+        }
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
