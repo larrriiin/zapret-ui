@@ -29,3 +29,5 @@ jobs:
         run: npm run test:i18n
       - name: Verify update proxy privacy
         run: npm run test:update-privacy
+      - name: Verify first-run state recovery
+        run: npm run test:first-run

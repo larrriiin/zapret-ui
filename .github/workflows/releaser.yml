@@ -66,6 +66,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Installer identity migration tests failed.' }
           node --test scripts/update-check-privacy.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Update proxy privacy tests failed.' }
+          node --test scripts/first-run-state.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'First-run state tests failed.' }
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

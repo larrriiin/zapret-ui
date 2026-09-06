@@ -7,10 +7,10 @@ import { pollFilters } from './filters.js';
 import { pollFakes } from './fakes.js';
 import { updateRestartBanner } from '../lib/restart.js';
 import { syncThemeFromStorage } from './theme.js';
+import { markSetupCompleted, shouldShowFirstRun } from './setup-state.js';
 
 const isSetupWindow = new URLSearchParams(location.search).get('setup') === '1';
 
-const COMPLETE_KEY = 'zapret.setup.completed';
 const USER_LISTS = ['list-general-user.txt', 'list-exclude-user.txt', 'ipset-exclude-user.txt'];
 let step = 0, busy = false, testStarted = false, cancelled = false;
 let prepared = false, best = null, connected = false, rerun = false, deleteLists = false;
@@ -149,15 +149,14 @@ async function applyResult() {
     const strategy = best.config.replace(/\.bat$/i, '');
     const mode = document.querySelector('input[name="setup-mode"]:checked').value;
     await invoke('start_zapret', { strategy, mode });
+    markSetupCompleted();
     setStrategyValue(strategy, strategy); connected = true; goTo(3);
   } catch (error) { errorMessage(error); }
   finally { busy = false; controls(); }
 }
 async function closeSetup(completed = false) {
   if (busy) return;
-  if (completed) {
-    try { localStorage.setItem(COMPLETE_KEY, '1'); localStorage.setItem('zapret.firstrun.dismissed', '1'); } catch { /* Retry next launch if storage is unavailable. */ }
-  }
+  if (completed) markSetupCompleted();
   if (isSetupWindow) {
     try { await invoke('finish_setup_window'); }
     catch (error) { errorMessage(error); }
@@ -250,11 +249,5 @@ export function initFirstRun() {
   });
 }
 export async function maybeShowFirstRun() {
-  let completed = false;
-  try { completed = localStorage.getItem(COMPLETE_KEY) === '1'; } catch { /* Show setup. */ }
-  if (completed) {
-    try { if (await invoke('ensure_binaries_present')) return; }
-    catch (error) { console.warn('Core check failed:', error); }
-  }
-  await openSetup();
+  if (await shouldShowFirstRun({ ensureBinaries: () => invoke('ensure_binaries_present') })) await openSetup();
 }
