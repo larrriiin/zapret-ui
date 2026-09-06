@@ -34,6 +34,7 @@ import { initWizard } from './features/wizard.js';
 import { initFirstRun, maybeShowFirstRun, openSetup } from './features/firstrun.js';
 import { initStatusCheck } from './features/status-check.js';
 import { initTrafficMonitor, refreshTrafficTranslations } from './features/traffic.js';
+import { initWarp } from './features/warp.js';
 
 // Mount HTML fragments synchronously so `[data-i18n]` elements are already in
 // the DOM when Tailwind's CDN JIT observer and i18n engine run over them.
@@ -53,6 +54,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.addEventListener('contextmenu', (e) => e.preventDefault());
 
   initTitlebar();
+  initWarp();
 
   const adminOk = await ensureAdminPrivileges();
   if (!adminOk) { await invoke('show_app_window', { force: true }); return; }

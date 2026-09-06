@@ -1,7 +1,7 @@
 {
   "name": "zapret-ui",
   "private": true,
-  "version": "26.9.9",
+  "version": "26.9.10",
   "type": "module",
   "scripts": {
     "installer:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1",

@@ -1,0 +1,52 @@
+<header class="connection-heading" hidden>
+  <h2 data-i18n="warp_connection_title"></h2>
+  <p data-i18n="warp_connection_desc"></p>
+</header>
+<article id="warp-card" class="connection-card" hidden aria-labelledby="warp-title">
+  <header class="provider-heading">
+    <span class="material-symbols-outlined warp-cloud" aria-hidden="true">cloud</span>
+    <div><h3 id="warp-title">CLOUDFLARE WARP</h3><p data-i18n="warp_subtitle"></p></div>
+    <span id="warp-state" class="provider-badge" role="status" aria-live="polite"></span>
+  </header>
+  <label id="warp-mode-title" class="provider-label" for="warp-mode-trigger" data-i18n="warp_mode"></label>
+  <div id="warp-mode-dropdown" class="relative">
+    <button id="warp-mode-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="warp-mode-options" aria-labelledby="warp-mode-title warp-mode-label"
+      class="glass-panel w-full flex items-center justify-between rounded-2xl border border-primary/10 px-4 py-3 font-headline text-sm text-on-surface hover:border-primary/30 transition-colors cursor-pointer">
+      <span id="warp-mode-label" class="truncate text-on-surface"></span>
+      <span id="warp-mode-chevron" class="material-symbols-outlined text-primary/60 text-base ml-2 transition-transform" aria-hidden="true">expand_more</span>
+    </button>
+    <select id="warp-mode" hidden tabindex="-1" aria-hidden="true"></select>
+    <div id="warp-mode-options" class="fixed z-[999] rounded-2xl border border-primary/20 overflow-hidden shadow-2xl" style="background: var(--color-popup);" hidden>
+      <div class="px-3 py-2 border-b border-outline-variant/10 flex items-center gap-2">
+        <span class="material-symbols-outlined text-primary/60 text-base" aria-hidden="true">search</span>
+        <input id="warp-mode-search" type="text" autocomplete="off" spellcheck="false" class="flex-1 min-w-0 bg-transparent text-sm text-on-surface placeholder-on-surface-variant/50 outline-none border-none ring-0 focus:outline-none focus:ring-0" data-i18n="warp_search_modes" data-i18n-attr="placeholder">
+      </div>
+      <div id="warp-mode-options-list" class="max-h-64 overflow-y-auto py-1" role="listbox" aria-labelledby="warp-mode-title"></div>
+    </div>
+  </div>
+  <button id="warp-connect" type="button" class="provider-button provider-connect">
+    <span id="warp-connect-label"></span><span class="material-symbols-outlined" aria-hidden="true">power_settings_new</span>
+  </button>
+  <button id="warp-refresh" type="button" class="provider-button provider-refresh">
+    <span data-i18n="check_status"></span><span class="material-symbols-outlined" aria-hidden="true">query_stats</span>
+  </button>
+  <div id="warp-proxy" class="warp-proxy" hidden>
+    <div class="warp-proxy-summary"><strong data-i18n="warp_mode_proxy"></strong><span id="warp-proxy-state"></span></div>
+    <p id="warp-proxy-endpoint" class="warp-endpoint"></p>
+    <form id="warp-port-form" class="warp-port-form">
+      <label for="warp-port" data-i18n="warp_port"></label>
+      <input id="warp-port" type="number" min="1" max="65535" step="1" required inputmode="numeric">
+      <button id="warp-port-save" type="submit" class="provider-button" data-i18n="warp_save_port"></button>
+    </form>
+    <p class="warp-hint" data-i18n="warp_proxy_hint"></p>
+  </div>
+  <p id="warp-error" class="warp-error" role="status" hidden></p>
+</article>
+<dialog id="warp-status-dialog" class="warp-status-dialog" aria-labelledby="warp-status-title">
+  <header class="flex items-center justify-between gap-4 mb-5">
+    <h2 id="warp-status-title" class="font-headline text-lg font-bold" data-i18n="warp_status_title"></h2>
+    <button id="warp-status-close" type="button" class="provider-button" data-i18n="warp_close" data-i18n-attr="aria-label"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
+  </header>
+  <div id="warp-status-report" role="status" aria-live="polite"></div>
+  <form method="dialog" class="mt-6 flex justify-end"><button class="provider-button" data-i18n="warp_close"></button></form>
+</dialog>

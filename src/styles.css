@@ -27,6 +27,119 @@
 }
 
 :root { color-scheme: dark; }
+
+/* WARP only changes the home composition after successful installation detection. */
+.provider-heading[hidden], .connection-heading[hidden], #warp-card[hidden],
+.warp-proxy[hidden], .warp-port-form[hidden], .warp-error[hidden], #warp-install[hidden] { display: none; }
+#section-home > section.has-warp {
+  height: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 24px;
+  padding: 28px 24px 24px;
+  overflow: visible;
+}
+.connection-heading { grid-column: 1 / -1; text-align: center; position: relative; padding-bottom: 8px; }
+.connection-heading h2 { font-size: clamp(22px, 2.5vw, 32px); font-weight: 900; color: var(--color-secondary); text-transform: uppercase; }
+.has-warp > .absolute { border-radius: inherit; }
+.connection-heading p { margin-top: 8px; font-size: 13px; color: var(--color-on-surface-variant); }
+.has-warp > .zapret-connection, .connection-card {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-align: left;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 55%, transparent);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--color-surface-container-high) 35%, transparent);
+}
+.has-warp > .zapret-connection:has(#status-lamp-divider.is-on), .connection-card[data-state="connected"] {
+  border-color: var(--color-secondary);
+}
+.provider-heading { display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 6px 12px; margin-bottom: 26px; }
+.provider-heading h3 { font-size: 18px; line-height: 1.25; font-weight: 800; }
+.provider-heading p { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-on-surface-variant); margin-top: 4px; }
+.provider-heading > .material-symbols-outlined { font-size: 32px; }
+.warp-cloud { color: #f78d3c; }
+.zapret-provider-icon { color: var(--color-secondary); }
+.provider-badge, .has-warp .provider-heading > h2 {
+  grid-column: 2;
+  justify-self: start;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  white-space: normal;
+  margin: 4px 0 0;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 65%, transparent);
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: var(--color-on-surface-variant);
+}
+.provider-badge::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 7px; }
+[data-state="connected"] .provider-badge { color: var(--color-secondary); }
+[data-state="error"] .provider-badge { color: var(--color-error-dim); }
+.has-warp #status-lamp-divider { display: none; }
+.has-warp .zapret-connection > .w-full h3, .provider-label { display: block; font-size: 10px; text-align: left; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--color-primary); margin-bottom: 10px; }
+.provider-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 10px 16px; border: 1px solid color-mix(in srgb, var(--color-primary) 45%, transparent); border-radius: 12px; color: var(--color-primary); background: transparent; font-size: 12px; font-weight: 700; cursor: pointer; }
+.provider-button:hover:not(:disabled) { background: color-mix(in srgb, var(--color-primary) 10%, transparent); }
+.provider-button:disabled { opacity: .55; cursor: not-allowed; }
+.provider-button:focus-visible, #warp-port:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+.provider-connect { margin-top: 12px; min-height: 56px; border: 2px solid var(--color-primary); border-radius: 16px; text-transform: uppercase; letter-spacing: .08em; }
+.provider-refresh { margin-top: 8px; min-height: 34px; color: var(--color-secondary); text-transform: uppercase; letter-spacing: .12em; font-size: 10px; border-color: color-mix(in srgb, var(--color-outline-variant) 50%, transparent); }
+/* Both connection cards share control geometry; the legacy home is untouched. */
+.has-warp :is(#strategy-trigger, #warp-mode-trigger) { box-sizing: border-box; height: 48px; min-height: 48px; padding: 12px 16px; font-size: 14px; line-height: 20px; font-weight: 400; text-align: left; }
+.has-warp :is(#strategy-chevron, #warp-mode-chevron) { font-size: 16px; line-height: 20px; }
+.has-warp .zapret-connection > .w-full.space-y-3 { margin: 0 0 12px; }
+.has-warp .zapret-connection > .w-full.space-y-3 > h3 { margin: 0 0 10px; }
+.has-warp #strategy-dropdown { margin: 0; }
+.has-warp :is(#connect-btn, #warp-connect) { box-sizing: border-box; height: 56px; min-height: 56px; padding: 0 16px; border-radius: 16px; font-size: 14px; line-height: 20px; font-weight: 700; letter-spacing: .1em; transform: none; }
+.has-warp :is(#connect-btn, #warp-connect) > span { font-size: inherit; line-height: inherit; letter-spacing: inherit; }
+.has-warp :is(#connect-btn-icon, #warp-connect > .material-symbols-outlined) { font-size: 24px; line-height: 24px; }
+.has-warp :is(#check-status-btn, #warp-refresh) { box-sizing: border-box; height: 40px; min-height: 40px; padding: 0 16px; border-radius: 12px; font-size: 10px; line-height: 14px; font-weight: 700; letter-spacing: .16em; }
+.has-warp #check-status-btn > span { font-size: inherit; line-height: inherit; letter-spacing: inherit; }
+.has-warp :is(#check-status-btn-icon, #warp-refresh > .material-symbols-outlined) { font-size: 18px; line-height: 18px; }
+.warp-proxy { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--color-outline-variant); }
+.warp-proxy-summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 12px; }
+.warp-proxy-summary > span { color: var(--color-on-surface-variant); }
+.warp-endpoint { font-variant-numeric: tabular-nums; margin: 8px 0 12px; color: var(--color-secondary); font-size: 13px; }
+.warp-port-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+#warp-port { width: 94px; min-height: 40px; border-radius: 10px; background: var(--color-surface-container-high); border: 1px solid var(--color-outline-variant); color: var(--color-on-surface); }
+.warp-hint { margin-top: 10px; font-size: 11px; line-height: 1.5; color: var(--color-on-surface-variant); }
+.warp-error { margin-top: 12px; font-size: 12px; line-height: 1.5; color: var(--color-error-dim); overflow-wrap: anywhere; }
+.has-warp :is(#strategy-trigger, #warp-mode-trigger):focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+#warp-mode-trigger:disabled { opacity: .55; cursor: not-allowed; }
+/* Match Zapret rows, including the space its favourite action occupies vertically. */
+:is(#strategy-options-list, #warp-mode-options-list) > [data-value] { min-height: 49px; }
+:is(#strategy-options-list, #warp-mode-options-list) > .dropdown-option-selected {
+  border-left: 2px solid var(--color-secondary);
+  color: var(--color-secondary);
+  background: transparent;
+}
+.warp-status-dialog { width: min(480px, calc(100vw - 48px)); max-height: calc(100vh - 48px); margin: auto; padding: 24px; border-radius: 24px; border: 1px solid color-mix(in srgb, var(--color-primary) 20%, transparent); background: var(--color-popup); color: var(--color-on-surface); overflow-y: auto; }
+.warp-status-dialog::backdrop { background: rgb(0 0 0 / .65); backdrop-filter: blur(8px); }
+.warp-report-row { display: flex; justify-content: space-between; align-items: baseline; gap: 20px; padding: 14px 0; font-size: 13px; border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 35%, transparent); }
+.warp-report-row > span { color: var(--color-on-surface-variant); }
+.warp-report-row > strong { text-align: right; overflow-wrap: anywhere; }
+.warp-settings-row { display: flex; align-items: flex-start; gap: 16px; }
+#warp-settings-panel { grid-column: 1 / -1; }
+.warp-settings-actions { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
+@media (max-width: 980px) { .warp-settings-row { flex-wrap: wrap; } .warp-settings-actions { flex-direction: row; flex-wrap: wrap; margin-left: 46px; } }
+@media (max-width: 980px) {
+  #section-home > section.has-warp { gap: 16px; padding: 24px 16px 16px; }
+  .has-warp > .zapret-connection, .connection-card { padding: 20px 16px; }
+  .provider-heading h3 { font-size: 15px; }
+}
+@media (max-width: 740px) {
+  #section-home > section.has-warp { grid-template-columns: minmax(0, 1fr); }
+}
 :root[data-theme="graphite"] {
   --color-primary: #b8c7e0;
   --color-primary-dim: #8199bb;

@@ -3,6 +3,8 @@
 
     <h2 class="font-headline text-[10px] font-bold uppercase tracking-[0.2em] text-primary/70" data-i18n="settings">Settings</h2>
 
+
+
     <fieldset class="theme-settings glass-panel rounded-2xl border border-outline-variant/10 p-6">
         <legend class="sr-only" data-i18n="theme_title">Appearance</legend>
         <h3 class="text-sm text-on-surface font-headline font-bold" aria-hidden="true" data-i18n="theme_title">Appearance</h3>
@@ -102,5 +104,23 @@
             </label>
         </div>
     </div>
+
+    <!-- Optional connection provider, after the general application preferences. -->
+    <section id="warp-settings-panel" class="glass-panel rounded-2xl border border-outline-variant/10 p-6" aria-labelledby="warp-settings-title">
+        <div class="warp-settings-row">
+            <span class="material-symbols-outlined warp-cloud text-3xl" aria-hidden="true">cloud</span>
+            <div class="min-w-0 flex-1">
+                <h3 id="warp-settings-title" class="text-sm font-bold">Cloudflare WARP</h3>
+                <p id="warp-settings-description" class="theme-description" data-i18n="warp_settings_install_desc"></p>
+                <p id="warp-settings-status" class="mt-2 text-xs text-on-surface-variant" role="status" data-i18n="warp_detecting"></p>
+            </div>
+            <div class="warp-settings-actions">
+                <button id="warp-install" type="button" class="provider-button" disabled data-i18n="warp_install"></button>
+                <button id="warp-settings-refresh" type="button" class="provider-button" data-i18n="check_status"></button>
+            </div>
+        </div>
+        <p id="warp-install-details" class="warp-hint mt-4" data-i18n="warp_settings_desc"></p>
+        <p id="warp-install-result" class="text-xs text-on-surface-variant mt-3" role="status"></p>
+    </section>
 
 </div><!-- /section-settings -->

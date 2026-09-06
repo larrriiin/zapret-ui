@@ -3599,6 +3599,13 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            providers::warp::get_warp_status,
+            providers::warp::connect_warp,
+            providers::warp::disconnect_warp,
+            providers::warp::get_warp_mode,
+            providers::warp::set_warp_mode,
+            providers::warp::set_warp_proxy_port,
+            providers::warp::installer::install_warp,
             open_setup_window,
             setup_window_ready,
             finish_setup_window,

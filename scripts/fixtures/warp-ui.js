@@ -1,0 +1,124 @@
+import '/styles.css';
+import { mountComponents } from '/components/index.js';
+import { initI18n, setLanguage, onLangChange } from '/lib/i18n.js';
+import { initWarp } from '/features/warp.js';
+import { updateStatusUI } from '/features/status.js';
+import { initTheme } from '/features/theme.js';
+import { initStrategyDropdown, loadStrategies } from '/features/strategies.js';
+
+mountComponents();
+localStorage.setItem('zapret_theme', 'graphite');
+localStorage.setItem('zapret_accents', JSON.stringify({graphite:'lavender'}));
+initTheme(); initI18n();
+const $ = id => document.getElementById(id);
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+let installed = false, connected = false, mode = 'warp', port = 40000, failed = false;
+let inFlight = 0, maximum = 0, calls = [];
+const modes = ['doh','dot','warp','warp+dot','warp+doh','proxy','tunnel_only'];
+window.__TAURI__ = { core: { invoke: async (command, args) => {
+  if (command === 'get_strategies') return ['general (ALT12)', 'general'];
+  if (!command.includes('warp')) return {};
+  calls.push(command); maximum = Math.max(maximum, ++inFlight);
+  await wait(80); inFlight--;
+  if (failed) throw {code:'warp_cli_error', detail:'Test failure'};
+  if (command === 'connect_warp') connected = true;
+  if (command === 'disconnect_warp') connected = false;
+  if (command === 'set_warp_mode') mode = args.mode;
+  if (command === 'set_warp_proxy_port') port = args.port;
+  return {installed, connected, state:connected ? 'connected':'disconnected', mode, modes, version:'warp-cli 2026.7.1343.0', proxy:mode === 'proxy' ? {address:'127.0.0.1',port,kind:'SOCKS5',active:connected,port_editable:true}:null};
+}}};
+setLanguage('ru');
+updateStatusUI({running:true, strategy:'general (ALT12)'});
+initStrategyDropdown();
+await loadStrategies('general (ALT12)');
+onLangChange(() => updateStatusUI({running:true, strategy:'general (ALT12)'}));
+const hero = document.querySelector('#section-home > section');
+const elements = [...hero.querySelectorAll('*'), hero];
+const rects = () => elements.map(e => { const r=e.getBoundingClientRect(); return [r.x,r.y,r.width,r.height]; });
+await document.fonts.ready;
+const before = JSON.stringify(rects());
+initWarp(); await wait(200);
+const results = [];
+function check(condition, label) {results.push(`${condition?'PASS':'FAIL'}: ${label}`); if(!condition) console.error(label);}
+async function manualCheck(id) {
+  $(id).click();
+  await wait(200);
+  $('warp-status-dialog').close();
+}
+check(before === JSON.stringify(rects()), 'WARP absent: all original hero element bounds unchanged');
+check($('warp-card').hidden, 'WARP absent: no visible WARP card');
+check(!$('warp-install').hidden && !$('warp-install').disabled, 'Missing WARP offers installation in Settings');
+installed = true; $('warp-settings-refresh').click();
+check($('warp-status-dialog').open && $('warp-status-report').getAttribute('aria-busy') === 'true', 'Settings status check opens a loading report');
+await wait(200);
+check($('warp-status-report').textContent.includes('2026.7.1343.0'), 'Settings status check shows client version');
+$('warp-status-dialog').close();
+check(hero.classList.contains('has-warp') && !$('warp-card').hidden, 'Detection enables two cards');
+$('warp-connect').click(); $('warp-connect').click();
+check($('warp-connect').disabled && $('warp-state').textContent.includes('Подключение'), 'Pending operation disables repeated clicks');
+await wait(200);
+check(connected && $('connect-btn').dataset.action === 'stop', 'Both providers stay connected independently');
+check(calls.filter(c=>c==='connect_warp').length === 1, 'Double click sends only one command');
+for (const [left, right] of [['strategy-trigger', 'warp-mode-trigger'], ['connect-btn', 'warp-connect'], ['check-status-btn', 'warp-refresh']]) {
+  const a = $(left).getBoundingClientRect(), b = $(right).getBoundingClientRect();
+  check(Math.abs(a.width - b.width) < 1 && a.height === b.height, `${left} and ${right} have equal dimensions`);
+}
+const zapretPickerStyle = getComputedStyle($('strategy-trigger'));
+const warpPickerStyle = getComputedStyle($('warp-mode-trigger'));
+check(['backgroundColor','borderRadius','borderColor','padding','fontSize','fontWeight','lineHeight'].every(key => zapretPickerStyle[key] === warpPickerStyle[key]), 'Dropdown triggers use identical visual styles');
+const labelProperties = ['color','fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','textAlign','textOverflow'];
+check(labelProperties.every(key => getComputedStyle($('strategy-label'))[key] === getComputedStyle($('warp-mode-label'))[key]), 'Selected values use identical text styles');
+$('strategy-trigger').click();
+const strategyRow = $('strategy-options-list').querySelector('[data-value="general (ALT12)"]');
+const strategyRowHeight = strategyRow.getBoundingClientRect().height;
+const rowProperties = ['color','backgroundColor','borderLeftWidth','borderLeftColor','padding','fontSize','fontWeight','lineHeight'];
+const strategyRowStyles = rowProperties.map(key => getComputedStyle(strategyRow)[key]);
+$('warp-mode-trigger').click();
+const warpRow = $('warp-mode-options-list').querySelector('[aria-selected="true"]');
+check(strategyRowHeight === warpRow.getBoundingClientRect().height && rowProperties.every((key, index) => getComputedStyle(warpRow)[key] === strategyRowStyles[index]), 'Selected popup rows have identical height and highlight');
+check(getComputedStyle(warpRow).backgroundColor === 'rgba(0, 0, 0, 0)' && getComputedStyle(warpRow).borderLeftWidth === '2px', 'Selection uses a left stripe without a filled row');
+check(warpRow.children[1].className === strategyRow.children[1].className, 'Option labels use the same alignment and truncation');
+$('warp-mode-trigger').click();
+check(!$('warp-card').textContent.includes('warp-cli'), 'Client version is absent from the home card');
+check($('header-status').textContent.includes('general (ALT12) + WARP'), 'Header shows strategy plus WARP');
+updateStatusUI({running:false});
+check($('header-status').textContent.endsWith('WARP'), 'Header shows WARP alone when Zapret is stopped');
+updateStatusUI({running:true, strategy:'general (ALT12)'});
+$('warp-mode-trigger').click();
+check(!$('warp-mode-options').hidden, 'Custom mode dropdown opens');
+$('warp-mode-options').querySelector('[data-value="proxy"]').click(); await wait(200);
+check($('warp-mode-options').hidden && $('warp-mode-label').textContent === 'Локальный прокси', 'Custom dropdown selects mode and closes');
+check(!$('warp-proxy').hidden && $('warp-proxy-endpoint').textContent.includes('40000'), 'Local proxy reports endpoint and type');
+$('warp-port').value = '40001'; $('warp-port-form').requestSubmit(); await wait(200);
+check(port === 40001 && $('warp-proxy-endpoint').textContent.includes('40001'), 'Proxy port changes and refreshes');
+$('warp-refresh').click(); await wait(200);
+check($('warp-status-dialog').open && $('warp-status-report').textContent.includes('127.0.0.1:40001'), 'Home status check reports proxy endpoint');
+$('warp-status-dialog').close();
+failed = true; $('warp-connect').click(); await wait(200);
+check(!$('warp-error').hidden && !$('warp-connect').disabled, 'Operation failure is visible and retry available');
+$('warp-settings-refresh').click(); await wait(200);
+check($('warp-status-report').textContent.includes('Test failure'), 'Manual status check displays backend errors');
+$('warp-status-dialog').close();
+failed = false; mode = 'warp+doh'; connected = false;
+await wait(3300);
+check($('warp-mode').value === 'warp+doh' && $('warp-state').textContent.includes('Отключено'), 'External changes synchronize without clicking refresh');
+installed = false; await manualCheck('warp-settings-refresh');
+// Original Zapret buttons use a 300ms transition-all; let their legacy padding settle.
+await wait(350);
+check(!hero.classList.contains('has-warp') && $('warp-card').hidden, 'Uninstall restores original screen');
+check(before === JSON.stringify(rects()), 'Uninstall restores original element bounds');
+check(maximum === 1, 'Polling and operations never overlap');
+installed = true; connected = true; mode='proxy'; await manualCheck('warp-settings-refresh');
+setLanguage('en');
+check($('warp-state').textContent === 'Connected' && $('warp-mode').selectedOptions[0].textContent === 'Local proxy', 'Dynamic labels change language');
+setLanguage('ru'); mode='warp'; await manualCheck('warp-settings-refresh');
+const report = document.createElement('pre'); report.id='test-results'; report.textContent=results.join('\n');
+report.style.cssText='position:relative;margin:24px;padding:16px;background:#20232a;color:white;font:12px monospace;white-space:pre-wrap';
+$('sections-host').append(report);
+const params = new URLSearchParams(location.search);
+if(params.get('width')) document.querySelector('body').style.width = `${params.get('width')}px`;
+if(params.get('lang')) setLanguage(params.get('lang'));
+if(params.get('theme')) document.querySelector(`input[name="theme-pref"][value="${params.get('theme')}"]`)?.click();
+if(params.get('proxy')) {mode='proxy'; await manualCheck('warp-settings-refresh');}
+if(params.get('settings')) { $('section-home').classList.add('hidden'); $('section-settings').classList.remove('hidden'); }
+

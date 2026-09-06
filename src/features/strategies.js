@@ -161,11 +161,11 @@ export function renderStrategyList() {
       const item = document.createElement('div');
       item.dataset.value = name;
       const baseCls = 'group w-full text-left px-4 py-2.5 text-sm font-headline text-on-surface hover:bg-primary/10 transition-colors flex items-center gap-2 cursor-pointer';
-      item.className = baseCls + (isBest ? ' border-l-2 border-secondary' : '') + (isSelected ? ' bg-primary/20 text-primary' : '');
+      item.className = baseCls + (isBest ? ' border-l-2 border-secondary' : '') + (isSelected ? ' dropdown-option-selected' : '');
 
       const icon = document.createElement('span');
       icon.className = 'material-symbols-outlined text-sm item-icon';
-      icon.style.color = isSelected ? 'var(--color-primary)' : '';
+      icon.style.color = isSelected ? 'var(--color-secondary)' : '';
       icon.style.opacity = isSelected ? '1' : '0.3';
       icon.textContent = 'chevron_right';
       item.appendChild(icon);
