@@ -3,7 +3,7 @@
 // tauri.conf.json. tauri-action publishes the version from tauri.conf.json,
 // so anything else is a silent mismatch waiting to happen on the next tag.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -44,7 +44,7 @@ const pkgLock = readJson(resolve(repo, "package-lock.json"));
 const tauri = readJson(resolve(repo, "src-tauri/tauri.conf.json"));
 const cargoVersion = readCargoVersion(resolve(repo, "src-tauri/Cargo.toml"));
 const cargoLockVersion = readCargoLockVersion(resolve(repo, "src-tauri/Cargo.lock"));
-const versionTxt = readFileSync(resolve(repo, "version.txt"), "utf8").trim();
+const versionTxtPath = resolve(repo, "version.txt");
 
 const versions = {
   "package.json": pkg.version,
@@ -53,8 +53,14 @@ const versions = {
   "src-tauri/Cargo.toml": cargoVersion,
   "src-tauri/Cargo.lock": cargoLockVersion,
   "src-tauri/tauri.conf.json": tauri.version,
-  "version.txt": versionTxt,
 };
+
+// version.txt is ignored by Git and generated from tauri.conf.json by build.rs.
+// Validate it in local worktrees where it exists, but do not require it in a
+// clean CI checkout before the Rust build has generated it.
+if (existsSync(versionTxtPath)) {
+  versions["version.txt"] = readFileSync(versionTxtPath, "utf8").trim();
+}
 
 const unique = new Set(Object.values(versions));
 if (unique.size !== 1) {
