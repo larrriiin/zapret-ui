@@ -13,6 +13,8 @@
   <a href="https://github.com/larrriiin/zapret-ui/releases/latest"><strong>Скачать / Download</strong></a>
   ·
   <a href="https://github.com/larrriiin/zapret-ui/issues">Сообщить о проблеме / Report an issue</a>
+  ·
+  <a href="CODE_SIGNING.md">Code signing policy</a>
 </p>
 
 <p align="center">

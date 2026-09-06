@@ -69,7 +69,10 @@ jobs:
           releaseId: ${{ steps.release.outputs.release_id }}
           tagName: ${{ env.RELEASE_TAG }}
           releaseName: "Zapret-UI ${{ env.RELEASE_TAG }}"
-          releaseBody: "See the assets below for the latest installers and update artifacts."
+          releaseBody: |
+            See the assets below for the latest installers and update artifacts.
+
+            [Code signing policy](https://github.com/larrriiin/zapret-ui/blob/main/CODE_SIGNING.md)
           releaseDraft: ${{ steps.release.outputs.draft }}
           prerelease: ${{ steps.release.outputs.prerelease }}
           # The final manifest is generated below from this run's signed bundles.

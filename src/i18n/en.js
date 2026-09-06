@@ -144,6 +144,7 @@ export default {
     "loading_strategies": "Loading strategies...",
     "no_strategies": "No strategies found",
     "run_service": "Run as Service",
+    "run_service_notice": "Installs and runs Zapret as a Windows service and uses the WinDivert network driver. Administrator privileges are required.",
     "run_temp": "Run Temporarily",
     "stop_service": "Disconnect",
     "check_status": "Check Status",

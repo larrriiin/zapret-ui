@@ -1,9 +1,12 @@
 [package]
 name = "zapret-ui"
 version = "26.9.5"
-description = "A Tauri App"
-authors = ["you"]
+description = "A Windows desktop interface for installing, configuring, and running Zapret"
+authors = ["larrriiin"]
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/larrriiin/zapret-ui"
+homepage = "https://github.com/larrriiin/zapret-ui"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -51,4 +54,3 @@ tokio = { version = "1", features = ["macros", "rt"] }
 [[bin]]
 name = "zapret-ui"
 path = "src/main.rs"
-

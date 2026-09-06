@@ -144,6 +144,7 @@ export default {
     "loading_strategies": "Загрузка...",
     "no_strategies": "Стратегии не найдены",
     "run_service": "Запустить службу",
+    "run_service_notice": "Устанавливает и запускает Zapret как службу Windows и использует сетевой драйвер WinDivert. Требуются права администратора.",
     "run_temp": "Запустить временно",
     "stop_service": "Отключить",
     "check_status": "Проверить статус",
