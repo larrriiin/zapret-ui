@@ -398,6 +398,7 @@ input[type="radio"]:checked::before {
 .setup-run-mode { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 20px; }
 .setup-run-mode legend { margin-bottom: 8px; font-size: 12px; }
 .setup-run-mode label, .setup-delete-label { display: flex; align-items: center; gap: 10px; font-size: 13px; cursor: pointer; }
+.setup-run-mode .setup-service-notice { flex-basis: 100%; margin: 0; color: var(--color-on-surface-variant); font-size: 12px; line-height: 1.5; }
 .setup-delete-label { margin-top: 24px; }
 .setup-delete-label input { flex-shrink: 0; }
 .setup-confirm { width: min(500px, calc(100vw - 48px)); }

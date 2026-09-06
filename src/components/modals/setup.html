@@ -35,8 +35,9 @@
                     <p id="setup-best-meta"></p>
                     <fieldset class="setup-run-mode">
                         <legend data-i18n="setup_run_mode">Run mode</legend>
-                        <label><input type="radio" name="setup-mode" value="service" checked><span data-i18n="setup_service">With Windows</span></label>
+                        <label><input type="radio" name="setup-mode" value="service" aria-describedby="setup-service-notice" checked><span data-i18n="setup_service">With Windows</span></label>
                         <label><input type="radio" name="setup-mode" value="temporary"><span data-i18n="setup_temporary">Until stopped</span></label>
+                        <p id="setup-service-notice" class="setup-service-notice" data-i18n="setup_service_notice">Service mode installs Zapret as a Windows service and uses the WinDivert network driver. Administrator privileges are required.</p>
                     </fieldset>
                     <p class="setup-note" data-i18n="setup_test_limit">Successful checks do not guarantee that every video or voice call will work</p>
                 </div>

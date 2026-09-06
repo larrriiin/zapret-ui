@@ -84,7 +84,12 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
-          $installer = Get-Item "src-tauri/target/release/bundle/nsis/ZAPRET_${version}_x64-setup.exe"
+          $installers = @(Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*_${version}_x64-setup.exe" |
+            Where-Object { $_.Name -notlike '*-branded-setup.exe' })
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one native NSIS installer for version ${version}; found $($installers.Count)."
+          }
+          $installer = $installers[0]
           New-Item -ItemType Directory -Force artifacts/installer | Out-Null
           node scripts/prepare-installer-update.mjs artifacts/installer/latest.json $installer.FullName --from-bundle src-tauri/target/release/bundle
           if ($LASTEXITCODE -ne 0) { throw 'Failed to prepare NSIS updater manifest.' }
@@ -96,7 +101,14 @@ jobs:
           # manifest are available, including when rebuilding an existing release.
           $assets = gh release view $env:RELEASE_TAG --json assets --jq '.assets[].name'
           if ($LASTEXITCODE -ne 0) { throw 'Failed to list release assets.' }
-          foreach ($legacy in @("ZAPRET_${version}_x64-branded-setup.exe", "ZAPRET_${version}_x64-branded-setup.exe.sig")) {
+          foreach ($legacy in @(
+            "ZAPRET_${version}_x64-setup.exe",
+            "ZAPRET_${version}_x64-setup.exe.sig",
+            "ZAPRET_${version}_x64_en-US.msi",
+            "ZAPRET_${version}_x64_en-US.msi.sig",
+            "ZAPRET_${version}_x64-branded-setup.exe",
+            "ZAPRET_${version}_x64-branded-setup.exe.sig"
+          )) {
             if ($assets -contains $legacy) {
               gh release delete-asset $env:RELEASE_TAG $legacy --yes
               if ($LASTEXITCODE -ne 0) { throw 'Failed to retire obsolete wrapper asset.' }
