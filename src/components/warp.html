@@ -5,7 +5,7 @@
 <article id="warp-card" class="connection-card" hidden aria-labelledby="warp-title">
   <header class="provider-heading">
     <span class="material-symbols-outlined warp-cloud" aria-hidden="true">cloud</span>
-    <div><h3 id="warp-title">CLOUDFLARE WARP</h3><p data-i18n="warp_subtitle"></p></div>
+    <div><h3 id="warp-title">CLOUDFLARE WARP<button id="warp-info-btn" type="button" class="provider-info" aria-label="Cloudflare WARP: info"><span class="material-symbols-outlined" aria-hidden="true">info</span></button></h3><p data-i18n="warp_subtitle"></p></div>
     <span id="warp-state" class="provider-badge" role="status" aria-live="polite"></span>
   </header>
   <label id="warp-mode-title" class="provider-label" for="warp-mode-trigger" data-i18n="warp_mode"></label>
@@ -24,7 +24,7 @@
       <div id="warp-mode-options-list" class="max-h-64 overflow-y-auto py-1" role="listbox" aria-labelledby="warp-mode-title"></div>
     </div>
   </div>
-  <button id="warp-connect" type="button" class="provider-button provider-connect">
+  <button id="warp-connect" type="button" class="provider-button provider-connect connect-glow">
     <span id="warp-connect-label"></span><span class="material-symbols-outlined" aria-hidden="true">power_settings_new</span>
   </button>
   <button id="warp-refresh" type="button" class="provider-button provider-refresh">
@@ -44,9 +44,9 @@
 </article>
 <dialog id="warp-status-dialog" class="warp-status-dialog" aria-labelledby="warp-status-title">
   <header class="flex items-center justify-between gap-4 mb-5">
-    <h2 id="warp-status-title" class="font-headline text-lg font-bold" data-i18n="warp_status_title"></h2>
+    <div class="flex items-center gap-3 min-w-0"><span class="material-symbols-outlined text-secondary text-2xl" aria-hidden="true">query_stats</span><h2 id="warp-status-title" class="font-headline text-lg font-bold" data-i18n="warp_status_title"></h2></div>
     <button id="warp-status-close" type="button" class="provider-button" data-i18n="warp_close" data-i18n-attr="aria-label"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
   </header>
-  <div id="warp-status-report" role="status" aria-live="polite"></div>
+  <div id="warp-status-report" class="space-y-3" role="status" aria-live="polite"></div>
   <form method="dialog" class="mt-6 flex justify-end"><button class="provider-button" data-i18n="warp_close"></button></form>
 </dialog>

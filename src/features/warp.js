@@ -3,6 +3,7 @@ import { t, onLangChange } from '../lib/i18n.js';
 import markup from '../components/warp.html?raw';
 import { initWarpModes, renderWarpModes, closeWarpModes } from './warp-mode.js';
 import { setWarpSummary } from './connection-summary.js';
+import { makeStatusRow } from './status-check.js';
 
 export const WARP_MODE_KEYS = {
   doh: 'warp_mode_doh', dot: 'warp_mode_dot', warp: 'warp_mode_warp',
@@ -17,6 +18,7 @@ let operation = null;
 let operationError = null;
 let requestError = null;
 let checking = false;
+let cancelRequested = false;
 let hero, zapret, heading, zapretHeader, statusHeading;
 
 function errorText(error) {
@@ -31,6 +33,7 @@ function layout(installed) {
   heading.hidden = !installed;
   $('warp-card').hidden = !installed;
   zapretHeader.hidden = !installed;
+  (installed ? zapretHeader.querySelector('h3') : $('strategy-title')).append($('zapret-info-btn'));
   if (installed) zapretHeader.append(statusHeading);
   else zapret.prepend(statusHeading);
 }
@@ -43,8 +46,10 @@ function render() {
   const locked = busy || status === 'connecting' || status === 'disconnecting';
   $('warp-state').textContent = t(`warp_state_${status}`);
   $('warp-card').dataset.state = status;
-  $('warp-connect-label').textContent = operation ? t(`warp_state_${operation}`) : t(s?.connected ? 'warp_disconnect' : 'warp_connect');
-  $('warp-connect').disabled = locked || !s?.installed || !s?.modes?.length;
+  const connecting = operation === 'connecting' || (!busy && s?.state === 'connecting');
+  $('warp-connect-label').textContent = connecting ? t('warp_cancel_connect') : operation ? t(`warp_state_${operation}`) : t(s?.connected ? 'warp_disconnect' : 'warp_connect');
+  $('warp-connect').disabled = (!connecting && locked) || !s?.installed || (!s?.modes?.length && !s?.connected && !connecting);
+  $('warp-connect').dataset.action = s?.connected ? 'stop' : 'start';
   $('warp-refresh').disabled = busy || checking;
   const mode = $('warp-mode');
   const values = s?.modes || [];
@@ -87,25 +92,31 @@ function renderReport() {
   const report = $('warp-status-report');
   report.replaceChildren();
   report.setAttribute('aria-busy', String(checking));
-  if (checking) { report.textContent = t('status_checking_realtime'); return; }
+  if (checking) {
+    const loading = document.createElement('div');
+    loading.className = 'rounded-xl bg-surface-container-high/70 p-5 text-sm text-on-surface-variant';
+    loading.textContent = t('status_checking_realtime'); report.append(loading); return;
+  }
   const error = requestError || snapshot?.error;
+  if (snapshot?.installed) {
+    const summary = document.createElement('div');
+    summary.className = `rounded-xl p-4 ${error ? 'bg-tertiary/10 text-tertiary' : snapshot.connected ? 'bg-secondary/10 text-secondary' : 'bg-white/5 text-on-surface'}`;
+    const title = document.createElement('div');
+    title.className = 'font-headline text-base font-bold';
+    title.textContent = t(`warp_state_${error ? 'error' : snapshot.state}`);
+    summary.append(title); report.append(summary);
+  }
   if (error) {
     const message = document.createElement('p');
     message.className = 'warp-error'; message.textContent = errorText(error); report.append(message);
   }
-  const rows = [[t('warp_client'), snapshot?.installed ? t('warp_installed_short') : t('warp_not_installed')]];
+  const rows = [{ icon: 'cloud', labelKey: 'warp_client', value: snapshot?.installed ? 'selected' : 'not_installed', valueLabel: snapshot?.installed ? t('warp_installed_short') : t('warp_not_installed'), detail: snapshot?.installed ? snapshot.version || t('warp_unknown') : undefined }];
   if (snapshot?.installed) {
-    rows.push([t('status_label'), t(`warp_state_${error ? 'error' : snapshot.state}`)],
-      [t('warp_mode'), t(WARP_MODE_KEYS[snapshot.mode] || 'warp_unknown')],
-      [t('warp_client_version'), snapshot.version || t('warp_unknown')]);
-    if (snapshot.proxy) rows.push([t('warp_mode_proxy'), `${snapshot.proxy.kind || t('warp_unknown')} · ${snapshot.proxy.address}:${snapshot.proxy.port ?? t('warp_unknown')}`]);
+    rows.push({ icon: 'power_settings_new', labelKey: 'status_label', value: error ? 'unknown' : snapshot.connected ? 'running' : 'stopped', detail: t(`warp_state_${error ? 'error' : snapshot.state}`) },
+      { icon: 'route', labelKey: 'warp_mode', value: snapshot.mode ? 'selected' : 'unknown', detail: t(WARP_MODE_KEYS[snapshot.mode] || 'warp_unknown') });
+    if (snapshot.proxy) rows.push({ icon: 'settings_ethernet', labelKey: 'warp_mode_proxy', value: snapshot.proxy.active ? 'running' : 'stopped', detail: `${snapshot.proxy.kind || t('warp_unknown')} · ${snapshot.proxy.address}:${snapshot.proxy.port ?? t('warp_unknown')}` });
   }
-  if (snapshot) for (const [label, value] of rows) {
-    const row = document.createElement('div'); row.className = 'warp-report-row';
-    const name = document.createElement('span'); name.textContent = label;
-    const text = document.createElement('strong'); text.textContent = value;
-    row.append(name, text); report.append(row);
-  }
+  if (snapshot) report.append(...rows.map(makeStatusRow));
 }
 
 async function checkStatus() {
@@ -136,7 +147,19 @@ async function act(command, args, state = null) {
   busy = true; operation = state; operationError = null; render();
   try { await polling; snapshot = await invoke(command, args); requestError = null; }
   catch (error) { operationError = error; }
-  finally { busy = false; operation = null; render(); }
+  finally {
+    if (cancelRequested) {
+      // The CLI gate serializes commands. Finish the pending request, then
+      // disconnect even if that request failed or has not established a tunnel.
+      cancelRequested = false;
+      operation = 'disconnecting'; render();
+      try {
+        snapshot = await invoke('disconnect_warp');
+        requestError = null; operationError = null;
+      } catch (error) { operationError = error; }
+    }
+    busy = false; operation = null; render();
+  }
 }
 
 export function initWarp() {
@@ -166,7 +189,13 @@ export function initWarp() {
   initWarpModes();
   $('warp-status-close').addEventListener('click', () => $('warp-status-dialog').close());
   onLangChange(render);
-  $('warp-connect').addEventListener('click', () => act(snapshot?.connected ? 'disconnect_warp' : 'connect_warp', undefined, snapshot?.connected ? 'disconnecting' : 'connecting'));
+  $('warp-connect').addEventListener('click', () => {
+    if (busy && operation === 'connecting') {
+      cancelRequested = true; operation = 'disconnecting'; render(); return;
+    }
+    const disconnect = snapshot?.connected || snapshot?.state === 'connecting';
+    act(disconnect ? 'disconnect_warp' : 'connect_warp', undefined, disconnect ? 'disconnecting' : 'connecting');
+  });
   $('warp-mode').addEventListener('change', event => act('set_warp_mode', { mode: event.target.value }));
   $('warp-port-form').addEventListener('submit', event => {
     event.preventDefault();
@@ -183,5 +212,16 @@ export function initWarp() {
   });
   // One loop per webview; the backend gate also serializes across windows.
   async function poll() { await refresh(); window.setTimeout(poll, 3000); }
-  poll();
+  // A tray query may own the client gate during startup. Do not reveal an
+  // undecided layout; wait for detection or let the startup screen offer retry.
+  return (async () => {
+    const deadline = Date.now() + 45000;
+    do {
+      await refresh();
+      if (snapshot) return;
+      if (requestError && requestError.code !== 'warp_busy') throw requestError;
+      await new Promise(resolve => window.setTimeout(resolve, 200));
+    } while (Date.now() < deadline);
+    throw new Error('WARP detection timed out');
+  })().finally(() => window.setTimeout(poll, 3000));
 }

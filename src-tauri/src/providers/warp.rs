@@ -48,14 +48,14 @@ struct Client {
 
 #[derive(Default, Debug, Serialize)]
 pub struct WarpStatus {
-    installed: bool,
-    connected: bool,
+    pub(crate) installed: bool,
+    pub(crate) connected: bool,
     state: String,
     mode: Option<String>,
     version: Option<String>,
     modes: Vec<String>,
     proxy: Option<ProxyStatus>,
-    error: Option<WarpError>,
+    pub(crate) error: Option<WarpError>,
 }
 #[derive(Debug, Serialize)]
 struct ProxyStatus {

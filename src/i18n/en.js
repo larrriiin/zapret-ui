@@ -1,4 +1,9 @@
 export default {
+    "warp_cancel_connect": "Cancel connection",
+    "startup_loading": "Loading the app…",
+    "startup_retry": "Retry",
+    "zapret_info_content": "ZAPRET changes network packet handling to bypass DPI restrictions, using the selected strategy and site lists. It does not create a VPN tunnel or hide your IP address. Results depend on the network and strategy.",
+    "warp_info_content": "Cloudflare WARP is a separate Cloudflare client. Tunnel modes route traffic through Cloudflare; DNS-only modes change DNS only, while the local proxy serves apps configured to use it. WARP may change your public IP address but is not designed for choosing a country. You can control it independently of ZAPRET.",
     "warp_search_modes": "Search modes...",
     "warp_status_title": "Cloudflare WARP status",
     "warp_close": "Close",
@@ -266,7 +271,7 @@ export default {
     "extracting": "Extracting and installing...",
     "install_complete": "Installation complete! Reloading...",
     "download_failed": "Download failed",
-    "system_status": "System Status",
+    "system_status": "ZAPRET Status",
     "checking_status": "Checking status...",
     "close": "Close",
     "information": "Information",

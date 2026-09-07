@@ -5,6 +5,8 @@ let currentInfoType = null;
 
 function getInfoData() {
   return {
+    zapret: { title: 'ZAPRET', content: t('zapret_info_content') },
+    warp: { title: 'Cloudflare WARP', content: t('warp_info_content') },
     ipset: { title: t('ipset_info_title'), content: t('ipset_info_content') },
     game: { title: t('game_info_title'), content: t('game_info_content') },
     include: { title: t('include_info_title'), content: t('include_info_content') },
@@ -34,6 +36,8 @@ export function refreshOpenInfoModal() {
 }
 
 export function initInfoModals() {
+  $('zapret-info-btn')?.addEventListener('click', () => showInfo('zapret'));
+  $('warp-info-btn')?.addEventListener('click', () => showInfo('warp'));
   const infoModal = $('info-modal');
   const infoClose = $('info-modal-close');
 

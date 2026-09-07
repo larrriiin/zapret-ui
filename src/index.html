@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html class="dark" lang="en">
+<html class="dark app-loading" lang="en">
 
 <head>
     <meta charset="utf-8" />
@@ -7,6 +7,10 @@
     <title>ZAPRET UI</title>
 
     <style>
+        /* Keep the initial layout covered even before the application CSS loads. */
+        #startup-loader { display: none; }
+        .app-loading #sections-host { visibility: hidden; }
+        .app-loading #startup-loader { position: fixed; inset: 30px 0 0; z-index: 10000; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 20px; background: var(--color-background, #17181b); color: var(--color-on-surface, #eceef1); }
         .material-symbols-outlined {
             font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
             user-select: none;
@@ -223,6 +227,11 @@
 </head>
 
 <body class="bg-background text-on-background font-body selection:bg-primary/30 antialiased overflow-hidden">
+    <div id="startup-loader" role="status" aria-live="polite">
+        <span id="startup-spinner" class="startup-spinner" aria-hidden="true"></span>
+        <p id="startup-message" data-i18n="startup_loading">Loading…</p>
+        <button id="startup-retry" type="button" hidden data-i18n="startup_retry">Retry</button>
+    </div>
 
     <!-- Custom title bar -->
     <div id="titlebar" class="fixed top-0 left-0 right-0 flex items-stretch z-[9999]"

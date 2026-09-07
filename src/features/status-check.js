@@ -11,7 +11,7 @@ const STATUS_META = {
   unknown: { label: 'system_state_unknown', icon: 'help', tone: 'text-tertiary', badge: 'bg-tertiary/10 text-tertiary' },
 };
 
-function makeStatusRow({ icon, labelKey, value, detail }) {
+export function makeStatusRow({ icon, labelKey, value, detail, valueLabel }) {
   const meta = STATUS_META[value] || STATUS_META.unknown;
   const row = document.createElement('div');
   row.className = 'flex items-center gap-3 rounded-xl bg-surface-container-high/40 px-4 py-3 min-w-0';
@@ -40,7 +40,7 @@ function makeStatusRow({ icon, labelKey, value, detail }) {
   stateIcon.className = `material-symbols-outlined text-[16px] ${meta.tone}`;
   stateIcon.textContent = meta.icon;
   const stateLabel = document.createElement('span');
-  stateLabel.textContent = t(meta.label);
+  stateLabel.textContent = valueLabel || t(meta.label);
   state.append(stateIcon, stateLabel);
   row.append(itemIcon, copy, state);
   return row;

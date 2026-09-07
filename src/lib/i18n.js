@@ -77,6 +77,11 @@ export async function syncTrayLocalization() {
   try {
     await invoke('update_tray_translations', {
       translations: {
+        warp_on: t('warp_connect'),
+        warp_off: t('warp_disconnect'),
+        warp_missing: t('warp_not_installed'),
+        warp_error: t('warp_state_error'),
+        warp_loading: t('warp_detecting'),
         exit: t('tray_exit'),
         show: t('tray_show'),
         status_prefix: t('tray_status_prefix'),

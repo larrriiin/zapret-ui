@@ -43,21 +43,23 @@ initTheme();
 
 
 window.addEventListener('DOMContentLoaded', async () => {
+  try {
   initI18n();
   if (new URLSearchParams(location.search).get('setup') === '1') {
     document.documentElement.dataset.setupWindow = 'true';
     initFirstRun();
     const params = new URLSearchParams(location.search);
     openSetup({ repeat: params.get('repeat') === 'true', clearLists: params.get('clearLists') === 'true' });
+    document.documentElement.classList.remove('app-loading');
     return;
   }
   document.addEventListener('contextmenu', (e) => e.preventDefault());
 
   initTitlebar();
-  initWarp();
+  const warpReady = initWarp().then(() => null, error => error);
 
   const adminOk = await ensureAdminPrivileges();
-  if (!adminOk) { await invoke('show_app_window', { force: true }); return; }
+  if (!adminOk) { document.documentElement.classList.remove('app-loading'); await invoke('show_app_window', { force: true }); return; }
 
   initFirstRun();
   await maybeShowFirstRun();
@@ -145,4 +147,15 @@ window.addEventListener('DOMContentLoaded', async () => {
     refreshTrafficTranslations();
   });
 
+  const [warpError] = await Promise.all([warpReady, document.fonts.ready]);
+  if (warpError) throw warpError;
+  document.documentElement.classList.remove('app-loading');
+  } catch (error) {
+    console.error('Startup failed:', error);
+    document.getElementById('startup-spinner').hidden = true;
+    document.getElementById('startup-message').textContent = document.documentElement.lang === 'ru' ? 'Не удалось загрузить приложение' : 'Unable to load the app';
+    document.getElementById('startup-retry').hidden = false;
+    document.getElementById('startup-retry').onclick = () => location.reload();
+    await invoke('show_app_window', { force: false });
+  }
 });
