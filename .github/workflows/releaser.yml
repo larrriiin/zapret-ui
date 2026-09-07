@@ -11,7 +11,8 @@ on:
       - 'v*'
 
 concurrency:
-  group: publish-${{ inputs.release_tag || github.ref_name }}
+  # Serialize releases sharing the public VirusTotal API quota.
+  group: publish
   cancel-in-progress: false
 
 jobs:
@@ -36,6 +37,16 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
+      - name: Check VirusTotal configuration
+        shell: pwsh
+        env:
+          VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:VIRUSTOTAL_API_KEY)) {
+            throw 'Add the VIRUSTOTAL_API_KEY repository secret in Settings > Secrets and variables > Actions.'
+          }
+      - name: Verify VirusTotal integration
+        run: node --test scripts/virustotal-release.test.mjs
       - name: Verify version consistency
         run: node scripts/check-versions.mjs
       - name: Resolve target release
@@ -78,8 +89,6 @@ jobs:
           releaseName: "ZAPRET UI ${{ env.RELEASE_TAG }}"
           releaseBody: |
             See the assets below for the latest installers and update artifacts.
-
-            [Code signing policy](https://github.com/larrriiin/zapret-ui/blob/main/CODE_SIGNING.md)
           releaseDraft: ${{ steps.release.outputs.draft }}
           prerelease: ${{ steps.release.outputs.prerelease }}
           # The final manifest is generated below from this run's signed bundles.
@@ -121,13 +130,24 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw 'Failed to retire obsolete wrapper asset.' }
             }
           }
-          # tauri-action does not update the title or body when releaseId points
-          # to an existing release, so synchronize both fields explicitly.
-          $releaseTitle = "ZAPRET UI $env:RELEASE_TAG"
-          $releaseNotes = @(
-            'See the assets below for the latest installers and update artifacts.',
-            '',
-            '[Code signing policy](https://github.com/larrriiin/zapret-ui/blob/main/CODE_SIGNING.md)'
-          ) -join [Environment]::NewLine
-          gh release edit $env:RELEASE_TAG --title $releaseTitle --notes $releaseNotes --draft=false
-          if ($LASTEXITCODE -ne 0) { throw 'Failed to update and publish the completed release.' }
+      - name: Scan installers and update release security sections
+        timeout-minutes: 35
+        uses: actions/github-script@v8
+        env:
+          VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const { resolve } = require('node:path');
+            const { scanRelease } = await import(pathToFileURL(resolve('scripts/virustotal-release.mjs')).href);
+            const config = require('./src-tauri/tauri.conf.json');
+            const { data: release } = await github.rest.repos.getReleaseByTag({ ...context.repo, tag: process.env.RELEASE_TAG });
+            await scanRelease({ github, context, core, apiKey: process.env.VIRUSTOTAL_API_KEY,
+              releaseId: release.id, version: config.version });
+      - name: Publish completed release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit $env:RELEASE_TAG --title "ZAPRET UI $env:RELEASE_TAG" --draft=false
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to publish the completed release.' }
