@@ -366,18 +366,21 @@ function initIPSetUpdateButton() {
     const statusEl = $('ipset-update-status');
     statusEl.classList.remove('hidden');
     statusEl.textContent = t('updating');
-    statusEl.className = 'mt-4 text-sm text-secondary';
+    statusEl.classList.remove('text-error-dim');
+    statusEl.classList.add('text-secondary');
     ipsetUpdateBtn.disabled = true;
     try {
       const result = await invoke('update_ipset_list');
-      const countMatch = result.match(/\d+/);
-      const count = countMatch ? countMatch[0] : '?';
-      statusEl.textContent = t('update_success', { count });
-      statusEl.className = 'mt-4 text-sm text-secondary';
-      await markRestartIfServiceRunning();
+      statusEl.textContent = result.changed
+        ? t('update_success', { count: result.count })
+        : t('ipset_no_changes');
+      statusEl.classList.remove('text-error-dim');
+      statusEl.classList.add('text-secondary');
+      if (result.changed) await markRestartIfServiceRunning();
     } catch (err) {
       statusEl.textContent = `${t('error')}: ${err}`;
-      statusEl.className = 'mt-4 text-sm text-error-dim';
+      statusEl.classList.remove('text-secondary');
+      statusEl.classList.add('text-error-dim');
     } finally {
       ipsetUpdateBtn.disabled = false;
     }

@@ -30,6 +30,7 @@ import { initUserLists } from './features/user-lists.js';
 import { initInfoModals, refreshOpenInfoModal } from './features/info-modals.js';
 import { initUpdates } from './features/updates.js';
 import { initDiagnostics } from './features/diagnostics.js';
+import { initHosts } from './features/hosts.js';
 import { initWizard } from './features/wizard.js';
 import { initFirstRun, maybeShowFirstRun, openSetup } from './features/firstrun.js';
 import { initStatusCheck } from './features/status-check.js';
@@ -92,6 +93,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   initInfoModals();
   initUpdates();
   initDiagnostics();
+  initHosts();
   initWizard();
   initStatusCheck();
   initTrafficMonitor();

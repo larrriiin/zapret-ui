@@ -15,9 +15,16 @@ BrandingText "Preview - no installation"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_FUNCTION PreviewNoOp
+!define MUI_FINISHPAGE_SHOWREADME
+!define MUI_FINISHPAGE_SHOWREADME_TEXT "Create desktop shortcut"
+!define MUI_FINISHPAGE_SHOWREADME_FUNCTION PreviewNoOp
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_LANGUAGE "Russian"
 !insertmacro MUI_LANGUAGE "English"
 Section
   DetailPrint "Preview only - no files are installed."
 SectionEnd
+Function PreviewNoOp
+FunctionEnd

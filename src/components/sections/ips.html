@@ -19,20 +19,37 @@
     </div>
 
     <div class="flex flex-col gap-6 w-full">
-        <!-- Update IPSet List Block -->
-        <div class="glass-panel rounded-2xl border border-primary/10 p-6 w-full">
-            <div class="flex items-center justify-between">
+        <!-- IPSet and hosts updates -->
+        <div class="w-full list-update-panel">
+        <div class="glass-panel rounded-2xl border border-primary/10 p-6 min-w-0 list-update-column">
+            <div class="contents">
                 <div>
                     <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-secondary" data-i18n="update_ipset">Update IPSet List</h3>
                     <p class="text-xs text-on-surface-variant mt-1" data-i18n="update_ipset_desc">Download latest IP ranges for filtering</p>
                 </div>
                 <button id="ipset-update-btn"
-                    class="px-8 py-3 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors flex items-center gap-2">
+                    class="list-update-button px-6 py-3 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors flex items-center gap-2 shrink-0">
                     <span class="material-symbols-outlined text-sm">download</span>
                     <span data-i18n="update_btn">Update</span>
                 </button>
             </div>
-            <div id="ipset-update-status" class="hidden mt-4 text-sm"></div>
+            <div id="ipset-update-status" class="list-update-status hidden text-sm break-words" role="status" aria-live="polite"></div>
+        </div>
+
+        <section class="glass-panel rounded-2xl border border-primary/10 p-6 min-w-0 list-update-column" aria-labelledby="hosts-title">
+            <div class="contents">
+                <div>
+                    <h3 id="hosts-title" class="font-headline text-sm font-bold uppercase tracking-widest text-secondary" data-i18n="hosts_title">Update hosts</h3>
+                    <p class="text-xs text-on-surface-variant mt-1" data-i18n="hosts_description">Download the latest hosts</p>
+                </div>
+                <button id="hosts-update-btn" type="button"
+                    class="list-update-button px-6 py-3 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors flex items-center gap-2 shrink-0 disabled:opacity-40">
+                    <span id="hosts-update-icon" class="material-symbols-outlined text-sm" aria-hidden="true">download</span>
+                    <span id="hosts-update-label" data-i18n="update_btn">Update</span>
+                </button>
+            </div>
+            <p id="hosts-update-status" class="list-update-status hidden text-sm text-on-surface-variant break-words" role="status" aria-live="polite"></p>
+        </section>
         </div>
 
         <!-- IP Exclude Block -->

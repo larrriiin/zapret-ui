@@ -573,3 +573,31 @@ input[type="radio"]:checked::before {
 :root[data-setup-window] .setup-dialog::backdrop { background: var(--color-popup); backdrop-filter: none; }
 :root[data-setup-window] .setup-shell { height: 100vh; max-height: none; }
 :root[data-setup-window] .setup-body { flex: 1; min-height: 0; }
+
+/* Shared rows keep IPSet and hosts aligned even when descriptions wrap. */
+.list-update-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 2rem;
+  row-gap: 1rem;
+}
+.list-update-column {
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: span 3;
+}
+.list-update-button {
+  grid-row: 2;
+  justify-self: start;
+  align-self: start;
+}
+@media (max-width: 767px) {
+  .list-update-panel { grid-template-columns: minmax(0, 1fr); }
+}
+
+.list-update-status {
+  grid-row: 3;
+  align-self: start;
+  margin: 0;
+  line-height: 1.5;
+}

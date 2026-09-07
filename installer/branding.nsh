@@ -1,6 +1,8 @@
 ; Compile-time Modern UI settings only. Tauri owns installation and updates.
 !define MUI_BGCOLOR "070D1F"
 !define MUI_TEXTCOLOR "DFE4FE"
+; Windows themed checkboxes ignore MUI_TEXTCOLOR (NSIS bug #443).
+!define MUI_FORCECLASSICCONTROLS
 !define MUI_INSTFILESPAGE_COLORS "DFE4FE 070D1F"
 !define MUI_HEADERIMAGE_RIGHT
 !define MUI_WELCOMEFINISHPAGE_BITMAP_NOSTRETCH

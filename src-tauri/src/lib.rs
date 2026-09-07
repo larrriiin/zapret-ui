@@ -30,6 +30,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri_plugin_notification::NotificationExt;
 
 mod core;
+mod hosts;
+mod ipset;
 mod providers;
 mod strategy_test;
 mod traffic_monitor;
@@ -1801,13 +1803,11 @@ fn import_backup_file() -> Result<bool, String> {
 
 /// Updates the IPSet list from the provider's upstream source.
 #[tauri::command]
-async fn update_ipset_list() -> Result<String, String> {
-    update_ipset_list_inner()
-        .await
-        .map(|count| format!("Updated successfully. {} IPs loaded.", count))
+async fn update_ipset_list() -> Result<ipset::UpdateResult, String> {
+    update_ipset_list_inner().await
 }
 
-async fn update_ipset_list_inner() -> Result<usize, String> {
+async fn update_ipset_list_inner() -> Result<ipset::UpdateResult, String> {
     let dir = find_binaries_dir();
     let manager = core_manager_at(&dir);
     let provider = manager.provider();
@@ -1870,10 +1870,9 @@ async fn update_ipset_list_inner() -> Result<usize, String> {
                 let _ = std::fs::remove_file(&download_file);
                 return Err("Downloaded ipset list is empty".to_string());
             }
-            std::fs::copy(&download_file, &list_file)
-                .map_err(|e| format!("Failed to install downloaded IPSet list: {}", e))?;
+            let result = ipset::install_if_changed(&list_file, &content);
             let _ = std::fs::remove_file(&download_file);
-            Ok(count)
+            result
         }
         Ok(out) => {
             let _ = std::fs::remove_file(&download_file);
@@ -2141,7 +2140,7 @@ async fn download_and_install_update(
     if operation.is_ok() {
         window.emit("core-update-phase", "updating_ipset").ok();
         match update_ipset_list_inner().await {
-            Ok(_) => ipset_updated = true,
+            Ok(result) => ipset_updated = result.changed,
             Err(error) => warnings.push(format!("IPSet update failed: {error}")),
         }
     }
@@ -3670,6 +3669,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            hosts::update_hosts,
             providers::warp::get_warp_status,
             providers::warp::connect_warp,
             providers::warp::disconnect_warp,
