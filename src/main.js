@@ -35,6 +35,7 @@ import { initWizard } from './features/wizard.js';
 import { initFirstRun, maybeShowFirstRun, openSetup } from './features/firstrun.js';
 import { initStatusCheck } from './features/status-check.js';
 import { initTrafficMonitor, refreshTrafficTranslations } from './features/traffic.js';
+import { initTelegram } from './features/telegram.js';
 import { initWarp } from './features/warp.js';
 
 // Mount HTML fragments synchronously so `[data-i18n]` elements are already in
@@ -86,6 +87,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }, 2000);
 
   initNavigation();
+  initTelegram();
   initConnectButtons();
   initFilterButtons();
   initFakeSelectors();

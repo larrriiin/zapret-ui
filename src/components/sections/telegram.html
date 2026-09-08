@@ -1,0 +1,12 @@
+<section id="section-telegram" class="hidden p-8 space-y-6 max-w-[1000px] mx-auto pb-24" aria-labelledby="telegram-title">
+    <header><h2 id="telegram-title" class="text-xl font-bold">Telegram</h2><p class="theme-description" data-i18n="tg_description"></p></header>
+    <div class="glass-panel rounded-2xl border border-outline-variant/10 p-6 space-y-4">
+        <div class="warp-settings-row"><div class="flex-1"><h3 class="text-sm font-bold">TG WS Proxy</h3><p id="telegram-status" class="theme-description" role="status"></p></div><button id="telegram-toggle" type="button" class="provider-button" disabled></button></div>
+        <p class="theme-description" data-i18n="tg_connect_hint"></p>
+        <div class="module-actions"><button id="telegram-open" type="button" class="provider-button" data-i18n="tg_open" disabled></button><button id="telegram-copy" type="button" class="provider-button" data-i18n="tg_copy" disabled></button></div>
+        <form id="telegram-port-form" class="module-actions"><label for="telegram-port" class="text-sm" data-i18n="tg_port"></label><input id="telegram-port" class="module-port" type="number" min="1" max="65535" required value="1443"><button id="telegram-save" type="submit" class="provider-button" data-i18n="tg_save"></button></form>
+        <p class="theme-description" data-i18n="tg_runtime_hint"></p>
+        <p id="telegram-message" class="module-message" role="status"></p>
+    </div>
+    <details class="glass-panel rounded-2xl border border-outline-variant/10 p-6"><summary class="text-sm font-bold" data-i18n="tg_logs"></summary><button id="telegram-refresh-logs" type="button" class="provider-button mt-4" data-i18n="tg_refresh_logs"></button><pre id="telegram-logs" class="module-logs" tabindex="0"></pre></details>
+</section>

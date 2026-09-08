@@ -105,7 +105,9 @@
         </div>
     </div>
 
-    <!-- Optional connection provider, after the general application preferences. -->
+    <section class="settings-modules" aria-labelledby="settings-modules-title">
+        <h3 id="settings-modules-title" class="text-sm font-bold" data-i18n="settings_modules">Modules</h3>
+        <div class="settings-modules-grid">
     <section id="warp-settings-panel" class="glass-panel rounded-2xl border border-outline-variant/10 p-6" aria-labelledby="warp-settings-title">
         <div class="warp-settings-row">
             <span class="material-symbols-outlined warp-cloud text-3xl" aria-hidden="true">cloud</span>
@@ -114,13 +116,20 @@
                 <p id="warp-settings-description" class="theme-description" data-i18n="warp_settings_install_desc"></p>
                 <p id="warp-settings-status" class="mt-2 text-xs text-on-surface-variant" role="status" data-i18n="warp_detecting"></p>
             </div>
-            <div class="warp-settings-actions">
-                <button id="warp-install" type="button" class="provider-button" disabled data-i18n="warp_install"></button>
-                <button id="warp-settings-refresh" type="button" class="provider-button" data-i18n="check_status"></button>
-            </div>
         </div>
         <p id="warp-install-details" class="warp-hint mt-4" data-i18n="warp_settings_desc"></p>
+        <div class="warp-settings-actions module-actions">
+            <button id="warp-install" type="button" class="provider-button" disabled data-i18n="warp_install"></button>
+            <button id="warp-settings-refresh" type="button" class="provider-button" data-i18n="check_status"></button>
+        </div>
         <p id="warp-install-result" class="text-xs text-on-surface-variant mt-3" role="status"></p>
     </section>
 
+    <section class="glass-panel rounded-2xl border border-outline-variant/10 p-6" aria-labelledby="telegram-settings-title">
+        <div class="warp-settings-row"><span class="material-symbols-outlined text-primary text-3xl" aria-hidden="true">send</span><div class="min-w-0 flex-1"><h3 id="telegram-settings-title" class="text-sm font-bold">TG WS Proxy</h3><p class="theme-description" data-i18n="tg_optional_hint"></p><p id="telegram-settings-status" class="theme-description" role="status"></p></div></div>
+        <div class="module-actions mt-4"><button id="telegram-install" class="provider-button" type="button" data-i18n="tg_install" disabled></button><button id="telegram-settings-open" class="provider-button" type="button" data-i18n="tg_open_tab" hidden></button><button id="telegram-remove" class="provider-button" type="button" data-i18n="tg_remove" hidden></button></div>
+        <progress id="telegram-download-progress" class="module-progress" max="100" value="0" hidden aria-label="Telegram"></progress><p id="telegram-settings-message" class="module-message" role="status"></p>
+    </section>
+        </div>
+    </section>
 </div><!-- /section-settings -->

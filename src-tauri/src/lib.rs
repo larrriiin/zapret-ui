@@ -35,6 +35,7 @@ mod ipset;
 mod providers;
 mod strategy_test;
 mod traffic_monitor;
+mod telegram;
 use core::{
     compare_versions, resolve_stable, Checksum, CoreInstallation, CoreInstallationState,
     CoreManager, CoreUpdateStatus,
@@ -3338,6 +3339,7 @@ fn graceful_exit(app: &tauri::AppHandle) {
     let dll_path = find_binaries_dir().join("bin").join("WinDivert.dll");
     state.traffic_monitor.stop(&dll_path);
     stop_zapret_on_exit(state);
+    telegram::shutdown(app);
     if let Some(window) = app.get_webview_window("main") {
         if let Err(error) = window.destroy() {
             eprintln!("Failed to destroy main WebView window during shutdown: {error}");
@@ -3442,6 +3444,7 @@ pub fn run() {
                     }
                 });
         }))
+        .manage(telegram::TelegramState::default())
         .manage(AppState {
             warp_status_item: Mutex::new(None),
             warp_toggle_item: Mutex::new(None),
@@ -3669,6 +3672,9 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            telegram::get_telegram_status, telegram::install_telegram, telegram::start_telegram,
+            telegram::stop_telegram, telegram::remove_telegram, telegram::set_telegram_port,
+            telegram::telegram_link, telegram::open_telegram, telegram::telegram_logs,
             hosts::update_hosts,
             providers::warp::get_warp_status,
             providers::warp::connect_warp,

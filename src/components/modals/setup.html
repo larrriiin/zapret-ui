@@ -23,6 +23,13 @@
             <section data-setup-panel="1" hidden aria-labelledby="setup-title">
                 <div class="setup-illustration" aria-hidden="true"><span class="material-symbols-outlined">download</span></div>
                 <p class="setup-note" data-i18n="setup_prepare_note">The app checks the core and downloads missing components</p>
+                <fieldset id="setup-modules" class="setup-modules"><legend data-i18n="tg_optional_title"></legend>
+                    <p class="theme-description" data-i18n="tg_optional_hint"></p>
+                    <label class="module-choice"><input id="setup-telegram" type="checkbox" disabled><span><strong>Telegram · TG WS Proxy</strong><span id="setup-telegram-detail" class="theme-description" data-i18n="tg_checking"></span></span></label>
+                    <label id="setup-warp-choice" class="module-choice" hidden><input id="setup-warp" type="checkbox"><span><strong>Cloudflare WARP</strong><span class="theme-description" data-i18n="tg_warp_offer"></span></span></label>
+                    <p id="setup-modules-message" class="module-message" role="status"></p>
+                    <button id="setup-modules-retry" class="provider-button" type="button" data-i18n="tg_recheck" hidden></button>
+                </fieldset>
             </section>
             <section data-setup-panel="2" hidden aria-labelledby="setup-title">
                 <div id="setup-test-intro">
