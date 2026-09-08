@@ -110,20 +110,20 @@ button:disabled { cursor: not-allowed; }
 .provider-button:focus-visible, #warp-port:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
 .provider-connect { margin-top: 12px; min-height: 56px; border: 2px solid var(--color-primary); border-radius: 16px; text-transform: uppercase; letter-spacing: .08em; }
 .provider-refresh { margin-top: 8px; min-height: 34px; color: var(--color-secondary); text-transform: uppercase; letter-spacing: .12em; font-size: 10px; border-color: color-mix(in srgb, var(--color-outline-variant) 50%, transparent); }
-:is(#connect-btn, #warp-connect) { border: 2px solid var(--color-primary); background: transparent; color: var(--color-primary); transition: background-color .2s, color .2s, border-color .2s; }
-#connect-btn > span { color: inherit; }
-:is(#connect-btn, #warp-connect)[data-action="stop"] { background: var(--color-primary); color: var(--color-on-primary); }
-:is(#connect-btn, #warp-connect):hover:not(:disabled) { background: color-mix(in srgb, var(--color-primary) 10%, transparent); }
-:is(#connect-btn, #warp-connect)[data-action="stop"]:hover:not(:disabled) { background: var(--color-primary); }
-:is(#connect-btn-icon, #warp-connect > .material-symbols-outlined) { transition: transform .2s ease; }
-#connect-btn:hover:not(:disabled) #connect-btn-icon, #warp-connect:hover:not(:disabled) > .material-symbols-outlined { transform: rotate(12deg); }
+:is(#connect-btn, #warp-connect, #telegram-toggle) { border: 2px solid var(--color-primary); background: transparent; color: var(--color-primary); transition: background-color .2s, color .2s, border-color .2s; }
+:is(#connect-btn, #telegram-toggle) > span { color: inherit; }
+:is(#connect-btn, #warp-connect, #telegram-toggle)[data-action="stop"] { background: var(--color-primary); color: var(--color-on-primary); }
+:is(#connect-btn, #warp-connect, #telegram-toggle):hover:not(:disabled) { background: color-mix(in srgb, var(--color-primary) 10%, transparent); }
+:is(#connect-btn, #warp-connect, #telegram-toggle)[data-action="stop"]:hover:not(:disabled) { background: var(--color-primary); }
+:is(#connect-btn-icon, #warp-connect > .material-symbols-outlined, #telegram-toggle-icon) { transition: transform .2s ease; }
+:is(#connect-btn, #telegram-toggle):hover:not(:disabled) :is(#connect-btn-icon, #telegram-toggle-icon), #warp-connect:hover:not(:disabled) > .material-symbols-outlined { transform: rotate(12deg); }
 :is(#check-status-btn, #warp-refresh) { background: transparent; border: 1px solid color-mix(in srgb, var(--color-outline-variant) 20%, transparent); color: var(--color-secondary); transition: background-color .2s, border-color .2s; }
 :is(#check-status-btn, #warp-refresh):hover:not(:disabled) { background: var(--color-surface-container-highest); border-color: color-mix(in srgb, var(--color-secondary) 50%, transparent); }
 :is(#check-status-btn-icon, #warp-refresh > .material-symbols-outlined) { transition: transform .2s ease; }
 #check-status-btn:hover:not(:disabled) #check-status-btn-icon, #warp-refresh:hover:not(:disabled) > .material-symbols-outlined { transform: translateY(-1px); }
 @media (prefers-reduced-motion: reduce) {
-  #connect-btn #connect-btn-icon, #warp-connect > .material-symbols-outlined, #check-status-btn #check-status-btn-icon, #warp-refresh > .material-symbols-outlined { transition: none; transform: none; }
-  #connect-btn:hover:not(:disabled) #connect-btn-icon, #warp-connect:hover:not(:disabled) > .material-symbols-outlined,
+  :is(#connect-btn, #telegram-toggle) :is(#connect-btn-icon, #telegram-toggle-icon), #warp-connect > .material-symbols-outlined, #check-status-btn #check-status-btn-icon, #warp-refresh > .material-symbols-outlined { transition: none; transform: none; }
+  :is(#connect-btn, #telegram-toggle):hover:not(:disabled) :is(#connect-btn-icon, #telegram-toggle-icon), #warp-connect:hover:not(:disabled) > .material-symbols-outlined,
   #check-status-btn:hover:not(:disabled) #check-status-btn-icon, #warp-refresh:hover:not(:disabled) > .material-symbols-outlined { transform: none; }
 }
 /* Both connection cards share control geometry; the legacy home is untouched. */
@@ -161,9 +161,7 @@ button:disabled { cursor: not-allowed; }
 .warp-report-row > span { color: var(--color-on-surface-variant); }
 .warp-report-row > strong { text-align: right; overflow-wrap: anywhere; }
 .warp-settings-row { display: flex; align-items: flex-start; gap: 16px; }
-#warp-settings-panel { grid-column: 1 / -1; }
-.warp-settings-actions { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
-@media (max-width: 980px) { .warp-settings-row { flex-wrap: wrap; } .warp-settings-actions { flex-direction: row; flex-wrap: wrap; margin-left: 46px; } }
+#section-settings .module-actions { margin-top: auto; }
 @media (max-width: 980px) {
   #section-home > section.has-warp { gap: 16px; padding: 24px 16px 16px; }
   .has-warp > .zapret-connection, .connection-card { padding: 20px 16px; }
@@ -555,13 +553,9 @@ input[type="radio"]:checked::before {
 #setup-appearance .theme-choice-label { font-size: 11px; }
 #setup-appearance .theme-preview { height: 48px; }
 #setup-appearance .accent-settings { margin-top: 20px; }
-#section-settings:not(.hidden) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; align-content: start; }
-#section-settings > * { margin-block: 0; }
-#section-settings > h2, #section-settings > .theme-settings, .settings-restart-panel { grid-column: 1 / -1; }
+#section-settings:not(.hidden) { display: flex; flex-direction: column; gap: 20px; }
 #section-settings .theme-options { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 #section-settings .accent-options { max-width: 540px; }
-.settings-restart-panel { display: flex; gap: 24px; align-items: center; justify-content: space-between; }
-.settings-restart-panel button { flex-shrink: 0; }
 @keyframes setup-enter { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @media (hover: hover) and (pointer: fine) { .setup-secondary:hover, .setup-window-button:hover:not(:disabled) { background: var(--color-surface-container-highest); color: var(--color-on-surface); } .setup-window-close:hover:not(:disabled) { background: var(--color-error-dim); color: white; } .setup-primary:hover:not(:disabled) { opacity: .9; } }
 @media (max-width: 950px) { #section-settings:not(.hidden) { gap: 16px; } #section-settings .theme-choice { padding: 8px; } #section-settings .theme-choice-label { font-size: 12px; } }
@@ -601,3 +595,31 @@ input[type="radio"]:checked::before {
   margin: 0;
   line-height: 1.5;
 }
+
+/* Optional modules inherit the provider controls and setup typography. */
+#nav-telegram[hidden], .module-actions [hidden], #setup-warp-choice[hidden], .module-progress[hidden] { display: none; }
+.module-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.module-message { margin-top: 12px; color: var(--color-on-surface-variant); font-size: 13px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.module-message:empty { display: none; }
+.module-port { width: 110px; border: 1px solid var(--color-outline-variant); border-radius: 8px; background: var(--color-surface-container-high); color: var(--color-on-surface); }
+.module-port:focus-visible, .module-choice input:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+.module-progress { appearance: none; -webkit-appearance: none; display: block; width: 100%; height: 6px; margin-top: 16px; border: 0; border-radius: 4px; overflow: hidden; background: var(--color-surface-container-highest); accent-color: var(--color-primary); }
+.module-progress::-webkit-progress-bar { background: var(--color-surface-container-highest); border-radius: 4px; }
+.module-progress::-webkit-progress-value { background: var(--color-primary); border-radius: 4px; }
+.module-progress::-moz-progress-bar { background: var(--color-primary); border-radius: 4px; }
+.telegram-icon { display: inline-block; width: 1em; height: 1em; flex-shrink: 0; background-color: currentColor; mask: url('./assets/telegram.svg') center / contain no-repeat; -webkit-mask: url('./assets/telegram.svg') center / contain no-repeat; }
+.module-logs { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; margin-top: 16px; }
+.setup-modules { margin-top: 24px; border-top: 1px solid var(--color-outline-variant); padding-top: 16px; }
+.setup-modules legend { font-size: 14px; font-weight: 700; }
+.module-choice { display: flex; gap: 12px; align-items: flex-start; padding: 14px 0; cursor: pointer; }
+.module-choice input { flex-shrink: 0; margin-top: 3px; accent-color: var(--color-primary); }
+.module-choice strong { font-size: 14px; }
+.module-choice .theme-description { display: block; margin-top: 4px; }
+.telegram-config-form label { display: block; font-size: 13px; font-weight: 600; }
+.telegram-config-form input:not([type="checkbox"]), .telegram-config-form textarea { width: 100%; border: 1px solid var(--color-outline-variant); border-radius: 10px; background: var(--color-surface-container-high); color: var(--color-on-surface); padding: 10px; font-size: 13px; }
+.telegram-config-form textarea { resize: vertical; }
+.telegram-config-form .telegram-checkbox { display: flex; align-items: center; gap: 10px; }
+.telegram-config-form :is(input, textarea):focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.telegram-config-form fieldset:disabled { opacity: .65; }
+.module-installed-mark { color: var(--color-primary); font-size: 20px; }
+.module-installed-mark[hidden], .module-choice input[hidden] { display: none; }

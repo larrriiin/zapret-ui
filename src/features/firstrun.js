@@ -8,6 +8,7 @@ import { pollFakes } from './fakes.js';
 import { updateRestartBanner } from '../lib/restart.js';
 import { syncThemeFromStorage } from './theme.js';
 import { markSetupCompleted, shouldShowFirstRun } from './setup-state.js';
+import { installTelegram, moduleError } from './telegram.js';
 
 const isSetupWindow = new URLSearchParams(location.search).get('setup') === '1';
 
@@ -17,7 +18,7 @@ let prepared = false, best = null, connected = false, rerun = false, deleteLists
 let appearanceHome, appearance, resolveSetup, previousFocus, transition;
 
 function errorMessage(error) {
-  $('setup-error').textContent = error instanceof Error ? error.message : t(String(error));
+  $('setup-error').textContent = moduleError(error);
   $('setup-error').hidden = false;
 }
 function controls() {
@@ -29,6 +30,7 @@ function controls() {
   $('setup-skip').disabled = busy && (!testStarted || cancelled);
   $('setup-skip').textContent = t(busy ? 'setup_cancel_test' : best ? 'setup_without_apply' : 'setup_skip');
   $('setup-next').disabled = busy;
+  $('setup-modules').disabled = busy;
   $('setup-next').textContent = t(['setup_continue', 'setup_prepare_action', best ? 'setup_apply' : 'setup_test_action', 'setup_done'][step]);
   $('setup-dialog').setAttribute('aria-busy', String(busy));
 }
@@ -99,26 +101,76 @@ async function resetConfiguration() {
   updateRestartBanner();
 }
 async function prepare() {
-  if (prepared) { goTo(2); return; }
   busy = true; controls(); $('setup-error').hidden = true;
   let unlisten;
   try {
-    setProgress(t('setup_check_core'));
-    if (!await invoke('ensure_binaries_present')) {
-      unlisten = await listen('download-progress', event => {
-        const percent = Number(event.payload);
-        if (Number.isFinite(percent)) setProgress(t(percent < 90 ? 'downloading_core' : 'extracting'), `${percent}%`, percent);
-      });
-      await invoke('download_and_install_update');
-      if (!await invoke('ensure_binaries_present')) throw new Error(t('setup_core_missing'));
+    if (!prepared) {
+      setProgress(t('setup_check_core'));
+      if (!await invoke('ensure_binaries_present')) {
+        unlisten = await listen('download-progress', event => {
+          const percent = Number(event.payload);
+          if (Number.isFinite(percent)) setProgress(t(percent < 90 ? 'downloading_core' : 'extracting'), `${percent}%`, percent);
+        });
+        await invoke('download_and_install_update');
+        if (!await invoke('ensure_binaries_present')) throw new Error(t('setup_core_missing'));
+      }
+      if (rerun) { setProgress(t('setup_resetting')); await resetConfiguration(); }
+      const pre = await invoke('precheck_tests');
+      if (!pre.strategies_count) throw new Error(t('wizard_no_strategies'));
+      await loadStrategies();
+      prepared = true;
     }
-    if (rerun) { setProgress(t('setup_resetting')); await resetConfiguration(); }
-    const pre = await invoke('precheck_tests');
-    if (!pre.strategies_count) throw new Error(t('wizard_no_strategies'));
-    await loadStrategies();
-    prepared = true; goTo(2);
+    if ($('setup-telegram').checked && !$('setup-telegram').disabled) {
+      setProgress(t('tg_installing'));
+      await installTelegram(percent => setProgress(t('tg_installing'), `${percent}%`, percent));
+      $('setup-telegram').checked = false;
+      await detectModules();
+    }
+    if ($('setup-warp').checked && !$('setup-warp').disabled && !$('setup-warp-choice').hidden) {
+      setProgress(t('tg_warp_installing'));
+      await invoke('install_warp');
+      const warp = await invoke('get_warp_status');
+      if (!warp.installed) throw new Error(t('tg_warp_not_completed'));
+      $('setup-warp').checked = false;
+      await detectModules();
+    }
+    goTo(2);
   } catch (error) { $('setup-progress').hidden = true; errorMessage(error); }
   finally { unlisten?.(); busy = false; controls(); }
+}
+async function detectModules() {
+  $('setup-modules-retry').hidden = true;
+  $('setup-modules-message').textContent = '';
+  const results = await Promise.allSettled([
+    invoke('get_telegram_status'),
+    (async () => {
+      for (let attempt = 0; ; attempt++) {
+        try { return await invoke('get_warp_status'); }
+        catch (error) { if (error?.code !== 'warp_busy' || attempt >= 15) throw error; await new Promise(resolve => setTimeout(resolve, 200)); }
+      }
+    })(),
+  ]);
+  const [telegram, warp] = results;
+  if (telegram.status === 'fulfilled') {
+    const value = telegram.value;
+    $('setup-telegram').disabled = value.installed;
+    $('setup-telegram').hidden = value.installed;
+    $('setup-telegram-installed').hidden = !value.installed;
+    if (value.installed) $('setup-telegram').checked = false;
+    $('setup-telegram-detail').textContent = value.installed ? t('tg_installed', { version: value.version }) : t('tg_download_size', { size: (value.download_bytes / 1e6).toFixed(1) });
+  }
+  if (warp.status === 'fulfilled') {
+    $('setup-warp-choice').hidden = false;
+    $('setup-warp').hidden = warp.value.installed;
+    $('setup-warp').disabled = warp.value.installed;
+    $('setup-warp-installed').hidden = !warp.value.installed;
+    $('setup-warp-detail').textContent = t(warp.value.installed ? 'tg_warp_installed' : 'tg_warp_offer');
+    if (warp.value.installed) $('setup-warp').checked = false;
+  }
+  if (results.some(result => result.status === 'rejected')) {
+    $('setup-modules-message').textContent = t('tg_detection_failed');
+    $('setup-modules-retry').hidden = false;
+  }
 }
 async function testStrategies() {
   busy = true; cancelled = false; testStarted = false; controls(); $('setup-error').hidden = true;
@@ -201,6 +253,9 @@ export async function openSetup({ repeat = false, clearLists = false } = {}) {
   }
   rerun = repeat; deleteLists = clearLists; prepared = false; best = null; connected = false; state.setupActive = true;
   previousFocus = document.activeElement;
+  $('setup-telegram').checked = false;
+  $('setup-warp').checked = false;
+  detectModules();
   appearance = document.querySelector('.theme-settings');
   appearanceHome = document.createComment('appearance settings'); appearance.before(appearanceHome);
   $('setup-appearance').append(appearance); $('setup-dialog').showModal(); goTo(0, false);
@@ -214,6 +269,7 @@ export async function openSetup({ repeat = false, clearLists = false } = {}) {
   return new Promise(resolve => { resolveSetup = resolve; });
 }
 export function initFirstRun() {
+  $('setup-modules-retry').addEventListener('click', detectModules);
   $('setup-next').addEventListener('click', () => {
     if (busy) return;
     if (step === 0) goTo(1);

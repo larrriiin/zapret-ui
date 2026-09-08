@@ -17,8 +17,9 @@ export function makeStatusRow({ icon, labelKey, value, detail, valueLabel }) {
   row.className = 'flex items-center gap-3 rounded-xl bg-surface-container-high/40 px-4 py-3 min-w-0';
 
   const itemIcon = document.createElement('span');
-  itemIcon.className = 'material-symbols-outlined text-primary/60 text-xl shrink-0';
-  itemIcon.textContent = icon;
+  itemIcon.className = `${icon === 'telegram' ? 'telegram-icon' : 'material-symbols-outlined'} text-primary/60 text-xl shrink-0`;
+  itemIcon.textContent = icon === 'telegram' ? '' : icon;
+  itemIcon.setAttribute('aria-hidden', 'true');
 
   const copy = document.createElement('div');
   copy.className = 'min-w-0 flex-1';

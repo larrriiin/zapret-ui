@@ -1,0 +1,49 @@
+{
+  "version": "1.10.2",
+  "python": "3.13.12",
+  "architecture": "x86_64",
+  "artifacts": [
+    {
+      "url": "https://www.python.org/ftp/python/3.13.12/python-3.13.12-embed-amd64.zip",
+      "sha256": "76f238f606250c87c6beac75dccd35ee99070a13490555936abb6cb64ecce3d0",
+      "size": 10941233,
+      "kind": "runtime"
+    },
+    {
+      "url": "https://github.com/Flowseal/tg-ws-proxy/archive/refs/tags/v1.10.2.zip",
+      "sha256": "efe9914f9b9c1e517d8fa46c73f0fdf9e66e90dbcdc8b9a6363de6d41f42a65b",
+      "size": 1723377,
+      "kind": "source"
+    },
+    {
+      "url": "https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl",
+      "sha256": "62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775",
+      "size": 136983,
+      "kind": "wheel"
+    },
+    {
+      "url": "https://files.pythonhosted.org/packages/60/a6/8b149b2c3f2e11aaa1618ef64500b45f50f22c57a977a4dff1aff1f91042/cffi-2.1.1-cp313-cp313-win_amd64.whl",
+      "sha256": "1aa5645c30469b09530c4ebca77ebf8f17618293c58f8549cb1a543a50236e7d",
+      "size": 185688,
+      "kind": "wheel"
+    },
+    {
+      "url": "https://files.pythonhosted.org/packages/42/8b/cb12b1b60c91b074ca6bf0fdd59aa8f10d8bc5f73af8faece86ef0421b37/cryptography-50.0.1-cp311-abi3-win_amd64.whl",
+      "sha256": "aed8db4f6d71c51efb89530e12d9464e7bf2923d46c3205dc794a2a93f8c0648",
+      "size": 3842826,
+      "kind": "wheel"
+    },
+    {
+      "url": "https://files.pythonhosted.org/packages/0c/c3/44f3fbbfa403ea2a7c779186dc20772604442dde72947e7d01069cbe98e3/pycparser-3.0-py3-none-any.whl",
+      "sha256": "b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992",
+      "size": 48172,
+      "kind": "wheel"
+    },
+    {
+      "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl",
+      "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+      "size": 45571,
+      "kind": "wheel"
+    }
+  ]
+}

@@ -42,6 +42,7 @@ export function showConfirm(message, title = null) {
 
     okBtn.textContent = t('ok');
     cancelBtn.textContent = t('cancel');
+    cancelBtn.classList.remove('hidden');
 
     modal.classList.remove('hidden');
 
@@ -62,5 +63,43 @@ export function showConfirm(message, title = null) {
 
     okBtn.addEventListener('click', onOk);
     cancelBtn.addEventListener('click', onCancel);
+  });
+}
+
+export function showAlert(message, title = null) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('confirm-modal');
+    const titleEl = document.getElementById('confirm-modal-title');
+    const bodyEl = document.getElementById('confirm-modal-body');
+    const okBtn = document.getElementById('confirm-modal-ok');
+    const cancelBtn = document.getElementById('confirm-modal-cancel');
+
+    if (!modal || !bodyEl || !okBtn) {
+      window.alert(message);
+      resolve();
+      return;
+    }
+
+    if (titleEl) {
+      titleEl.textContent = title || t('information');
+    }
+    bodyEl.textContent = message;
+    okBtn.textContent = t('ok');
+    if (cancelBtn) cancelBtn.classList.add('hidden');
+
+    modal.classList.remove('hidden');
+
+    const cleanUp = () => {
+      modal.classList.add('hidden');
+      if (cancelBtn) cancelBtn.classList.remove('hidden');
+      okBtn.removeEventListener('click', onOk);
+      resolve();
+    };
+
+    function onOk() {
+      cleanUp();
+    }
+
+    okBtn.addEventListener('click', onOk);
   });
 }

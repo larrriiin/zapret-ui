@@ -3,7 +3,7 @@ import { state } from '../lib/state.js';
 import { showRestartModal } from '../lib/restart.js';
 import { loadUserLists } from './user-lists.js';
 
-const ALL_SECTIONS = ['section-home', 'section-sites', 'section-ips', 'section-diagnostics', 'section-traffic', 'section-settings'];
+const ALL_SECTIONS = ['section-home', 'section-sites', 'section-ips', 'section-diagnostics', 'section-traffic', 'section-settings', 'section-telegram'];
 
 export function showSection(sectionId) {
   if (state.pendingRestart && !state.restartGuardDismissed && sectionId !== state.currentSectionId) {
@@ -65,12 +65,13 @@ function updateNavIndicator(activeEl) {
   if (!indicator || !activeEl || !aside) return;
   const asideRect = aside.getBoundingClientRect();
   const elRect = activeEl.getBoundingClientRect();
-  indicator.style.top = (elRect.top - asideRect.top) + 'px';
+  indicator.style.top = (elRect.top - asideRect.top - aside.clientTop + aside.scrollTop) + 'px';
   indicator.style.height = elRect.height + 'px';
   indicator.style.opacity = '1';
 }
 
 export function initNavigation() {
+  $('nav-telegram')?.addEventListener('click', e => { e.preventDefault(); if (!$('nav-telegram').hidden) showSection('telegram'); });
   document.querySelector('aside nav a:first-child')?.addEventListener('click', (e) => {
     e.preventDefault();
     showSection('home');
@@ -98,9 +99,26 @@ export function initNavigation() {
     showSection('settings');
   });
 
-  // Set indicator to initial active item after layout
-  requestAnimationFrame(() => {
-    const firstNav = document.querySelector('aside nav a:first-child');
-    if (firstNav) updateNavIndicator(firstNav);
-  });
+  // Track layout changes as well as selection: maximizing the window moves
+  // Settings, and installing/removing a module shifts the other navigation links.
+  const aside = document.querySelector('aside');
+  let frame = null;
+  const syncIndicator = () => {
+    if (frame !== null) return;
+    frame = requestAnimationFrame(() => {
+      frame = null;
+      const active = aside?.querySelector('a.nav-active');
+      if (active && !active.hidden) updateNavIndicator(active);
+    });
+  };
+  window.addEventListener('resize', syncIndicator);
+  if (aside) {
+    const sizes = new ResizeObserver(syncIndicator);
+    sizes.observe(aside);
+    aside.querySelectorAll('nav, a').forEach(element => sizes.observe(element));
+    const visibility = new MutationObserver(syncIndicator);
+    visibility.observe(aside, { subtree: true, attributes: true, attributeFilter: ['hidden'], childList: true });
+  }
+  document.fonts.ready.then(syncIndicator);
+  syncIndicator();
 }
