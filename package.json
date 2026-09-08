@@ -20,13 +20,16 @@
     "test:status": "node --test scripts/status-check.test.mjs",
     "sign-core-channel": "tauri signer sign core-channel/stable.json",
     "set-version": "node scripts/set-version.mjs",
-    "promote-core-stable": "node scripts/promote-core-stable.mjs"
+    "promote-core-stable": "node scripts/promote-core-stable.mjs",
+    "screenshots": "node scripts/generate-screenshots.mjs"
   },
   "devDependencies": {
+    "@rolldown/binding-win32-x64-msvc": "^1.2.7",
     "@tailwindcss/forms": "^0.5.11",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2.11.4",
     "autoprefixer": "^10.5.4",
+    "playwright-core": "^1.63.0",
     "postcss": "^8.5.26",
     "tailwindcss": "^4.3.3",
     "vite": "^8.2.2"
