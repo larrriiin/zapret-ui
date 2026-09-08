@@ -16,6 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::{Emitter, Manager};
+pub mod update;
 
 const LOCK: &str = include_str!("../telegram-module.json");
 const RUNNER: &str = include_str!("../telegram-runner.py");
@@ -23,6 +24,7 @@ static BUSY: AtomicBool = AtomicBool::new(false);
 #[derive(Default)]
 pub struct TelegramState {
     child: Mutex<Option<Child>>,
+    update: Mutex<Option<update::Release>>,
 }
 struct Operation;
 impl Operation {
@@ -49,10 +51,72 @@ struct Artifact {
     size: u64,
     kind: String,
 }
-#[derive(Deserialize, Serialize)]
-struct Config {
+#[derive(Clone, Deserialize, Serialize)]
+pub struct Config {
     port: u16,
     secret: String,
+    #[serde(default = "default_host")]
+    host: String,
+    #[serde(default = "default_dc_ips")]
+    dc_ips: std::collections::BTreeMap<u16, String>,
+    #[serde(default)]
+    cfproxy: bool,
+    #[serde(default)]
+    cfproxy_domains: Vec<String>,
+    #[serde(default)]
+    worker: bool,
+    #[serde(default)]
+    worker_domains: Vec<String>,
+}
+fn default_host() -> String {
+    "127.0.0.1".into()
+}
+fn default_dc_ips() -> std::collections::BTreeMap<u16, String> {
+    [(2, "149.154.167.220".into()), (4, "149.154.167.220".into())].into()
+}
+fn valid_domain(value: &str) -> bool {
+    value.len() <= 253
+        && value.contains('.')
+        && value.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        })
+}
+fn validate_config(cfg: &Config) -> Result<(), String> {
+    if cfg.port == 0 || cfg.secret.len() != 32 || !cfg.secret.bytes().all(|c| c.is_ascii_hexdigit())
+    {
+        return Err("tg_invalid_config".into());
+    }
+    if cfg.host.parse::<std::net::Ipv4Addr>().is_err() {
+        return Err("tg_invalid_host".into());
+    }
+    if cfg.dc_ips.len() > 32
+        || cfg
+            .dc_ips
+            .iter()
+            .any(|(dc, ip)| *dc == 0 || *dc > 32767 || ip.parse::<std::net::Ipv4Addr>().is_err())
+    {
+        return Err("tg_invalid_dc".into());
+    }
+    if cfg.cfproxy_domains.len() > 32
+        || cfg.worker_domains.len() > 32
+        || cfg
+            .cfproxy_domains
+            .iter()
+            .chain(&cfg.worker_domains)
+            .any(|d| !valid_domain(d))
+    {
+        return Err("tg_invalid_domain".into());
+    }
+    if cfg.worker && cfg.worker_domains.is_empty() {
+        return Err("tg_worker_domain_required".into());
+    }
+    Ok(())
 }
 #[derive(Serialize)]
 pub struct Status {
@@ -62,6 +126,7 @@ pub struct Status {
     version: String,
     download_bytes: u64,
     port: u16,
+    host: String,
 }
 fn lock() -> Lock {
     serde_json::from_str(LOCK).expect("embedded Telegram lock")
@@ -88,10 +153,7 @@ fn config(path: &Path) -> Result<Config, String> {
     let cfg: Config =
         serde_json::from_slice(&fs::read(path.join("config.json")).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
-    if cfg.port == 0 || cfg.secret.len() != 32 || !cfg.secret.bytes().all(|c| c.is_ascii_hexdigit())
-    {
-        return Err("tg_invalid_config".into());
-    }
+    validate_config(&cfg)?;
     Ok(cfg)
 }
 fn process(path: &Path) -> Command {
@@ -113,6 +175,12 @@ pub fn get_telegram_status(
     state: tauri::State<'_, TelegramState>,
 ) -> Result<Status, String> {
     let path = root(&app)?;
+    // Recover an interrupted directory swap before reporting installation state.
+    if !path.join("module").exists() && path.join("previous/installed.json").is_file() {
+        if let Ok(_operation) = Operation::acquire() {
+            fs::rename(path.join("previous"), path.join("module")).map_err(|e| e.to_string())?;
+        }
+    }
     let mut child = state.child.lock_unpoisoned();
     let running = match child.as_mut() {
         Some(c) => c.try_wait().map_err(|e| e.to_string())?.is_none(),
@@ -129,6 +197,9 @@ pub fn get_telegram_status(
         version: installed_version(&path).unwrap_or(metadata.version),
         download_bytes: metadata.artifacts.iter().map(|a| a.size).sum(),
         port: config(&path).map(|c| c.port).unwrap_or(1443),
+        host: config(&path)
+            .map(|c| c.host)
+            .unwrap_or_else(|_| default_host()),
     })
 }
 fn allowed(url: &reqwest::Url) -> bool {
@@ -323,45 +394,56 @@ pub async fn install_telegram(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn start_telegram(app: tauri::AppHandle) -> Result<(), String> {
     let _operation = Operation::acquire()?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let path = root(&app)?;
-        if !installed(&path) {
-            return Err("tg_not_installed".into());
+    tauri::async_runtime::spawn_blocking(move || start_blocking(&app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+fn start_blocking(app: &tauri::AppHandle) -> Result<(), String> {
+    let path = root(&app)?;
+    if !installed(&path) {
+        return Err("tg_not_installed".into());
+    }
+    let state = app.state::<TelegramState>();
+    let mut slot = state.child.lock_unpoisoned();
+    if let Some(child) = slot.as_mut() {
+        if child.try_wait().map_err(|e| e.to_string())?.is_none() {
+            return Ok(());
         }
-        let state = app.state::<TelegramState>();
-        let mut slot = state.child.lock_unpoisoned();
-        if let Some(child) = slot.as_mut() {
-            if child.try_wait().map_err(|e| e.to_string())?.is_none() {
-                return Ok(());
-            }
+    }
+    let cfg = config(&path)?;
+    fs::write(path.join("module/runner.py"), RUNNER).map_err(|e| e.to_string())?;
+    let host: std::net::Ipv4Addr = cfg.host.parse().map_err(|_| "tg_invalid_host")?;
+    let address = (host, cfg.port);
+    let probe = TcpListener::bind(address).map_err(|_| "tg_port_busy")?;
+    drop(probe);
+    let mut child = process(&path.join("module"))
+        .arg(std::process::id().to_string())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let until = Instant::now() + Duration::from_secs(15);
+    loop {
+        if child.try_wait().map_err(|e| e.to_string())?.is_some() {
+            return Err("tg_start_failed".into());
         }
-        let cfg = config(&path)?;
-        let address = (std::net::Ipv4Addr::LOCALHOST, cfg.port);
-        let probe = TcpListener::bind(address).map_err(|_| "tg_port_busy")?;
-        drop(probe);
-        let mut child = process(&path.join("module"))
-            .arg(std::process::id().to_string())
-            .spawn()
-            .map_err(|e| e.to_string())?;
-        let until = Instant::now() + Duration::from_secs(15);
-        loop {
-            if child.try_wait().map_err(|e| e.to_string())?.is_some() {
-                return Err("tg_start_failed".into());
-            }
-            if TcpStream::connect_timeout(&address.into(), Duration::from_millis(150)).is_ok() {
-                *slot = Some(child);
-                return Ok(());
-            }
-            if Instant::now() >= until {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err("tg_start_failed".into());
-            }
-            std::thread::sleep(Duration::from_millis(100));
+        let connect_address = (
+            if host.is_unspecified() {
+                std::net::Ipv4Addr::LOCALHOST
+            } else {
+                host
+            },
+            cfg.port,
+        );
+        if TcpStream::connect_timeout(&connect_address.into(), Duration::from_millis(150)).is_ok() {
+            *slot = Some(child);
+            return Ok(());
         }
-    })
-    .await
-    .map_err(|e| e.to_string())?
+        if Instant::now() >= until {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("tg_start_failed".into());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 pub fn shutdown(app: &tauri::AppHandle) {
     if let Some(mut child) = app.state::<TelegramState>().child.lock_unpoisoned().take() {
@@ -379,9 +461,12 @@ pub fn stop_telegram(app: tauri::AppHandle) -> Result<(), String> {
 pub fn remove_telegram(app: tauri::AppHandle) -> Result<(), String> {
     let _operation = Operation::acquire()?;
     shutdown(&app);
-    let module = root(&app)?.join("module");
-    if module.exists() {
-        fs::remove_dir_all(module).map_err(|e| e.to_string())?;
+    let root = root(&app)?;
+    for name in ["module", "previous"] {
+        let module = root.join(name);
+        if module.exists() {
+            fs::remove_dir_all(module).map_err(|e| e.to_string())?;
+        }
     }
     let _ = app.emit("telegram-module-changed", ());
     Ok(())
@@ -398,10 +483,63 @@ pub fn set_telegram_port(app: tauri::AppHandle, port: u16) -> Result<(), String>
     let path = root(&app)?;
     let mut cfg = config(&path)?;
     cfg.port = port;
+    write_config(&path, &cfg)
+}
+fn write_config(path: &Path, cfg: &Config) -> Result<(), String> {
+    validate_config(cfg)?;
     let temp = path.join("config.tmp");
     fs::write(&temp, serde_json::to_vec(&cfg).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
     fs::rename(temp, path.join("config.json")).map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn get_telegram_config(app: tauri::AppHandle) -> Result<Config, String> {
+    config(&root(&app)?)
+}
+#[tauri::command]
+pub fn save_telegram_config(app: tauri::AppHandle, settings: Config) -> Result<Config, String> {
+    let _operation = Operation::acquire()?;
+    if get_telegram_status(app.clone(), app.state())?.running {
+        return Err("tg_stop_to_configure".into());
+    }
+    let path = root(&app)?;
+    let mut settings = settings;
+    // Secret changes have a dedicated command and never come from an editable form.
+    settings.secret = config(&path)?.secret;
+    write_config(&path, &settings)?;
+    Ok(settings)
+}
+#[tauri::command]
+pub async fn regenerate_telegram_secret(app: tauri::AppHandle) -> Result<Config, String> {
+    let _operation = Operation::acquire()?;
+    if get_telegram_status(app.clone(), app.state())?.running {
+        return Err("tg_stop_to_configure".into());
+    }
+    let path = root(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        fs::write(path.join("module/runner.py"), RUNNER).map_err(|e| e.to_string())?;
+        let mut child = process(&path.join("module"))
+            .arg("--rotate-secret")
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        let until = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(exit) = child.try_wait().map_err(|e| e.to_string())? {
+                if exit.success() {
+                    return config(&path);
+                }
+                return Err("tg_check_failed".into());
+            }
+            if Instant::now() >= until {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("tg_check_failed".into());
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 pub fn telegram_link(app: tauri::AppHandle) -> Result<String, String> {
@@ -411,8 +549,14 @@ pub fn telegram_link(app: tauri::AppHandle) -> Result<String, String> {
     }
     let cfg = config(&path)?;
     Ok(format!(
-        "tg://proxy?server=127.0.0.1&port={}&secret=dd{}",
-        cfg.port, cfg.secret
+        "tg://proxy?server={}&port={}&secret=dd{}",
+        if cfg.host == "0.0.0.0" {
+            "127.0.0.1"
+        } else {
+            &cfg.host
+        },
+        cfg.port,
+        cfg.secret
     ))
 }
 #[tauri::command]
@@ -449,6 +593,26 @@ pub fn telegram_logs(app: tauri::AppHandle) -> Result<String, String> {
 mod tests {
     use super::*;
     use std::io::{Cursor, Write};
+    #[test]
+    fn migrates_original_config_and_validates_extended_settings() {
+        let mut cfg: Config =
+            serde_json::from_str(r#"{"port":1443,"secret":"00000000000000000000000000000000"}"#)
+                .unwrap();
+        assert!(validate_config(&cfg).is_ok());
+        assert_eq!(cfg.host, "127.0.0.1");
+        assert_eq!(cfg.dc_ips.len(), 2);
+        cfg.worker = true;
+        assert!(validate_config(&cfg).is_err());
+        cfg.worker_domains.push("example.workers.dev".into());
+        assert!(validate_config(&cfg).is_ok());
+        cfg.cfproxy_domains.push("https://evil.test/path".into());
+        assert!(validate_config(&cfg).is_err());
+        cfg.cfproxy_domains.clear();
+        cfg.host = "0.0.0.0".into();
+        assert!(validate_config(&cfg).is_ok());
+        cfg.dc_ips.insert(2, "999.0.0.1".into());
+        assert!(validate_config(&cfg).is_err());
+    }
     fn archive(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
         for (name, bytes) in entries {

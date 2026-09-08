@@ -4,6 +4,7 @@ import { state } from '../lib/state.js';
 import { showSection } from './navigation.js';
 import { makeStatusRow } from './status-check.js';
 import { showConfirm } from '../lib/dom.js';
+import { initTelegramSettings, refreshTelegramSettings, setTelegramSettingsBusy, invalidateTelegramSettings } from './telegram-settings.js';
 
 let snapshot = null, busy = false;
 export function moduleError(error) { return t(error?.code || error?.message || String(error)) + (error?.detail ? `: ${error.detail}` : ''); }
@@ -32,13 +33,13 @@ function renderTelegramReport() {
   summary.className = `rounded-xl p-4 ${installed ? (running ? 'bg-secondary/10 text-secondary' : 'bg-white/5 text-on-surface') : 'bg-white/5 text-on-surface-variant'}`;
   const title = document.createElement('div');
   title.className = 'font-headline text-base font-bold';
-  title.textContent = installed ? (running ? t('tg_running', { port: snapshot.port }) : t('tg_stopped')) : t('tg_not_installed');
+  title.textContent = installed ? (running ? t('tg_running_host', { host: snapshot.host || '127.0.0.1', port: snapshot.port }) : t('tg_stopped')) : t('tg_not_installed');
   summary.append(title);
   report.append(summary);
 
   const rows = [
     {
-      icon: 'send',
+      icon: 'telegram',
       labelKey: 'nav_telegram',
       value: installed ? 'selected' : 'not_installed',
       valueLabel: installed ? t('warp_installed_short') : t('warp_not_installed'),
@@ -49,7 +50,7 @@ function renderTelegramReport() {
       labelKey: 'status_label',
       value: installed ? (running ? 'running' : 'stopped') : 'not_installed',
       valueLabel: installed ? (running ? t('system_state_running') : t('system_state_stopped')) : t('system_state_not_installed'),
-      detail: installed ? (running ? `127.0.0.1:${snapshot.port}` : t('tg_stopped')) : undefined,
+      detail: installed ? (running ? `${snapshot.host || '127.0.0.1'}:${snapshot.port}` : t('tg_stopped')) : undefined,
     }
   ];
   if (installed) {
@@ -58,7 +59,7 @@ function renderTelegramReport() {
       labelKey: 'tg_port',
       value: 'selected',
       valueLabel: String(snapshot.port),
-      detail: `127.0.0.1:${snapshot.port}`,
+      detail: `${snapshot.host || '127.0.0.1'}:${snapshot.port}`,
     });
   }
   report.append(...rows.map(makeStatusRow));
@@ -75,6 +76,10 @@ function render() {
     $('telegram-settings-status-btn').hidden = !installed;
     $('telegram-settings-status-btn').disabled = disabled;
   }
+  if ($('telegram-status-btn')) {
+    $('telegram-status-btn').hidden = !installed;
+    $('telegram-status-btn').disabled = disabled;
+  }
   if ($('telegram-settings-open')) $('telegram-settings-open').hidden = true;
   for (const id of ['telegram-install', 'telegram-remove']) {
     if ($(id)) $(id).disabled = disabled;
@@ -85,16 +90,41 @@ function render() {
         ? t('tg_installed', { version: snapshot.version })
         : t('tg_download_size', { size: (snapshot.download_bytes / 1e6).toFixed(1) }))
     : t('tg_checking');
-  $('telegram-status').textContent = snapshot?.running ? t('tg_running', { port: snapshot.port }) : t('tg_stopped');
-  $('telegram-toggle').textContent = t(snapshot?.running ? 'tg_stop' : 'tg_start');
-  $('telegram-toggle').disabled = disabled || !installed;
+  const statusEl = $('telegram-status');
+  if (statusEl) {
+    statusEl.textContent = snapshot?.running ? t('tg_running_host', { host: snapshot.host || '127.0.0.1', port: snapshot.port }) : t('tg_stopped');
+  }
+  const cardEl = $('telegram-card');
+  if (cardEl) {
+    cardEl.dataset.state = snapshot?.running ? 'connected' : 'stopped';
+  }
+  const toggleBtn = $('telegram-toggle');
+  if (toggleBtn) {
+    toggleBtn.disabled = disabled || !installed;
+    toggleBtn.dataset.action = snapshot?.running ? 'stop' : 'start';
+  }
+  const toggleText = $('telegram-toggle-text');
+  if (toggleText) toggleText.textContent = t(snapshot?.running ? 'tg_stop' : 'tg_start');
+  const toggleIcon = $('telegram-toggle-icon');
+  if (toggleIcon) toggleIcon.textContent = snapshot?.running ? 'stop' : 'bolt';
   for (const id of ['telegram-open', 'telegram-copy']) $(id).disabled = disabled || !installed || !snapshot?.running;
-  for (const id of ['telegram-port', 'telegram-save']) $(id).disabled = disabled || !installed || snapshot?.running;
-  if (snapshot && document.activeElement !== $('telegram-port')) $('telegram-port').value = snapshot.port;
+
+  const tgActions = $('telegram-actions-container');
+  if (tgActions) {
+    if (installed && snapshot?.running) {
+      tgActions.classList.remove('hidden');
+      tgActions.classList.add('flex');
+    } else {
+      tgActions.classList.add('hidden');
+      tgActions.classList.remove('flex');
+    }
+  }
+
+  setTelegramSettingsBusy(disabled || !installed || snapshot?.running);
   renderTelegramReport();
 }
 async function refresh() {
-  try { snapshot = await invoke('get_telegram_status'); render(); }
+  try { snapshot = await invoke('get_telegram_status'); await refreshTelegramSettings(snapshot.installed); render(); }
   catch (error) { $('telegram-settings-message').textContent = moduleError(error); }
 }
 async function action(work, output = 'telegram-message') {
@@ -107,12 +137,14 @@ async function action(work, output = 'telegram-message') {
 export function initTelegram() {
   const statusDialog = $('telegram-status-dialog');
   if (statusDialog) document.body.append(statusDialog);
-  $('telegram-settings-status-btn')?.addEventListener('click', async () => {
+  const onStatusClick = async () => {
     if (busy) return;
     statusDialog?.showModal();
     renderTelegramReport();
     await refresh();
-  });
+  };
+  $('telegram-settings-status-btn')?.addEventListener('click', onStatusClick);
+  $('telegram-status-btn')?.addEventListener('click', onStatusClick);
   $('telegram-status-close')?.addEventListener('click', () => statusDialog?.close());
   statusDialog?.addEventListener('click', (event) => {
     if (event.target === statusDialog) statusDialog.close();
@@ -132,14 +164,10 @@ export function initTelegram() {
   $('telegram-toggle').addEventListener('click', () => action(() => invoke(snapshot?.running ? 'stop_telegram' : 'start_telegram')));
   $('telegram-open').addEventListener('click', () => action(() => invoke('open_telegram')));
   $('telegram-copy').addEventListener('click', () => action(async () => { await navigator.clipboard.writeText(await invoke('telegram_link')); $('telegram-message').textContent = t('tg_copied'); }));
-  $('telegram-port-form').addEventListener('submit', event => {
-    event.preventDefault();
-    const port = Number($('telegram-port').value);
-    if (event.target.reportValidity()) action(() => invoke('set_telegram_port', { port }));
-  });
+  initTelegramSettings(action);
   $('telegram-refresh-logs').addEventListener('click', () => action(async () => { $('telegram-logs').textContent = await invoke('telegram_logs') || t('tg_logs_empty'); }));
   onLangChange(() => { render(); renderTelegramReport(); });
-  listen('telegram-module-changed', refresh).catch(console.error);
+  listen('telegram-module-changed', () => { invalidateTelegramSettings(); refresh(); }).catch(console.error);
   refresh();
   setInterval(() => { if (!busy) refresh(); }, 3000);
 }

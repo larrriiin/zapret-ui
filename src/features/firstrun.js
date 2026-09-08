@@ -124,13 +124,15 @@ async function prepare() {
       setProgress(t('tg_installing'));
       await installTelegram(percent => setProgress(t('tg_installing'), `${percent}%`, percent));
       $('setup-telegram').checked = false;
+      await detectModules();
     }
-    if ($('setup-warp').checked && !$('setup-warp-choice').hidden) {
+    if ($('setup-warp').checked && !$('setup-warp').disabled && !$('setup-warp-choice').hidden) {
       setProgress(t('tg_warp_installing'));
       await invoke('install_warp');
       const warp = await invoke('get_warp_status');
       if (!warp.installed) throw new Error(t('tg_warp_not_completed'));
       $('setup-warp').checked = false;
+      await detectModules();
     }
     goTo(2);
   } catch (error) { $('setup-progress').hidden = true; errorMessage(error); }
@@ -152,11 +154,17 @@ async function detectModules() {
   if (telegram.status === 'fulfilled') {
     const value = telegram.value;
     $('setup-telegram').disabled = value.installed;
+    $('setup-telegram').hidden = value.installed;
+    $('setup-telegram-installed').hidden = !value.installed;
     if (value.installed) $('setup-telegram').checked = false;
     $('setup-telegram-detail').textContent = value.installed ? t('tg_installed', { version: value.version }) : t('tg_download_size', { size: (value.download_bytes / 1e6).toFixed(1) });
   }
   if (warp.status === 'fulfilled') {
-    $('setup-warp-choice').hidden = warp.value.installed;
+    $('setup-warp-choice').hidden = false;
+    $('setup-warp').hidden = warp.value.installed;
+    $('setup-warp').disabled = warp.value.installed;
+    $('setup-warp-installed').hidden = !warp.value.installed;
+    $('setup-warp-detail').textContent = t(warp.value.installed ? 'tg_warp_installed' : 'tg_warp_offer');
     if (warp.value.installed) $('setup-warp').checked = false;
   }
   if (results.some(result => result.status === 'rejected')) {

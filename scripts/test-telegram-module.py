@@ -65,6 +65,31 @@ finally:
 subprocess.run(command + ["--check"], check=True, timeout=20, creationflags=flags)
 assert json.loads(cfg_path.read_text())["secret"] == cfg["secret"]
 print("PASS: configuration survives restart")
+cfg.update(host="127.0.0.1", dc_ips={"4": "149.154.167.220"}, cfproxy=True,
+           cfproxy_domains=["proxy.example.com"], worker=True, worker_domains=["proxy.example.workers.dev"])
+cfg_path.write_text(json.dumps(cfg))
+subprocess.run(command + ["--rotate-secret"], check=True, timeout=20, creationflags=flags)
+rotated = json.loads(cfg_path.read_text())
+assert rotated["secret"] != cfg["secret"] and len(rotated["secret"]) == 32
+assert {k: v for k, v in rotated.items() if k != "secret"} == {k: v for k, v in cfg.items() if k != "secret"}
+mapping_check = """
+import json, runner
+from proxy.config import proxy_config
+cfg = json.loads(runner.CONFIG.read_text())
+runner.configure_proxy(cfg)
+assert proxy_config.host == cfg['host'] and proxy_config.port == cfg['port']
+assert proxy_config.dc_redirects == {4:'149.154.167.220'}
+assert proxy_config.fallback_cfproxy and proxy_config.cfproxy_user_domains == cfg['cfproxy_domains']
+assert proxy_config.cfproxy_worker_domains == cfg['worker_domains']
+cfg.update(cfproxy=False, worker=False, dc_ips={})
+runner.configure_proxy(cfg)
+assert not proxy_config.fallback_cfproxy and not proxy_config.cfproxy_worker_domains and not proxy_config.dc_redirects
+"""
+subprocess.run([str(MODULE / "python.exe"), "-I", "-c", mapping_check], check=True, timeout=20, creationflags=flags)
+print("PASS: key regeneration preserves settings; DC/IP and relay switches reach upstream config")
+# Watchdog test must not contact example relay domains.
+rotated.update(cfproxy=False, worker=False)
+cfg_path.write_text(json.dumps(rotated))
 parent_code = """
 import json, os, subprocess, sys, time
 child = subprocess.Popen(json.loads(sys.argv[1]) + [str(os.getpid())], creationflags=subprocess.CREATE_NO_WINDOW)

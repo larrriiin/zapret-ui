@@ -34,8 +34,8 @@ mod hosts;
 mod ipset;
 mod providers;
 mod strategy_test;
-mod traffic_monitor;
 mod telegram;
+mod traffic_monitor;
 use core::{
     compare_versions, resolve_stable, Checksum, CoreInstallation, CoreInstallationState,
     CoreManager, CoreUpdateStatus,
@@ -3276,7 +3276,9 @@ fn refresh_tray_menu(app: &tauri::AppHandle) {
 
 fn refresh_warp_tray(app: &tauri::AppHandle, toggle: bool) {
     let state = app.state::<AppState>();
-    if state.warp_tray_busy.swap(true, Ordering::AcqRel) { return; }
+    if state.warp_tray_busy.swap(true, Ordering::AcqRel) {
+        return;
+    }
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
@@ -3284,11 +3286,15 @@ fn refresh_warp_tray(app: &tauri::AppHandle, toggle: bool) {
         let item = state.warp_toggle_item.lock_unpoisoned().clone();
         if let Some(item) = &item {
             let _ = item.set_enabled(false);
-            if let Some(t) = &trans { let _ = item.set_text(&t.warp_loading); }
+            if let Some(t) = &trans {
+                let _ = item.set_text(&t.warp_loading);
+            }
         }
         let mut result = providers::warp::get_warp_status().await;
         for _ in 0..10 {
-            if !matches!(&result, Err(e) if e.code == "warp_busy") { break; }
+            if !matches!(&result, Err(e) if e.code == "warp_busy") {
+                break;
+            }
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             result = providers::warp::get_warp_status().await;
         }
@@ -3296,31 +3302,69 @@ fn refresh_warp_tray(app: &tauri::AppHandle, toggle: bool) {
             if let Ok(status) = &result {
                 if status.installed && status.error.is_none() {
                     let disconnect = status.connected;
-                    result = if disconnect { providers::warp::disconnect_warp().await }
-                        else { providers::warp::connect_warp().await };
+                    result = if disconnect {
+                        providers::warp::disconnect_warp().await
+                    } else {
+                        providers::warp::connect_warp().await
+                    };
                     for _ in 0..10 {
-                        if !matches!(&result, Err(e) if e.code == "warp_busy") { break; }
+                        if !matches!(&result, Err(e) if e.code == "warp_busy") {
+                            break;
+                        }
                         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                        result = if disconnect { providers::warp::disconnect_warp().await }
-                            else { providers::warp::connect_warp().await };
+                        result = if disconnect {
+                            providers::warp::disconnect_warp().await
+                        } else {
+                            providers::warp::connect_warp().await
+                        };
                     }
                 }
             }
         }
         let (label, action, enabled) = match (&result, &trans) {
             (Ok(s), Some(t)) if s.error.is_none() => (
-                format!("WARP: {}", if !s.installed { &t.warp_missing } else if s.connected { &t.status_on } else { &t.status_off }),
-                if s.connected { t.warp_off.clone() } else { t.warp_on.clone() }, s.installed),
+                format!(
+                    "WARP: {}",
+                    if !s.installed {
+                        &t.warp_missing
+                    } else if s.connected {
+                        &t.status_on
+                    } else {
+                        &t.status_off
+                    }
+                ),
+                if s.connected {
+                    t.warp_off.clone()
+                } else {
+                    t.warp_on.clone()
+                },
+                s.installed,
+            ),
             (_, Some(t)) => {
-                let detail = match &result { Err(e) => Some(e), Ok(s) => s.error.as_ref() }
-                    .map(|e| e.detail.chars().take(120).collect::<String>()).unwrap_or_default();
-                (format!("WARP: {} — {}", t.warp_error, detail), t.warp_on.clone(), false)
-            },
+                let detail = match &result {
+                    Err(e) => Some(e),
+                    Ok(s) => s.error.as_ref(),
+                }
+                .map(|e| e.detail.chars().take(120).collect::<String>())
+                .unwrap_or_default();
+                (
+                    format!("WARP: {} — {}", t.warp_error, detail),
+                    t.warp_on.clone(),
+                    false,
+                )
+            }
             _ => ("WARP: ---".into(), "Connect WARP".into(), false),
         };
-        if let Some(mi) = state.warp_status_item.lock_unpoisoned().as_ref() { let _ = mi.set_text(label); }
-        if let Some(mi) = item { let _ = mi.set_text(action); let _ = mi.set_enabled(enabled); }
-        if let Err(error) = result { eprintln!("WARP tray: {}", error.detail); }
+        if let Some(mi) = state.warp_status_item.lock_unpoisoned().as_ref() {
+            let _ = mi.set_text(label);
+        }
+        if let Some(mi) = item {
+            let _ = mi.set_text(action);
+            let _ = mi.set_enabled(enabled);
+        }
+        if let Err(error) = result {
+            eprintln!("WARP tray: {}", error.detail);
+        }
         state.warp_tray_busy.store(false, Ordering::Release);
     });
 }
@@ -3483,8 +3527,12 @@ pub fn run() {
                 .enabled(false)
                 .build(app)?;
             let toggle_i = MenuItemBuilder::with_id("toggle", "Turn On Zapret").build(app)?;
-            let warp_status_i = MenuItemBuilder::with_id("warp_status", "WARP: ---").enabled(false).build(app)?;
-            let warp_toggle_i = MenuItemBuilder::with_id("warp_toggle", "Connect WARP").enabled(false).build(app)?;
+            let warp_status_i = MenuItemBuilder::with_id("warp_status", "WARP: ---")
+                .enabled(false)
+                .build(app)?;
+            let warp_toggle_i = MenuItemBuilder::with_id("warp_toggle", "Connect WARP")
+                .enabled(false)
+                .build(app)?;
 
             // Сохраняем ссылки для динамического обновления
             {
@@ -3672,9 +3720,20 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            telegram::get_telegram_status, telegram::install_telegram, telegram::start_telegram,
-            telegram::stop_telegram, telegram::remove_telegram, telegram::set_telegram_port,
-            telegram::telegram_link, telegram::open_telegram, telegram::telegram_logs,
+            telegram::get_telegram_config,
+            telegram::save_telegram_config,
+            telegram::regenerate_telegram_secret,
+            telegram::update::check_telegram_update,
+            telegram::update::update_telegram,
+            telegram::get_telegram_status,
+            telegram::install_telegram,
+            telegram::start_telegram,
+            telegram::stop_telegram,
+            telegram::remove_telegram,
+            telegram::set_telegram_port,
+            telegram::telegram_link,
+            telegram::open_telegram,
+            telegram::telegram_logs,
             hosts::update_hosts,
             providers::warp::get_warp_status,
             providers::warp::connect_warp,

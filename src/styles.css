@@ -110,20 +110,20 @@ button:disabled { cursor: not-allowed; }
 .provider-button:focus-visible, #warp-port:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
 .provider-connect { margin-top: 12px; min-height: 56px; border: 2px solid var(--color-primary); border-radius: 16px; text-transform: uppercase; letter-spacing: .08em; }
 .provider-refresh { margin-top: 8px; min-height: 34px; color: var(--color-secondary); text-transform: uppercase; letter-spacing: .12em; font-size: 10px; border-color: color-mix(in srgb, var(--color-outline-variant) 50%, transparent); }
-:is(#connect-btn, #warp-connect) { border: 2px solid var(--color-primary); background: transparent; color: var(--color-primary); transition: background-color .2s, color .2s, border-color .2s; }
-#connect-btn > span { color: inherit; }
-:is(#connect-btn, #warp-connect)[data-action="stop"] { background: var(--color-primary); color: var(--color-on-primary); }
-:is(#connect-btn, #warp-connect):hover:not(:disabled) { background: color-mix(in srgb, var(--color-primary) 10%, transparent); }
-:is(#connect-btn, #warp-connect)[data-action="stop"]:hover:not(:disabled) { background: var(--color-primary); }
-:is(#connect-btn-icon, #warp-connect > .material-symbols-outlined) { transition: transform .2s ease; }
-#connect-btn:hover:not(:disabled) #connect-btn-icon, #warp-connect:hover:not(:disabled) > .material-symbols-outlined { transform: rotate(12deg); }
+:is(#connect-btn, #warp-connect, #telegram-toggle) { border: 2px solid var(--color-primary); background: transparent; color: var(--color-primary); transition: background-color .2s, color .2s, border-color .2s; }
+:is(#connect-btn, #telegram-toggle) > span { color: inherit; }
+:is(#connect-btn, #warp-connect, #telegram-toggle)[data-action="stop"] { background: var(--color-primary); color: var(--color-on-primary); }
+:is(#connect-btn, #warp-connect, #telegram-toggle):hover:not(:disabled) { background: color-mix(in srgb, var(--color-primary) 10%, transparent); }
+:is(#connect-btn, #warp-connect, #telegram-toggle)[data-action="stop"]:hover:not(:disabled) { background: var(--color-primary); }
+:is(#connect-btn-icon, #warp-connect > .material-symbols-outlined, #telegram-toggle-icon) { transition: transform .2s ease; }
+:is(#connect-btn, #telegram-toggle):hover:not(:disabled) :is(#connect-btn-icon, #telegram-toggle-icon), #warp-connect:hover:not(:disabled) > .material-symbols-outlined { transform: rotate(12deg); }
 :is(#check-status-btn, #warp-refresh) { background: transparent; border: 1px solid color-mix(in srgb, var(--color-outline-variant) 20%, transparent); color: var(--color-secondary); transition: background-color .2s, border-color .2s; }
 :is(#check-status-btn, #warp-refresh):hover:not(:disabled) { background: var(--color-surface-container-highest); border-color: color-mix(in srgb, var(--color-secondary) 50%, transparent); }
 :is(#check-status-btn-icon, #warp-refresh > .material-symbols-outlined) { transition: transform .2s ease; }
 #check-status-btn:hover:not(:disabled) #check-status-btn-icon, #warp-refresh:hover:not(:disabled) > .material-symbols-outlined { transform: translateY(-1px); }
 @media (prefers-reduced-motion: reduce) {
-  #connect-btn #connect-btn-icon, #warp-connect > .material-symbols-outlined, #check-status-btn #check-status-btn-icon, #warp-refresh > .material-symbols-outlined { transition: none; transform: none; }
-  #connect-btn:hover:not(:disabled) #connect-btn-icon, #warp-connect:hover:not(:disabled) > .material-symbols-outlined,
+  :is(#connect-btn, #telegram-toggle) :is(#connect-btn-icon, #telegram-toggle-icon), #warp-connect > .material-symbols-outlined, #check-status-btn #check-status-btn-icon, #warp-refresh > .material-symbols-outlined { transition: none; transform: none; }
+  :is(#connect-btn, #telegram-toggle):hover:not(:disabled) :is(#connect-btn-icon, #telegram-toggle-icon), #warp-connect:hover:not(:disabled) > .material-symbols-outlined,
   #check-status-btn:hover:not(:disabled) #check-status-btn-icon, #warp-refresh:hover:not(:disabled) > .material-symbols-outlined { transform: none; }
 }
 /* Both connection cards share control geometry; the legacy home is untouched. */
@@ -603,7 +603,11 @@ input[type="radio"]:checked::before {
 .module-message:empty { display: none; }
 .module-port { width: 110px; border: 1px solid var(--color-outline-variant); border-radius: 8px; background: var(--color-surface-container-high); color: var(--color-on-surface); }
 .module-port:focus-visible, .module-choice input:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
-.module-progress { display: block; width: 100%; height: 6px; margin-top: 16px; accent-color: var(--color-primary); }
+.module-progress { appearance: none; -webkit-appearance: none; display: block; width: 100%; height: 6px; margin-top: 16px; border: 0; border-radius: 4px; overflow: hidden; background: var(--color-surface-container-highest); accent-color: var(--color-primary); }
+.module-progress::-webkit-progress-bar { background: var(--color-surface-container-highest); border-radius: 4px; }
+.module-progress::-webkit-progress-value { background: var(--color-primary); border-radius: 4px; }
+.module-progress::-moz-progress-bar { background: var(--color-primary); border-radius: 4px; }
+.telegram-icon { display: inline-block; width: 1em; height: 1em; flex-shrink: 0; background-color: currentColor; mask: url('./assets/telegram.svg') center / contain no-repeat; -webkit-mask: url('./assets/telegram.svg') center / contain no-repeat; }
 .module-logs { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; margin-top: 16px; }
 .setup-modules { margin-top: 24px; border-top: 1px solid var(--color-outline-variant); padding-top: 16px; }
 .setup-modules legend { font-size: 14px; font-weight: 700; }
@@ -611,3 +615,11 @@ input[type="radio"]:checked::before {
 .module-choice input { flex-shrink: 0; margin-top: 3px; accent-color: var(--color-primary); }
 .module-choice strong { font-size: 14px; }
 .module-choice .theme-description { display: block; margin-top: 4px; }
+.telegram-config-form label { display: block; font-size: 13px; font-weight: 600; }
+.telegram-config-form input:not([type="checkbox"]), .telegram-config-form textarea { width: 100%; border: 1px solid var(--color-outline-variant); border-radius: 10px; background: var(--color-surface-container-high); color: var(--color-on-surface); padding: 10px; font-size: 13px; }
+.telegram-config-form textarea { resize: vertical; }
+.telegram-config-form .telegram-checkbox { display: flex; align-items: center; gap: 10px; }
+.telegram-config-form :is(input, textarea):focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.telegram-config-form fieldset:disabled { opacity: .65; }
+.module-installed-mark { color: var(--color-primary); font-size: 20px; }
+.module-installed-mark[hidden], .module-choice input[hidden] { display: none; }

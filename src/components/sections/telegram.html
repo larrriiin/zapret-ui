@@ -1,12 +1,80 @@
-<section id="section-telegram" class="hidden p-8 space-y-6 max-w-[1000px] mx-auto pb-24" aria-labelledby="telegram-title">
-    <header><h2 id="telegram-title" class="text-xl font-bold">Telegram</h2><p class="theme-description" data-i18n="tg_description"></p></header>
-    <div class="glass-panel rounded-2xl border border-outline-variant/10 p-6 space-y-4">
-        <div class="warp-settings-row"><div class="flex-1"><h3 class="text-sm font-bold">TG WS Proxy</h3><p id="telegram-status" class="theme-description" role="status"></p></div><button id="telegram-toggle" type="button" class="provider-button" disabled></button></div>
-        <p class="theme-description" data-i18n="tg_connect_hint"></p>
-        <div class="module-actions"><button id="telegram-open" type="button" class="provider-button" data-i18n="tg_open" disabled></button><button id="telegram-copy" type="button" class="provider-button" data-i18n="tg_copy" disabled></button></div>
-        <form id="telegram-port-form" class="module-actions"><label for="telegram-port" class="text-sm" data-i18n="tg_port"></label><input id="telegram-port" class="module-port" type="number" min="1" max="65535" required value="1443"><button id="telegram-save" type="submit" class="provider-button" data-i18n="tg_save"></button></form>
-        <p class="theme-description" data-i18n="tg_runtime_hint"></p>
-        <p id="telegram-message" class="module-message" role="status"></p>
+<section id="section-telegram" class="hidden p-8 space-y-6 max-w-[1000px] mx-auto pb-24" aria-labelledby="telegram-card-title">
+  <article id="telegram-card" class="connection-card max-w-[420px] mx-auto" aria-labelledby="telegram-card-title">
+    <header class="provider-heading">
+      <span class="telegram-icon text-primary text-[32px]" aria-hidden="true"></span>
+      <div>
+          <h3 id="telegram-card-title">TELEGRAM PROXY</h3>
+          <p data-i18n="tg_card_desc"></p>
+      </div>
+      <span id="telegram-status" class="provider-badge" role="status" aria-live="polite"></span>
+    </header>
+
+    <button id="telegram-toggle" type="button" data-action="start" disabled class="provider-button provider-connect connect-glow mt-4">
+        <span id="telegram-toggle-text"></span>
+        <span id="telegram-toggle-icon" class="material-symbols-outlined" aria-hidden="true">power_settings_new</span>
+    </button>
+
+    <div id="telegram-actions-container" class="hidden items-center justify-center gap-3 mt-3 w-full">
+        <button id="telegram-open" type="button" class="provider-button flex-1 px-3 text-center leading-tight" data-i18n="tg_open"></button>
+        <span class="text-[10px] font-bold text-on-surface-variant shrink-0" data-i18n="or">ИЛИ</span>
+        <button id="telegram-copy" type="button" class="provider-button flex-1 px-3 text-center leading-tight" data-i18n="tg_copy"></button>
     </div>
-    <details class="glass-panel rounded-2xl border border-outline-variant/10 p-6"><summary class="text-sm font-bold" data-i18n="tg_logs"></summary><button id="telegram-refresh-logs" type="button" class="provider-button mt-4" data-i18n="tg_refresh_logs"></button><pre id="telegram-logs" class="module-logs" tabindex="0"></pre></details>
+
+    <button id="telegram-status-btn" type="button" class="provider-button provider-refresh mt-2">
+        <span data-i18n="check_status"></span>
+        <span class="material-symbols-outlined" aria-hidden="true">query_stats</span>
+    </button>
+
+    <details id="telegram-advanced-settings" class="group glass-panel rounded-2xl border border-outline-variant/10 overflow-hidden mt-6">
+        <summary class="list-none cursor-pointer select-none px-6 py-5 flex items-center justify-between gap-4 hover:bg-white/[0.025] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60">
+            <span class="flex items-center gap-3 min-w-0">
+                <span class="material-symbols-outlined text-primary/70 text-xl">tune</span>
+                <span class="min-w-0">
+                    <span class="block font-headline text-sm font-bold text-on-surface" data-i18n="advanced_settings"></span>
+                </span>
+            </span>
+            <span class="material-symbols-outlined text-primary/60 transition-transform duration-200 group-open:rotate-180">expand_more</span>
+        </summary>
+
+        <div class="px-6 pb-6 pt-1 border-t border-outline-variant/10 space-y-6">
+            <div class="warp-proxy" style="display: block;">
+                <form id="telegram-port-form" class="telegram-config-form">
+                  <fieldset id="telegram-config-fields" class="space-y-4" disabled>
+                    <p class="warp-hint" data-i18n="tg_settings_stop_hint"></p>
+                    <label for="telegram-host" data-i18n="tg_host"></label>
+                    <input id="telegram-host" type="text" required placeholder="127.0.0.1" spellcheck="false">
+                    <p class="warp-hint" data-i18n="tg_host_hint"></p>
+                    <label for="telegram-port" data-i18n="tg_port" class="font-bold text-sm"></label>
+                    <input id="telegram-port" type="number" min="1" max="65535" step="1" required inputmode="numeric">
+                    <label for="telegram-secret" data-i18n="tg_secret"></label>
+                    <input id="telegram-secret" type="password" readonly autocomplete="off">
+                    <button id="telegram-regenerate" type="button" class="provider-button" data-i18n="tg_regenerate"></button>
+                    <label for="telegram-dc-ips">DC → IP</label>
+                    <textarea id="telegram-dc-ips" rows="4" spellcheck="false" placeholder="2:149.154.167.220"></textarea>
+                    <p class="warp-hint" data-i18n="tg_dc_hint"></p>
+                    <label class="telegram-checkbox"><input id="telegram-cfproxy" type="checkbox"><span>Cloudflare Proxy</span></label>
+                    <label for="telegram-cf-domains" data-i18n="tg_cf_domains"></label>
+                    <textarea id="telegram-cf-domains" rows="2" spellcheck="false" placeholder="proxy.example.com"></textarea>
+                    <p class="warp-hint" data-i18n="tg_cf_hint"></p>
+                    <label class="telegram-checkbox"><input id="telegram-worker" type="checkbox"><span>Cloudflare Worker</span></label>
+                    <label for="telegram-worker-domains" data-i18n="tg_worker_domains"></label>
+                    <textarea id="telegram-worker-domains" rows="2" spellcheck="false" placeholder="proxy.example.workers.dev"></textarea>
+                    <p class="warp-hint" data-i18n="tg_worker_hint"></p>
+                    <button id="telegram-save" type="submit" class="provider-button" data-i18n="tg_save_settings"></button>
+                  </fieldset>
+                </form>
+                <p class="warp-hint mt-2" data-i18n="tg_runtime_hint"></p>
+                <p id="telegram-message" class="warp-error" role="status"></p>
+            </div>
+
+            <div class="border-t border-outline-variant/10 pt-4">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-bold" data-i18n="tg_logs"></span>
+                    <button id="telegram-refresh-logs" type="button" class="provider-button" data-i18n="tg_refresh_logs"></button>
+                </div>
+                <pre id="telegram-logs" class="module-logs" tabindex="0"></pre>
+            </div>
+        </div>
+    </details>
+  </article>
 </section>

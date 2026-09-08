@@ -12,6 +12,7 @@ import { pollStatus } from './status.js';
 import { refreshCoreVersion } from './versions.js';
 import { loadStrategies } from './strategies.js';
 import { showConfirm, showAlert } from '../lib/dom.js';
+import { checkTelegramUpdate, mountTelegramUpdate, isTelegramUpdating } from './telegram-updates.js';
 
 let currentUpdateObject = null;
 
@@ -229,7 +230,7 @@ function showDualUpdateModal(data, manual = false) {
 
   const uiStatus = data.ui.available
     ? `<span class="px-2 py-0.5 bg-primary/20 text-primary text-[10px] font-bold rounded-full uppercase">${t('update_available_short')}</span>`
-    : `<span class="text-on-surface-variant/50 text-[10px] font-bold uppercase">${t('up_to_date')}</span>`;
+    : `<span class="text-on-surface-variant/50 text-[10px] font-bold uppercase">${t(data.ui.error ? 'tg_update_check_failed' : 'up_to_date')}</span>`;
   const coreStatusLabels = {
     update_available: t('update_available_short'),
     not_installed: t('core_not_installed'),
@@ -245,7 +246,7 @@ function showDualUpdateModal(data, manual = false) {
       : `v${data.core.current}`;
 
   modal.innerHTML = `
-    <div class="bg-surface-container-high border border-outline-variant/30 rounded-3xl p-8 max-w-lg w-full shadow-2xl animate-scale-in">
+    <div class="bg-surface-container-high border border-outline-variant/30 rounded-3xl p-8 max-w-lg w-full shadow-2xl animate-scale-in max-h-[90vh] overflow-y-auto">
       <div class="flex flex-col items-center">
         <div class="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mb-6">
           <span class="material-symbols-outlined text-3xl text-primary">system_update_alt</span>
@@ -253,7 +254,7 @@ function showDualUpdateModal(data, manual = false) {
         <h3 id="update-modal-title" class="font-headline text-2xl font-black text-on-surface mb-2 uppercase tracking-tight">${t('check_updates')}</h3>
         <p id="update-modal-phase" class="min-h-5 text-xs text-on-surface-variant text-center mb-6"></p>
 
-        <div class="w-full space-y-3 mb-8">
+        <div id="update-components" class="w-full space-y-3 mb-8">
           <div class="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
             <div class="flex flex-col items-start text-left">
               <span class="text-[10px] font-bold text-primary/70 uppercase tracking-wider mb-1">${t('app_ui')}</span>
@@ -291,12 +292,20 @@ function showDualUpdateModal(data, manual = false) {
   `;
   currentUpdateObject = data.ui.updateObj;
   document.body.appendChild(modal);
+  mountTelegramUpdate(modal, data.telegram);
 
   modal.querySelector('#modal-close-btn')?.addEventListener('click', () => modal.remove());
-  modal.querySelector('#modal-update-ui-btn')?.addEventListener('click', (e) => downloadAndInstallUIUpdate(e, currentUpdateObject));
+  modal.querySelector('#modal-update-ui-btn')?.addEventListener('click', async (e) => {
+    const telegramButton = modal.querySelector('#modal-update-telegram-btn');
+    if (telegramButton) telegramButton.disabled = true;
+    try { await downloadAndInstallUIUpdate(e, currentUpdateObject); }
+    finally { if (telegramButton) telegramButton.disabled = false; }
+  });
   modal.querySelector('#modal-update-core-btn')?.addEventListener('click', (event) => {
     event.currentTarget.disabled = true;
-    downloadAndInstallCoreUpdate().catch(console.error);
+    const telegramButton = modal.querySelector('#modal-update-telegram-btn');
+    if (telegramButton) telegramButton.disabled = true;
+    downloadAndInstallCoreUpdate().catch(console.error).finally(() => { if (telegramButton) telegramButton.disabled = false; });
   });
 }
 
@@ -313,7 +322,7 @@ export async function checkUIUpdate(useProxy = false, customProxy = null) {
 }
 
 export async function checkForUpdates(manual = false, useProxy = false, customProxy = null, promptOnFailure = true) {
-  if (!window.__TAURI__) return;
+  if (!window.__TAURI__ || isTelegramUpdating()) return;
   const checkUpdatesBtn = $('check-updates-btn');
 
   if (manual && checkUpdatesBtn) {
@@ -323,19 +332,26 @@ export async function checkForUpdates(manual = false, useProxy = false, customPr
 
   try {
     const uiLocalVersion = await invoke('get_ui_version_cmd');
-    const [uiUpdate, coreInfo] = await Promise.all([
+    const [uiResult, coreResult, telegramResult] = await Promise.allSettled([
       checkUIUpdate(useProxy, customProxy),
       invoke('get_core_update_info', { useProxy, customProxy }),
+      checkTelegramUpdate(),
     ]);
+    const telegram = telegramResult.status === 'fulfilled' ? telegramResult.value : null;
+    // A failed UI/core endpoint must not suppress a Telegram module update.
+    if (!telegram && (uiResult.status === 'rejected' || coreResult.status === 'rejected')) throw uiResult.reason || coreResult.reason;
+    const uiUpdate = uiResult.status === 'fulfilled' ? uiResult.value : null;
+    const coreInfo = coreResult.status === 'fulfilled' ? coreResult.value : { status: 'unknown' };
 
     const hasUIUpdate = !!uiUpdate;
     const hasCoreUpdate = coreInfo.status === 'update_available' || coreInfo.status === 'not_installed';
     const showCoreError = manual && coreInfo.status === 'unknown';
 
-    if (hasUIUpdate || hasCoreUpdate || showCoreError || manual) {
+    if (hasUIUpdate || hasCoreUpdate || telegram?.available || showCoreError || manual) {
       showDualUpdateModal({
-        ui: { available: hasUIUpdate, current: uiLocalVersion, latest: hasUIUpdate ? uiUpdate.version : uiLocalVersion, updateObj: uiUpdate },
+        ui: { available: hasUIUpdate, current: uiLocalVersion, latest: hasUIUpdate ? uiUpdate.version : uiLocalVersion, updateObj: uiUpdate, error: uiResult.status === 'rejected' },
         core: { available: hasCoreUpdate, current: coreInfo.currentVersion || t('core_not_installed'), latest: coreInfo.stableVersion, status: coreInfo.status, error: showCoreError },
+        telegram,
       }, manual);
     }
   } catch (err) {

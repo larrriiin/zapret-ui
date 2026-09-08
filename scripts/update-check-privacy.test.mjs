@@ -22,6 +22,7 @@ test('background update checks never resolve or use the built-in proxy', async (
           invokeCalls.push({ command, args });
           if (command === 'get_ui_version_cmd') return '26.9.5';
           if (command === 'get_core_update_info') throw new Error('offline');
+          if (command === 'get_telegram_status') return { installed: false };
           if (command === 'get_update_proxy') throw new Error('background check requested proxy');
           throw new Error(`Unexpected command: ${command}`);
         },
@@ -41,6 +42,7 @@ test('background update checks never resolve or use the built-in proxy', async (
   assert.deepEqual(invokeCalls, [
     { command: 'get_ui_version_cmd', args: undefined },
     { command: 'get_core_update_info', args: { useProxy: false, customProxy: null } },
+    { command: 'get_telegram_status', args: undefined },
   ]);
 });
 
