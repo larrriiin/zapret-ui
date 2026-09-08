@@ -85,6 +85,7 @@ ZAPRET UI не конкурирует с Flowseal и не присваивает
 - Переключение между стратегиями Flowseal из графического интерфейса.
 - Управление пользовательскими списками доменов, исключений, IP-адресов и подсетей.
 - Настройка Game Filter, IPSet Filter и используемых fake-файлов.
+- Интеграция с дополнительными модулями: управление официальным клиентом Cloudflare WARP и локальным прокси [TG WS Proxy](https://github.com/Flowseal/tg-ws-proxy) (от Flowseal).
 - Автозапуск, системный трей, уведомления и выбор поведения при закрытии окна.
 - Раздельные обновления интерфейса ZAPRET UI и ядра Flowseal.
 - Проверка версии и источника стабильного ядра через управляемый канал.
@@ -294,6 +295,8 @@ scripts/                     проверка версий и служебные
 
 - [`bol-van/zapret`](https://github.com/bol-van/zapret) — оригинальный набор средств обхода DPI.
 - [`Flowseal/zapret-discord-youtube`](https://github.com/Flowseal/zapret-discord-youtube) — поставщик Windows-ядра, стратегий и списков, используемых ZAPRET UI.
+- [`Flowseal/tg-ws-proxy`](https://github.com/Flowseal/tg-ws-proxy) — локальный WebSocket-прокси для Telegram Desktop.
+- [Cloudflare WARP](https://1.1.1.1/) — торговая марка и продукт компании Cloudflare, Inc. ZAPRET UI лишь предоставляет интерфейс для работы с официальным клиентом и никак не связан с Cloudflare.
 - [Tauri](https://tauri.app/) и другие open-source проекты, на которых построено приложение.
 
 Исходный код ZAPRET UI распространяется по лицензии [MIT](LICENSE). Загружаемые сторонние компоненты, бинарные файлы, стратегии и списки сохраняют авторство и лицензии соответствующих проектов. ZAPRET UI не является официальным клиентом Flowseal или `bol-van/zapret`.
@@ -338,6 +341,7 @@ In short: **Flowseal supplies the working core content; ZAPRET UI makes it easie
 - Switch between Flowseal strategies from a graphical interface.
 - Edit user domain, exclusion, IP address, and subnet lists.
 - Configure Game Filter, IPSet Filter, and active fake files.
+- Integration with additional modules: management of the official Cloudflare WARP client and the local [TG WS Proxy](https://github.com/Flowseal/tg-ws-proxy) (by Flowseal).
 - Autostart, system tray integration, notifications, and configurable close behavior.
 - Independent updates for the ZAPRET UI application and the Flowseal core.
 - A maintainer-controlled stable core channel with explicit version and source metadata.
@@ -547,6 +551,8 @@ scripts/                     version checks and release helpers
 
 - [`bol-van/zapret`](https://github.com/bol-van/zapret) — the original DPI-circumvention toolkit.
 - [`Flowseal/zapret-discord-youtube`](https://github.com/Flowseal/zapret-discord-youtube) — the Windows core, strategies, and lists consumed by ZAPRET UI.
+- [`Flowseal/tg-ws-proxy`](https://github.com/Flowseal/tg-ws-proxy) — local WebSocket proxy for Telegram Desktop.
+- [Cloudflare WARP](https://1.1.1.1/) — a product and trademark of Cloudflare, Inc. ZAPRET UI solely provides an interface for configuring the official client and is not affiliated with Cloudflare.
 - [Tauri](https://tauri.app/) and the other open-source projects used to build the application.
 
 ZAPRET UI source code is distributed under the [MIT License](LICENSE). Downloaded third-party components, binaries, strategies, and lists retain the copyright and licenses of their respective projects. ZAPRET UI is not an official client of Flowseal or `bol-van/zapret`.
