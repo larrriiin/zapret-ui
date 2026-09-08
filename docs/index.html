@@ -49,7 +49,33 @@
     <symbol id="icon-windows" viewBox="0 0 24 24">
       <path d="M3 3h7v7H3zm11 0h7v7h-7zM3 14h7v7H3zm11 0h7v7h-7z"/>
     </symbol>
+    <symbol id="icon-close" viewBox="0 0 24 24">
+      <path d="M18 6 6 18M6 6l12 12"/>
+    </symbol>
+    <symbol id="icon-chevron-left" viewBox="0 0 24 24">
+      <path d="m15 18-6-6 6-6"/>
+    </symbol>
+    <symbol id="icon-chevron-right" viewBox="0 0 24 24">
+      <path d="m9 18 6-6-6-6"/>
+    </symbol>
   </svg>
+
+  <!-- Lightbox -->
+  <div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="Просмотр скриншота">
+    <button class="lightbox-close" id="lightbox-close" aria-label="Закрыть">
+      <svg class="icon" aria-hidden="true"><use href="#icon-close"/></svg>
+    </button>
+    <button class="lightbox-nav lightbox-prev" id="lightbox-prev" aria-label="Предыдущий скриншот">
+      <svg class="icon" aria-hidden="true"><use href="#icon-chevron-left"/></svg>
+    </button>
+    <button class="lightbox-nav lightbox-next" id="lightbox-next" aria-label="Следующий скриншот">
+      <svg class="icon" aria-hidden="true"><use href="#icon-chevron-right"/></svg>
+    </button>
+    <div class="lightbox-inner">
+      <img id="lightbox-img" src="" alt="">
+      <p id="lightbox-caption" class="lightbox-caption"></p>
+    </div>
+  </div>
 
   <header class="site-header container">
     <a class="brand" href="#" aria-label="ZAPRET UI — в начало страницы">
@@ -86,13 +112,58 @@
         Windows 10 / 11 <span aria-hidden="true">·</span> x64 <span aria-hidden="true">·</span> Открытый код
       </p>
 
+      <!-- Screenshot carousel -->
       <figure class="app-preview">
-        <a class="screenshot-link" href="./assets/app-screenshot.png" target="_blank" rel="noopener" aria-label="Открыть скриншот ZAPRET UI в полном размере (новая вкладка)">
-          <img class="app-screenshot" src="./assets/app-screenshot.png" width="1102" height="979" alt="Главное окно ZAPRET UI: выбор стратегии, управление запуском, фильтры IPSet и Game Filter." fetchpriority="high" decoding="async">
-        </a>
+        <div class="carousel" role="region" aria-label="Скриншоты приложения">
+          <div class="carousel-track" id="carousel-track">
+            <div class="carousel-slide">
+              <button class="screenshot-link" aria-label="Главная страница — открыть в полном размере" data-index="0">
+                <img class="app-screenshot" src="./screenshots/home.png" width="1100" height="980" alt="Главная страница ZAPRET UI: выбор стратегии и управление запуском." loading="eager" decoding="async">
+              </button>
+            </div>
+            <div class="carousel-slide">
+              <button class="screenshot-link" aria-label="Telegram прокси — открыть в полном размере" data-index="1">
+                <img class="app-screenshot" src="./screenshots/telegram.png" width="1100" height="980" alt="Встроенный Telegram WS Proxy на основе Flowseal tg-ws-proxy." loading="lazy" decoding="async">
+              </button>
+            </div>
+            <div class="carousel-slide">
+              <button class="screenshot-link" aria-label="Списки сайтов — открыть в полном размере" data-index="2">
+                <img class="app-screenshot" src="./screenshots/sites.png" width="1100" height="980" alt="Управление списками сайтов и доменов." loading="lazy" decoding="async">
+              </button>
+            </div>
+            <div class="carousel-slide">
+              <button class="screenshot-link" aria-label="Настройки IP — открыть в полном размере" data-index="3">
+                <img class="app-screenshot" src="./screenshots/ips.png" width="1100" height="980" alt="Настройки исключений IP-адресов и подсетей." loading="lazy" decoding="async">
+              </button>
+            </div>
+            <div class="carousel-slide">
+              <button class="screenshot-link" aria-label="Диагностика — открыть в полном размере" data-index="4">
+                <img class="app-screenshot" src="./screenshots/diagnostics.png" width="1100" height="980" alt="Раздел диагностики: логи и системная информация." loading="lazy" decoding="async">
+              </button>
+            </div>
+            <div class="carousel-slide">
+              <button class="screenshot-link" aria-label="Монитор трафика — открыть в полном размере" data-index="5">
+                <img class="app-screenshot" src="./screenshots/traffic.png" width="1100" height="980" alt="Монитор сетевого трафика." loading="lazy" decoding="async">
+              </button>
+            </div>
+            <div class="carousel-slide">
+              <button class="screenshot-link" aria-label="Настройки — открыть в полном размере" data-index="6">
+                <img class="app-screenshot" src="./screenshots/settings.png" width="1100" height="980" alt="Настройки приложения." loading="lazy" decoding="async">
+              </button>
+            </div>
+          </div>
+        </div>
         <figcaption>
-          <span>Знакомый zapret. Удобный интерфейс.</span>
-          <a href="./assets/app-screenshot.png" target="_blank" rel="noopener" aria-label="Рассмотреть скриншот (новая вкладка)">Рассмотреть <svg class="icon" aria-hidden="true"><use href="#icon-arrow"/></svg></a>
+          <span id="carousel-label">Знакомый zapret. Удобный интерфейс.</span>
+          <div class="carousel-controls" aria-label="Управление каруселью">
+            <button class="carousel-btn" id="carousel-prev" aria-label="Предыдущий слайд">
+              <svg class="icon" aria-hidden="true"><use href="#icon-chevron-left"/></svg>
+            </button>
+            <div class="carousel-dots" id="carousel-dots" role="tablist" aria-label="Слайды"></div>
+            <button class="carousel-btn" id="carousel-next" aria-label="Следующий слайд">
+              <svg class="icon" aria-hidden="true"><use href="#icon-chevron-right"/></svg>
+            </button>
+          </div>
         </figcaption>
       </figure>
     </section>
@@ -118,6 +189,20 @@
         <li>
           <svg class="icon feature-check" aria-hidden="true"><use href="#icon-check"/></svg>
           <div><h3>Пользовательские списки</h3><p>Добавляйте свои домены, исключения, IP-адреса и подсети во встроенном редакторе.</p></div>
+        </li>
+        <li>
+          <svg class="icon feature-check" aria-hidden="true"><use href="#icon-check"/></svg>
+          <div>
+            <h3>Telegram прокси <span class="feature-badge">tg-ws-proxy</span></h3>
+            <p>Встроенный локальный прокси для Telegram Desktop на основе <a class="feature-link" href="https://github.com/Flowseal/tg-ws-proxy" target="_blank" rel="noopener">Flowseal tg-ws-proxy</a>. Подключается прямо из интерфейса — одной кнопкой.</p>
+          </div>
+        </li>
+        <li>
+          <svg class="icon feature-check" aria-hidden="true"><use href="#icon-check"/></svg>
+          <div>
+            <h3>Cloudflare WARP <span class="feature-badge">WARP</span></h3>
+            <p>Интеграция с Cloudflare WARP: автоматическое переключение режима туннеля, статус подключения и совместная работа с zapret прямо из приложения.</p>
+          </div>
         </li>
       </ul>
     </section>
@@ -158,7 +243,138 @@
         <a href="https://github.com/larrriiin/zapret-ui/blob/main/LICENSE">MIT</a>
       </nav>
     </div>
-    <p>На основе <a href="https://github.com/bol-van/zapret">zapret</a> и ядра <a href="https://github.com/Flowseal/zapret-discord-youtube">Flowseal</a>. Независимый интерфейс для Windows.</p>
+    <p>На основе <a href="https://github.com/bol-van/zapret">zapret</a> и ядра <a href="https://github.com/Flowseal/zapret-discord-youtube">Flowseal</a>. Telegram прокси — <a href="https://github.com/Flowseal/tg-ws-proxy">tg-ws-proxy</a> by Flowseal. Независимый интерфейс для Windows.</p>
   </footer>
+
+  <script>
+    // ── Carousel ──────────────────────────────────────────────────────────────
+    (function () {
+      const slides = document.querySelectorAll('.carousel-slide');
+      const track = document.getElementById('carousel-track');
+      const dotsContainer = document.getElementById('carousel-dots');
+      const prevBtn = document.getElementById('carousel-prev');
+      const nextBtn = document.getElementById('carousel-next');
+      const labels = [
+        'Знакомый zapret. Удобный интерфейс.',
+        'Встроенный Telegram прокси.',
+        'Управление списками сайтов.',
+        'Настройки IP-адресов и подсетей.',
+        'Диагностика и системные логи.',
+        'Монитор сетевого трафика.',
+        'Настройки приложения.',
+      ];
+      let current = 0;
+      let autoplayTimer = null;
+
+      // Build dots
+      slides.forEach(function (_, i) {
+        var dot = document.createElement('button');
+        dot.className = 'carousel-dot' + (i === 0 ? ' active' : '');
+        dot.setAttribute('role', 'tab');
+        dot.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
+        dot.setAttribute('aria-label', 'Слайд ' + (i + 1));
+        dot.addEventListener('click', function () { goTo(i); });
+        dotsContainer.appendChild(dot);
+      });
+
+      function updateDots() {
+        var dots = dotsContainer.querySelectorAll('.carousel-dot');
+        dots.forEach(function (d, i) {
+          var active = i === current;
+          d.classList.toggle('active', active);
+          d.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+      }
+
+      function goTo(idx) {
+        current = (idx + slides.length) % slides.length;
+        track.style.transform = 'translateX(-' + current * 100 + '%)';
+        document.getElementById('carousel-label').textContent = labels[current] || '';
+        updateDots();
+        resetAutoplay();
+      }
+
+      prevBtn.addEventListener('click', function () { goTo(current - 1); });
+      nextBtn.addEventListener('click', function () { goTo(current + 1); });
+
+      // Keyboard
+      document.addEventListener('keydown', function (e) {
+        if (document.getElementById('lightbox').classList.contains('open')) return;
+        if (e.key === 'ArrowLeft') goTo(current - 1);
+        if (e.key === 'ArrowRight') goTo(current + 1);
+      });
+
+      // Touch swipe
+      var startX = 0;
+      track.addEventListener('touchstart', function (e) { startX = e.touches[0].clientX; }, { passive: true });
+      track.addEventListener('touchend', function (e) {
+        var dx = e.changedTouches[0].clientX - startX;
+        if (Math.abs(dx) > 40) goTo(current + (dx < 0 ? 1 : -1));
+      }, { passive: true });
+
+      // Autoplay
+      function startAutoplay() {
+        autoplayTimer = setInterval(function () { goTo(current + 1); }, 5000);
+      }
+      function resetAutoplay() {
+        clearInterval(autoplayTimer);
+        startAutoplay();
+      }
+      startAutoplay();
+
+      // ── Lightbox ────────────────────────────────────────────────────────────
+      var lightbox = document.getElementById('lightbox');
+      var lbImg = document.getElementById('lightbox-img');
+      var lbCaption = document.getElementById('lightbox-caption');
+      var lbCurrent = 0;
+      var slideButtons = document.querySelectorAll('.carousel-slide .screenshot-link');
+      var slideImgs = Array.from(document.querySelectorAll('.carousel-slide .app-screenshot'));
+
+      function openLightbox(idx) {
+        lbCurrent = idx;
+        lbImg.src = slideImgs[idx].src;
+        lbImg.alt = slideImgs[idx].alt;
+        lbCaption.textContent = labels[idx] || '';
+        lightbox.classList.add('open');
+        document.body.style.overflow = 'hidden';
+        document.getElementById('lightbox-close').focus();
+        clearInterval(autoplayTimer);
+      }
+
+      function closeLightbox() {
+        lightbox.classList.remove('open');
+        document.body.style.overflow = '';
+        startAutoplay();
+      }
+
+      function lbGoTo(idx) {
+        lbCurrent = (idx + slideButtons.length) % slideButtons.length;
+        lbImg.src = slideImgs[lbCurrent].src;
+        lbImg.alt = slideImgs[lbCurrent].alt;
+        lbCaption.textContent = labels[lbCurrent] || '';
+      }
+
+      slideButtons.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          openLightbox(parseInt(btn.getAttribute('data-index'), 10));
+        });
+      });
+
+      document.getElementById('lightbox-close').addEventListener('click', closeLightbox);
+      document.getElementById('lightbox-prev').addEventListener('click', function () { lbGoTo(lbCurrent - 1); });
+      document.getElementById('lightbox-next').addEventListener('click', function () { lbGoTo(lbCurrent + 1); });
+
+      lightbox.addEventListener('click', function (e) {
+        if (e.target === lightbox) closeLightbox();
+      });
+
+      document.addEventListener('keydown', function (e) {
+        if (!lightbox.classList.contains('open')) return;
+        if (e.key === 'Escape') closeLightbox();
+        if (e.key === 'ArrowLeft') lbGoTo(lbCurrent - 1);
+        if (e.key === 'ArrowRight') lbGoTo(lbCurrent + 1);
+      });
+    })();
+  </script>
 </body>
 </html>

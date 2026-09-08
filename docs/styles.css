@@ -74,12 +74,44 @@ nav a:hover { color: var(--foreground); }
 .platform-note .icon { width: 13px; height: 13px; stroke-width: 1.4; }
 
 .app-preview { max-width: 960px; margin: 52px auto 0; }
-.screenshot-link { display: block; overflow: hidden; border-radius: 14px; background: var(--surface); box-shadow: 0 24px 70px #0006; }
-.app-screenshot { width: 100%; height: auto; }
 figcaption { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 17px; color: var(--muted); font-size: 12px; text-align: left; }
-figcaption a { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
-figcaption a:hover { color: var(--primary); }
 figcaption .icon { width: 16px; height: 16px; }
+
+/* ── Carousel ── */
+.carousel { overflow: hidden; border-radius: 14px; background: var(--surface); box-shadow: 0 24px 70px #0006; }
+.carousel-track { display: flex; transition: transform 400ms cubic-bezier(.4,0,.2,1); will-change: transform; }
+.carousel-slide { flex: 0 0 100%; min-width: 0; }
+.screenshot-link { display: block; cursor: zoom-in; border: 0; background: none; padding: 0; width: 100%; }
+.app-screenshot { width: 100%; height: auto; display: block; }
+
+.carousel-controls { display: flex; align-items: center; gap: 10px; }
+.carousel-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; padding: 0; transition: color 160ms ease-out, border-color 160ms ease-out; }
+.carousel-btn:hover { color: var(--foreground); border-color: var(--muted); }
+.carousel-btn .icon { width: 16px; height: 16px; stroke-width: 2; }
+
+.carousel-dots { display: flex; align-items: center; gap: 6px; }
+.carousel-dot { width: 6px; height: 6px; border-radius: 50%; border: 0; background: var(--line); padding: 0; cursor: pointer; transition: background 200ms ease-out, transform 200ms ease-out; }
+.carousel-dot.active { background: var(--primary); transform: scale(1.4); }
+
+/* ── Lightbox ── */
+.lightbox { position: fixed; inset: 0; z-index: 100; background: #00000099; backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 200ms ease-out; }
+.lightbox.open { opacity: 1; pointer-events: all; }
+.lightbox-inner { position: relative; max-width: min(960px, calc(100vw - 120px)); width: 100%; }
+.lightbox-inner img { width: 100%; height: auto; display: block; border-radius: 14px; box-shadow: 0 32px 80px #000a; }
+.lightbox-caption { margin-top: 12px; color: var(--muted); font-size: 12px; text-align: center; }
+.lightbox-close { position: fixed; top: 20px; right: 20px; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); cursor: pointer; padding: 0; transition: color 160ms ease-out; }
+.lightbox-close:hover { color: var(--foreground); }
+.lightbox-close .icon { width: 18px; height: 18px; stroke-width: 2; }
+.lightbox-nav { position: fixed; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); cursor: pointer; padding: 0; transition: color 160ms ease-out; }
+.lightbox-nav:hover { color: var(--foreground); }
+.lightbox-nav .icon { width: 20px; height: 20px; stroke-width: 2; }
+.lightbox-prev { left: 20px; }
+.lightbox-next { right: 20px; }
+
+/* ── Feature badge ── */
+.feature-badge { display: inline-block; font-size: 10px; font-weight: 700; line-height: 1; padding: 3px 7px; border-radius: 5px; border: 1px solid var(--line); color: var(--muted); letter-spacing: .03em; vertical-align: middle; margin-left: 8px; }
+.feature-link { color: var(--primary); text-decoration: underline; text-decoration-color: #ba9eff50; }
+.feature-link:hover { text-decoration-color: currentColor; }
 
 .section { padding-block: 96px; }
 h2 { font-size: clamp(28px, 3.2vw, 38px); line-height: 1.25; letter-spacing: -.035em; }
@@ -145,8 +177,12 @@ h3 { font-size: 17px; line-height: 1.5; letter-spacing: -.02em; }
   .hero-actions .button-primary { flex: 1; }
   .platform-note { gap: 7px; font-size: 11px; }
   .app-preview { margin-top: 36px; }
-  .screenshot-link { border-radius: 8px; }
+  .carousel { border-radius: 8px; }
   figcaption { font-size: 11px; align-items: flex-start; gap: 12px; margin-top: 12px; }
+  .lightbox-nav { width: 36px; height: 36px; }
+  .lightbox-prev { left: 8px; }
+  .lightbox-next { right: 8px; }
+  .lightbox-inner { max-width: calc(100vw - 80px); }
   .section { padding-block: 60px; }
   .features { grid-template-columns: 1fr; gap: 32px; }
   .section-intro p { max-width: 100%; margin-top: 16px; font-size: 14px; }
@@ -172,4 +208,6 @@ h3 { font-size: 17px; line-height: 1.5; letter-spacing: -.02em; }
   :root { scroll-behavior: auto; }
   .button, nav a { transition: none; }
   .button:hover { transform: none; }
+  .carousel-track { transition: none; }
+  .lightbox { transition: none; }
 }
