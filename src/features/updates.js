@@ -1,5 +1,5 @@
 import { $, invoke, listen, getUpdater } from '../lib/core.js';
-import { t } from '../lib/i18n.js';
+import { t, onLangChange } from '../lib/i18n.js';
 import { state } from '../lib/state.js';
 import {
   beginRestart,
@@ -11,6 +11,7 @@ import {
 import { pollStatus } from './status.js';
 import { refreshCoreVersion } from './versions.js';
 import { loadStrategies } from './strategies.js';
+import { showConfirm, showAlert } from '../lib/dom.js';
 
 let currentUpdateObject = null;
 
@@ -202,10 +203,10 @@ function showProxyFallbackModal(errStr, onTryProxy, onCustomProxy, onRetryNoProx
       const btn = modal.querySelector('#proxy-btn-custom');
       btn.disabled = true;
       btn.innerHTML = `<span class="material-symbols-outlined text-sm animate-spin">refresh</span> ${t('loading')}`;
-      onCustomProxy(val).then(() => modal.remove()).catch(err => {
+      onCustomProxy(val).then(() => modal.remove()).catch(async (err) => {
         btn.disabled = false;
         btn.innerHTML = t('download');
-        alert(`${t('error')}: ${err}`);
+        await showAlert(`${t('error')}: ${err}`, t('error'));
       });
     });
   }
@@ -449,21 +450,28 @@ async function refreshRollbackState() {
     const installation = await invoke('get_core_installation_state');
     current.textContent = installation.currentVersion || '—';
     previous.textContent = installation.previousVersion || '—';
-    previousRow?.classList.toggle('hidden', !installation.previousVersion);
-    button.classList.toggle('hidden', !installation.rollbackAvailable);
+    previousRow?.classList.remove('hidden');
+    button.classList.remove('hidden');
     button.disabled = !installation.rollbackAvailable;
-    button.textContent = t('core_rollback_button', { version: installation.previousVersion || '' });
+    if (installation.rollbackAvailable && installation.previousVersion) {
+      button.textContent = t('core_rollback_button', { version: installation.previousVersion });
+    } else {
+      button.textContent = t('core_rollback_unavailable');
+    }
   } catch (err) {
     console.error('Cannot read core installation state:', err);
     button.disabled = true;
+    button.textContent = t('core_rollback_unavailable');
   }
 }
 
 function initCoreRollback() {
   const button = $('core-rollback-btn');
+  onLangChange(refreshRollbackState);
   button?.addEventListener('click', async () => {
     const version = $('core-previous-install-version')?.textContent || '';
-    if (!window.confirm(t('core_rollback_confirm', { version }))) return;
+    const confirmed = await showConfirm(t('core_rollback_confirm', { version }), t('core_rollback_title'));
+    if (!confirmed) return;
     button.disabled = true;
     let restartOverlayVisible = false;
     try {
@@ -479,10 +487,10 @@ function initCoreRollback() {
       await refreshCoreVersion();
       await loadStrategies();
       await pollStatus();
-      alert(t('core_rollback_success'));
+      await showAlert(t('core_rollback_success'), t('core_rollback_title'));
     } catch (err) {
       if (restartOverlayVisible) endRestart();
-      alert(`${t('core_rollback_title')}: ${err}`);
+      await showAlert(`${t('core_rollback_title')}: ${err}`, t('core_rollback_title'));
       await refreshRollbackState();
     }
   });

@@ -81,9 +81,20 @@ function render() {
   $('warp-install').disabled = installing || !s || Boolean(requestError);
   $('warp-install').textContent = t(installing ? 'warp_installing' : 'warp_install');
   $('warp-settings-refresh').disabled = busy || checking;
-  $('warp-settings-status').textContent = requestError || s?.error ? errorText(requestError || s.error) : !s ? t('warp_detecting') : s.installed ? `${t(`warp_state_${s.state}`)} · ${s.version || 'Cloudflare WARP'}` : t('warp_not_installed');
-  $('warp-settings-description').textContent = t(s?.installed ? 'warp_settings_connected_desc' : 'warp_settings_install_desc');
-  $('warp-install-details').hidden = Boolean(s?.installed);
+  if ($('warp-settings-remove')) {
+    $('warp-settings-remove').hidden = !s?.installed;
+    $('warp-settings-remove').disabled = busy || checking;
+  }
+  const warpVer = s?.version ? s.version.replace(/^warp-cli\s*/i, '') : '';
+  $('warp-settings-status').textContent = requestError || s?.error
+    ? errorText(requestError || s.error)
+    : !s
+      ? t('warp_detecting')
+      : s.installed
+        ? (warpVer ? t('warp_installed_cli', { version: warpVer }) : t('warp_installed_cli_no_ver'))
+        : t('warp_not_installed');
+  $('warp-settings-description').textContent = t('warp_subtitle');
+  if ($('warp-install-details')) $('warp-install-details').hidden = true;
   renderReport();
 }
 
@@ -188,6 +199,14 @@ export function initWarp() {
   }
   initWarpModes();
   $('warp-status-close').addEventListener('click', () => $('warp-status-dialog').close());
+  const removeDialog = $('warp-remove-dialog');
+  if (removeDialog) document.body.append(removeDialog);
+  $('warp-settings-remove')?.addEventListener('click', () => removeDialog?.showModal());
+  $('warp-remove-close')?.addEventListener('click', () => removeDialog?.close());
+  $('warp-remove-done')?.addEventListener('click', () => removeDialog?.close());
+  removeDialog?.addEventListener('click', (event) => {
+    if (event.target === removeDialog) removeDialog.close();
+  });
   onLangChange(render);
   $('warp-connect').addEventListener('click', () => {
     if (busy && operation === 'connecting') {
