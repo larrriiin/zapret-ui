@@ -52,6 +52,51 @@ Inspected on Windows with `warp-cli 2026.7.1343.0`:
 No port or connection is fabricated if the client cannot report it. Local proxy
 activity reflects the client connection state, not an independent end-to-end probe.
 
+## Selected websites
+
+Expand **Websites through WARP** on the WARP card. Enter one domain per line,
+select **Local proxy**, connect WARP, then choose **Enable for websites**.
+The list is saved locally; enabling also saves the edited list. Domains include
+their subdomains. Unicode domains are converted to IDNA; URLs, IPs, ports,
+invalid labels, and lists over 500 entries are rejected by the backend.
+
+`providers/warp/sites.rs` serves an in-memory PAC script on a random loopback
+port with an exact, revision-specific URL. Selected hosts return only the
+verified WARP SOCKS5 endpoint; all other hosts return `DIRECT`. A domain such as
+`example.com` never matches `notexample.com` or `example.com.other.test`.
+The service accepts bounded HTTP GET requests, requires a matching Host header,
+and exposes no filesystem or configuration-write endpoint.
+
+Activation uses WinINet's per-connection API for the current user's default
+connection, temporarily enabling the PAC URL and disabling manual proxy and
+auto-detection flags. Manual proxy server/bypass values are not rewritten.
+The previous flags and PAC URL are flushed to `warp-sites-recovery.json` in
+the app data directory before the Windows settings change. Restoration only
+runs if the current flags and URL still match the settings owned by ZAPRET UI.
+External proxy changes are preserved. Failed restoration retains the journal
+for retry. Startup recovery precedes loading domain preferences.
+
+Rules are session-scoped and disabled on disconnect, mode change, app exit,
+or a detected external proxy/port/client change. The app may remain in the tray.
+After a crash, the next startup restores owned settings; browser behavior while
+the app is absent depends on its PAC cache/fallback. This is selective browser
+routing, not a fail-closed firewall. Preferences persist in `warp-sites.json`;
+activation does not automatically resume on startup.
+
+Scope: browsers using Windows system proxy settings (for example Chrome/Edge).
+Browser policies, extensions, or custom proxy settings can override this.
+Reload tabs after changes; existing connections can remain on their old route.
+CDN/authentication domains must be listed separately when needed. Games, UDP,
+WebRTC, and programs ignoring system proxy settings are outside this feature.
+The mode does not change WARP registration, install a driver, or use Zero Trust.
+
+Tests execute the generated PAC in Node.js, exercise the local HTTP endpoint,
+validate domains/IDNA, and check recovery ownership and retry behavior with
+injected settings. A WinINet read-only check runs on Windows. The UI harness
+checks loading/saving/enabling/disabling rules, invalid edits, and dirty-input
+preservation. Live WARP/browser routing and actual Windows proxy mutation still
+require a native smoke test; the default tests do not change the system proxy.
+
 ## Installer trust boundary
 
 `src-tauri/src/providers/warp/installer.rs` downloads the MSI directly from

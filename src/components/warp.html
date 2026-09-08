@@ -40,6 +40,20 @@
     </form>
     <p class="warp-hint" data-i18n="warp_proxy_hint"></p>
   </div>
+  <details id="warp-sites" class="warp-sites">
+    <summary data-i18n="warp_sites_title"></summary>
+    <p class="warp-hint" data-i18n="warp_sites_hint"></p>
+    <form id="warp-sites-form">
+      <label for="warp-sites-domains" class="provider-label" data-i18n="warp_sites_domains"></label>
+      <textarea id="warp-sites-domains" rows="5" maxlength="128000" spellcheck="false" autocomplete="off" placeholder="example.com&#10;example.org" aria-describedby="warp-sites-format"></textarea>
+      <p id="warp-sites-format" class="warp-hint" data-i18n="warp_sites_format"></p>
+      <p id="warp-sites-state" class="warp-hint" role="status" aria-live="polite"></p>
+      <div class="warp-sites-actions">
+        <button id="warp-sites-save" type="submit" class="provider-button" data-i18n="warp_sites_save"></button>
+        <button id="warp-sites-toggle" type="button" class="provider-button"></button>
+      </div>
+    </form>
+  </details>
   <p id="warp-error" class="warp-error" role="status" hidden></p>
 </article>
 <dialog id="warp-status-dialog" class="warp-status-dialog" aria-labelledby="warp-status-title">

@@ -19,6 +19,8 @@ let operationError = null;
 let requestError = null;
 let checking = false;
 let cancelRequested = false;
+let sitesDirty = false;
+let sitesLoaded = false;
 let hero, zapret, heading, zapretHeader, statusHeading;
 
 function errorText(error) {
@@ -72,8 +74,21 @@ function render() {
     if (document.activeElement !== $('warp-port') && !busy) $('warp-port').value = proxy.port ?? '';
     $('warp-port-form').hidden = !proxy.port_editable;
   }
-  $('warp-port').disabled = locked;
-  $('warp-port-save').disabled = locked;
+  $('warp-port').disabled = locked || Boolean(s?.sites?.enabled);
+  $('warp-port-save').disabled = locked || Boolean(s?.sites?.enabled);
+  const sites = s?.sites;
+  const siteInput = $('warp-sites-domains');
+  if (sites && (!sitesLoaded || !sitesDirty) && document.activeElement !== siteInput) {
+    siteInput.value = sites.domains.join('\n');
+    sitesLoaded = true;
+  }
+  const sitesEnabled = Boolean(sites?.enabled);
+  const canEnableSites = Boolean(proxy?.active && proxy.kind === 'SOCKS5' && proxy.port && !s?.error && !requestError);
+  siteInput.disabled = busy;
+  $('warp-sites-save').disabled = locked || !s?.installed || !sitesDirty;
+  $('warp-sites-toggle').disabled = locked || (!sitesEnabled && (!canEnableSites || !siteInput.value.trim()));
+  $('warp-sites-toggle').textContent = t(sitesEnabled ? 'warp_sites_disable' : 'warp_sites_enable');
+  $('warp-sites-state').textContent = t(sitesEnabled ? 'warp_sites_active' : canEnableSites ? 'warp_sites_ready' : 'warp_sites_requires_proxy');
   const error = operationError || requestError || s?.error;
   $('warp-error').hidden = !error;
   $('warp-error').textContent = error ? errorText(error) : '';
@@ -156,7 +171,13 @@ async function refresh() {
 async function act(command, args, state = null) {
   if (busy) return;
   busy = true; operation = state; operationError = null; render();
-  try { await polling; snapshot = await invoke(command, args); requestError = null; }
+  try {
+    await polling; snapshot = await invoke(command, args); requestError = null;
+    if (command === 'set_warp_sites') {
+      sitesDirty = false;
+      $('warp-sites-domains').value = (snapshot.sites?.domains || []).join('\n');
+    }
+  }
   catch (error) { operationError = error; }
   finally {
     if (cancelRequested) {
@@ -198,6 +219,16 @@ export function initWarp() {
     });
   }
   initWarpModes();
+  $('warp-sites-domains').addEventListener('input', () => { sitesDirty = true; render(); });
+  const siteDomains = () => $('warp-sites-domains').value.split(/\r?\n/).map(domain => domain.trim()).filter(Boolean);
+  $('warp-sites-form').addEventListener('submit', event => {
+    event.preventDefault();
+    act('set_warp_sites', { domains: siteDomains(), enabled: Boolean(snapshot?.sites?.enabled) });
+  });
+  $('warp-sites-toggle').addEventListener('click', () => {
+    const enabled = !snapshot?.sites?.enabled;
+    act('set_warp_sites', { domains: enabled ? siteDomains() : snapshot.sites.domains, enabled });
+  });
   $('warp-status-close').addEventListener('click', () => $('warp-status-dialog').close());
   const removeDialog = $('warp-remove-dialog');
   if (removeDialog) document.body.append(removeDialog);

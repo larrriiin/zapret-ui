@@ -18,6 +18,7 @@ let installed = false, connected = false, mode = 'warp', port = 40000, failed = 
 let inFlight = 0, maximum = 0, calls = [];
 let startupBusy = 2;
 let pendingConnection = false;
+let sites = { domains: ['example.org'], enabled: false };
 const modes = ['doh','dot','warp','warp+dot','warp+doh','proxy','tunnel_only'];
 window.__TAURI__ = { core: { invoke: async (command, args) => {
   if (command === 'get_strategies') return ['general (ALT12)', 'general'];
@@ -31,7 +32,12 @@ window.__TAURI__ = { core: { invoke: async (command, args) => {
   if (command === 'disconnect_warp') { connected = false; pendingConnection = false; }
   if (command === 'set_warp_mode') mode = args.mode;
   if (command === 'set_warp_proxy_port') port = args.port;
-  return {installed, connected, state:connected ? 'connected':pendingConnection ? 'connecting':'disconnected', mode, modes, version:'warp-cli 2026.7.1343.0', proxy:mode === 'proxy' ? {address:'127.0.0.1',port,kind:'SOCKS5',active:connected,port_editable:true}:null};
+  if (command === 'set_warp_sites') {
+    if (args.domains.some(domain => domain.includes('/'))) throw {code:'warp_sites_invalid', detail:''};
+    sites = { domains: [...new Set(args.domains.map(domain => domain.toLowerCase()))], enabled: args.enabled };
+  }
+  if (!connected || mode !== 'proxy' || !installed) sites.enabled = false;
+  return {installed, connected, sites: structuredClone(sites), state:connected ? 'connected':pendingConnection ? 'connecting':'disconnected', mode, modes, version:'warp-cli 2026.7.1343.0', proxy:mode === 'proxy' ? {address:'127.0.0.1',port,kind:'SOCKS5',active:connected,port_editable:true}:null};
 }}};
 setLanguage('ru');
 updateStatusUI({running:true, strategy:'general (ALT12)'});
@@ -127,6 +133,21 @@ check($('warp-mode-options').hidden && $('warp-mode-label').textContent === 'Ð›Ð
 check(!$('warp-proxy').hidden && $('warp-proxy-endpoint').textContent.includes('40000'), 'Local proxy reports endpoint and type');
 $('warp-port').value = '40001'; $('warp-port-form').requestSubmit(); await wait(200);
 check(port === 40001 && $('warp-proxy-endpoint').textContent.includes('40001'), 'Proxy port changes and refreshes');
+$('warp-sites').open = true;
+check($('warp-sites-domains').value === 'example.org', 'Saved website domains load from the backend');
+$('warp-sites-domains').value = 'EXAMPLE.com\nexample.org';
+$('warp-sites-domains').dispatchEvent(new Event('input'));
+await manualCheck('warp-settings-refresh');
+check($('warp-sites-domains').value.startsWith('EXAMPLE.com'), 'Polling preserves unsaved website edits');
+$('warp-sites-toggle').click(); await wait(200);
+check(sites.enabled && sites.domains[0] === 'example.com' && $('warp-port').disabled, 'Website rules enable with normalized domains and lock proxy port');
+$('warp-sites-domains').value = 'https://invalid.example';
+$('warp-sites-domains').dispatchEvent(new Event('input'));
+$('warp-sites-form').requestSubmit(); await wait(200);
+check(!$('warp-error').hidden && sites.enabled && sites.domains[0] === 'example.com', 'Invalid website edits keep the active rules and show an error');
+$('warp-sites-toggle').click(); await wait(200);
+check(!sites.enabled && !$('warp-port').disabled && $('warp-sites-domains').value.includes('example.com'), 'Disabling website rules keeps the saved list and releases the port');
+$('warp-sites').open = false;
 $('warp-refresh').click(); await wait(200);
 check($('warp-status-dialog').open && $('warp-status-report').textContent.includes('127.0.0.1:40001'), 'Home status check reports proxy endpoint');
 $('warp-status-dialog').close();
@@ -156,5 +177,6 @@ if(params.get('width')) document.querySelector('body').style.width = `${params.g
 if(params.get('lang')) setLanguage(params.get('lang'));
 if(params.get('theme')) document.querySelector(`input[name="theme-pref"][value="${params.get('theme')}"]`)?.click();
 if(params.get('proxy')) {mode='proxy'; await manualCheck('warp-settings-refresh');}
+if(params.get('sites')) {mode='proxy'; connected=true; await manualCheck('warp-settings-refresh'); $('warp-sites').open=true;}
 if(params.get('settings')) { $('section-home').classList.add('hidden'); $('section-settings').classList.remove('hidden'); }
 
