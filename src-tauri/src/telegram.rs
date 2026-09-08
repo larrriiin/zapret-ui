@@ -399,7 +399,7 @@ pub async fn start_telegram(app: tauri::AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?
 }
 fn start_blocking(app: &tauri::AppHandle) -> Result<(), String> {
-    let path = root(&app)?;
+    let path = root(app)?;
     if !installed(&path) {
         return Err("tg_not_installed".into());
     }
