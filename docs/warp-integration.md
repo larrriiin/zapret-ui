@@ -14,9 +14,12 @@
 - A process-wide mutex prevents concurrent CLI calls across webviews. Work runs on
   blocking workers, with drained stdout/stderr, hidden console windows and a 10-second
   CLI timeout. No generic command execution IPC is exposed.
-- `src/features/warp.js` and `src/components/warp.html`: independent controls and a
+- `src/features/warp.js`, `src/components/warp.html`, and
+  `src/components/sections/warp-settings.html`: independent controls and a
   three-second polling loop. A user operation waits for a pending poll. The backend
   remains the source of truth for installation, connection, mode and proxy endpoint.
+  The WARP card keeps connection controls concise and links to a dedicated settings
+  page for the local proxy, website rules, and application rules.
 - The original home HTML is unchanged. The installed state applies scoped CSS and
   moves the existing status heading into the Zapret card. Existing strategy and
   connection controls retain their nodes and listeners. Removing WARP restores the
@@ -54,15 +57,19 @@ activity reflects the client connection state, not an independent end-to-end pro
 
 ## Selected websites
 
-Expand **Websites through WARP** on the WARP card. Enter one domain per line,
+Open **WARP settings** from the WARP card or sidebar. Enter one domain per line,
 select **Local proxy**, connect WARP, then choose **Enable for websites**.
 The list is saved locally; enabling also saves the edited list. Domains include
 their subdomains. Unicode domains are converted to IDNA; URLs, IPs, ports,
 invalid labels, and lists over 500 entries are rejected by the backend.
 
 `providers/warp/sites.rs` serves an in-memory PAC script on a random loopback
-port with an exact, revision-specific URL. Selected hosts return only the
-verified WARP SOCKS5 endpoint; all other hosts return `DIRECT`. A domain such as
+port with an exact, revision-specific URL. Selected hosts return a SOCKS4
+directive for the verified WARP local endpoint, making the browser resolve the
+selected hostname locally and pass its IPv4 address to WARP. This is required
+because the tested WARP SOCKS5 endpoint accepts numeric destinations but closes
+Chrome's hostname-form SOCKS5 requests. As a result, website rules cover IPv4
+TCP; UDP and IPv6 remain direct. All other hosts return `DIRECT`. A domain such as
 `example.com` never matches `notexample.com` or `example.com.other.test`.
 The service accepts bounded HTTP GET requests, requires a matching Host header,
 and exposes no filesystem or configuration-write endpoint.
@@ -97,6 +104,40 @@ checks loading/saving/enabling/disabling rules, invalid edits, and dirty-input
 preservation. Live WARP/browser routing and actual Windows proxy mutation still
 require a native smoke test; the default tests do not change the system proxy.
 
+## Selected applications
+
+Open **WARP settings**, add one or more executable files, select **Local proxy**,
+connect WARP, then choose **Enable for applications**. Exact canonical executable
+paths are stored in `warp-applications.json`; rules do not resume automatically on
+startup. The selected applications must be restarted after activation so that new
+connections use the rule.
+
+`providers/warp/applications.rs` owns configuration and lifecycle.
+`providers/warp/tcp.rs` uses the bundled WinDivert component to reflect outbound TCP
+flows from the selected processes into private IPv4 and IPv6 relay listeners. Each
+relay opens the original numeric destination through the verified WARP SOCKS5
+endpoint. Process matching uses the Windows TCP owner table and the full executable
+path; the UI process and Cloudflare WARP executables cannot be selected. The relay
+does not inject code, inspect TLS, or rewrite DNS.
+
+Only new TCP connections over IPv4 and IPv6 are covered. If a browser itself is
+selected as an application, its application rule routes all of its eligible TCP
+connections through WARP; the website list cannot make its other TCP connections
+direct. Do not select the browser when using the website list for selective browsing.
+UDP, loopback, private and
+link-local destinations, fragmented packets, DNS resolution, and connections already
+open at activation remain unchanged. Unknown processes pass through unchanged. This
+is selective routing rather than a kill switch: if a new connection cannot be mapped
+to a selected process, it is not redirected. Rules stop on disconnect, mode or port
+change, app exit, driver failure, or a detected external WARP change. Up to 100
+executables, 4,096 remembered flows, and 256 concurrent relays are accepted.
+
+The default tests cover packet parsing, endpoint reflection, collision avoidance,
+local-address bypass, and path normalization. The opt-in administrator smoke test
+copies the Rust test binary to a unique temporary executable, selects only that exact
+path, and routes its test connection through a local mock SOCKS5 server. It neither
+uses the user's WARP tunnel nor changes the Windows proxy configuration.
+
 ## Installer trust boundary
 
 `src-tauri/src/providers/warp/installer.rs` downloads the MSI directly from
@@ -129,12 +170,21 @@ cargo test --manifest-path src-tauri/Cargo.toml installed_client_status -- --ign
 cargo test --manifest-path src-tauri/Cargo.toml installed_client_modes_and_proxy -- --ignored
 ```
 
+Opt-in transparent TCP smoke test (requires administrator privileges and the bundled
+WinDivert files, but does not require WARP to be connected):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-warp-tcp-elevated.ps1
+```
+
 `node scripts/preview-warp.mjs` serves a browser regression harness at
 `http://127.0.0.1:1420/warp-preview.html`. It uses mocked IPC and displays results
 below the home page. Checks include exact original element bounds without WARP
 and after removal, installation detection, independent providers, double clicks,
-mode/port changes, failures, external synchronization, serialization and RU/EN.
-Use `?lang=en&theme=light&proxy=1` for the proxy/light/English presentation.
+mode/port changes, website and application settings, failures, external
+synchronization, serialization and RU/EN. Use
+`?lang=en&theme=light&proxy=1` for the proxy/light/English presentation and
+`?sites=1` to open the WARP settings fixture directly.
 Validate the native default 1100×980 and minimum 900×750 window sizes.
 
 Live connect/disconnect routing and an actual MSI installation need a Windows

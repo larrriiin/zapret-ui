@@ -3384,6 +3384,7 @@ fn graceful_exit(app: &tauri::AppHandle) {
     state.traffic_monitor.stop(&dll_path);
     stop_zapret_on_exit(state);
     telegram::shutdown(app);
+    let _ = providers::warp::applications::shutdown();
     if let Err(error) = providers::warp::sites::shutdown() {
         eprintln!("Failed to restore browser proxy: {}", error.detail);
     }
@@ -3512,6 +3513,14 @@ pub fn run() {
             traffic_monitor: Arc::new(TrafficMonitor::default()),
         })
         .setup(|app| {
+            if let Err(error) =
+                providers::warp::applications::initialize(app.path().app_data_dir()?)
+            {
+                eprintln!(
+                    "Failed to initialize WARP application rules: {}",
+                    error.detail
+                );
+            }
             if let Err(error) = providers::warp::sites::initialize(app.path().app_data_dir()?) {
                 eprintln!("Failed to initialize WARP site rules: {}", error.detail);
             }
@@ -3743,6 +3752,8 @@ pub fn run() {
             hosts::update_hosts,
             providers::warp::get_warp_status,
             providers::warp::set_warp_sites,
+            providers::warp::set_warp_applications,
+            providers::warp::applications::choose_warp_applications,
             providers::warp::connect_warp,
             providers::warp::disconnect_warp,
             providers::warp::get_warp_mode,
@@ -3800,6 +3811,7 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|_, event| {
             if matches!(event, tauri::RunEvent::Exit) {
+                let _ = providers::warp::applications::shutdown();
                 if let Err(error) = providers::warp::sites::shutdown() {
                     eprintln!("Failed to restore browser proxy at exit: {}", error.detail);
                 }

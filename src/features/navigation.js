@@ -3,7 +3,7 @@ import { state } from '../lib/state.js';
 import { showRestartModal } from '../lib/restart.js';
 import { loadUserLists } from './user-lists.js';
 
-const ALL_SECTIONS = ['section-home', 'section-sites', 'section-ips', 'section-diagnostics', 'section-traffic', 'section-settings', 'section-telegram'];
+const ALL_SECTIONS = ['section-home', 'section-sites', 'section-ips', 'section-diagnostics', 'section-traffic', 'section-settings', 'section-telegram', 'section-warp-settings'];
 
 export function showSection(sectionId) {
   if (state.pendingRestart && !state.restartGuardDismissed && sectionId !== state.currentSectionId) {
@@ -71,6 +71,7 @@ function updateNavIndicator(activeEl) {
 }
 
 export function initNavigation() {
+  $('nav-warp-settings')?.addEventListener('click', e => { e.preventDefault(); showSection('warp-settings'); });
   $('nav-telegram')?.addEventListener('click', e => { e.preventDefault(); if (!$('nav-telegram').hidden) showSection('telegram'); });
   document.querySelector('aside nav a:first-child')?.addEventListener('click', (e) => {
     e.preventDefault();

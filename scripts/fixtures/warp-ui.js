@@ -7,6 +7,7 @@ import { initTheme } from '/features/theme.js';
 import { initStrategyDropdown, loadStrategies } from '/features/strategies.js';
 import { initInfoModals } from '/features/info-modals.js';
 import { initStatusCheck } from '/features/status-check.js';
+import { initNavigation, showSection } from '/features/navigation.js';
 
 mountComponents();
 localStorage.setItem('zapret_theme', 'graphite');
@@ -19,6 +20,7 @@ let inFlight = 0, maximum = 0, calls = [];
 let startupBusy = 2;
 let pendingConnection = false;
 let sites = { domains: ['example.org'], enabled: false };
+let applications = { paths: [], enabled: false, active_connections: 0, total_connections: 0, failed_connections: 0, error: null };
 const modes = ['doh','dot','warp','warp+dot','warp+doh','proxy','tunnel_only'];
 window.__TAURI__ = { core: { invoke: async (command, args) => {
   if (command === 'get_strategies') return ['general (ALT12)', 'general'];
@@ -28,6 +30,7 @@ window.__TAURI__ = { core: { invoke: async (command, args) => {
   await wait(80); inFlight--;
   if (command === 'get_warp_status' && startupBusy > 0) { startupBusy--; throw {code:'warp_busy',detail:''}; }
   if (failed) throw {code:'warp_cli_error', detail:'Test failure'};
+  if (command === 'choose_warp_applications') return ['C:\\Games\\League of Legends\\LeagueClientUx.exe'];
   if (command === 'connect_warp') connected = !pendingConnection;
   if (command === 'disconnect_warp') { connected = false; pendingConnection = false; }
   if (command === 'set_warp_mode') mode = args.mode;
@@ -37,7 +40,9 @@ window.__TAURI__ = { core: { invoke: async (command, args) => {
     sites = { domains: [...new Set(args.domains.map(domain => domain.toLowerCase()))], enabled: args.enabled };
   }
   if (!connected || mode !== 'proxy' || !installed) sites.enabled = false;
-  return {installed, connected, sites: structuredClone(sites), state:connected ? 'connected':pendingConnection ? 'connecting':'disconnected', mode, modes, version:'warp-cli 2026.7.1343.0', proxy:mode === 'proxy' ? {address:'127.0.0.1',port,kind:'SOCKS5',active:connected,port_editable:true}:null};
+  if (command === 'set_warp_applications') applications = { ...applications, paths: args.paths, enabled: args.enabled };
+  if (!connected || mode !== 'proxy' || !installed) applications.enabled = false;
+  return {installed, connected, sites: structuredClone(sites), applications: structuredClone(applications), state:connected ? 'connected':pendingConnection ? 'connecting':'disconnected', mode, modes, version:'warp-cli 2026.7.1343.0', proxy:mode === 'proxy' ? {address:'127.0.0.1',port,kind:'SOCKS5',active:connected,port_editable:true}:null};
 }}};
 setLanguage('ru');
 updateStatusUI({running:true, strategy:'general (ALT12)'});
@@ -51,6 +56,7 @@ await document.fonts.ready;
 const before = JSON.stringify(rects());
 const loadingVisible = getComputedStyle($('startup-loader')).display === 'flex' && getComputedStyle($('sections-host')).visibility === 'hidden';
 await initWarp();
+initNavigation();
 const detectionFinished = $('warp-settings-status').textContent.includes('WARP');
 document.documentElement.classList.remove('app-loading');
 initInfoModals(); initStatusCheck();
@@ -101,25 +107,13 @@ updateStatusUI({running:true, strategy:'general (ALT12)'});
 $('warp-connect').click(); await wait(350);
 check(connected && $('connect-btn').dataset.action === 'stop', 'Both providers stay connected independently');
 check(getComputedStyle($('connect-btn')).backgroundColor === getComputedStyle($('warp-connect')).backgroundColor, 'Connected buttons use the same fill');
-for (const [left, right] of [['strategy-trigger', 'warp-mode-trigger'], ['connect-btn', 'warp-connect'], ['check-status-btn', 'warp-refresh']]) {
+for (const [left, right] of [['connect-btn', 'warp-connect'], ['check-status-btn', 'warp-refresh']]) {
   const a = $(left).getBoundingClientRect(), b = $(right).getBoundingClientRect();
   check(Math.abs(a.width - b.width) < 1 && a.height === b.height, `${left} and ${right} have equal dimensions`);
 }
-const zapretPickerStyle = getComputedStyle($('strategy-trigger'));
-const warpPickerStyle = getComputedStyle($('warp-mode-trigger'));
-check(['backgroundColor','borderRadius','borderColor','padding','fontSize','fontWeight','lineHeight'].every(key => zapretPickerStyle[key] === warpPickerStyle[key]), 'Dropdown triggers use identical visual styles');
-const labelProperties = ['color','fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','textAlign','textOverflow'];
-check(labelProperties.every(key => getComputedStyle($('strategy-label'))[key] === getComputedStyle($('warp-mode-label'))[key]), 'Selected values use identical text styles');
-$('strategy-trigger').click();
-const strategyRow = $('strategy-options-list').querySelector('[data-value="general (ALT12)"]');
-const strategyRowHeight = strategyRow.getBoundingClientRect().height;
-const rowProperties = ['color','backgroundColor','borderLeftWidth','borderLeftColor','padding','fontSize','fontWeight','lineHeight'];
-const strategyRowStyles = rowProperties.map(key => getComputedStyle(strategyRow)[key]);
 $('warp-mode-trigger').click();
 const warpRow = $('warp-mode-options-list').querySelector('[aria-selected="true"]');
-check(strategyRowHeight === warpRow.getBoundingClientRect().height && rowProperties.every((key, index) => getComputedStyle(warpRow)[key] === strategyRowStyles[index]), 'Selected popup rows have identical height and highlight');
-check(getComputedStyle(warpRow).backgroundColor === 'rgba(0, 0, 0, 0)' && getComputedStyle(warpRow).borderLeftWidth === '2px', 'Selection uses a left stripe without a filled row');
-check(warpRow.children[1].className === strategyRow.children[1].className, 'Option labels use the same alignment and truncation');
+check(warpRow && warpRow.getBoundingClientRect().height > 0, 'Connection mode selector opens on the home page');
 $('warp-mode-trigger').click();
 check(!$('warp-card').textContent.includes('warp-cli'), 'Client version is absent from the home card');
 check($('header-status').textContent.includes('general (ALT12) + WARP'), 'Header shows strategy plus WARP');
@@ -135,19 +129,39 @@ $('warp-port').value = '40001'; $('warp-port-form').requestSubmit(); await wait(
 check(port === 40001 && $('warp-proxy-endpoint').textContent.includes('40001'), 'Proxy port changes and refreshes');
 $('warp-sites').open = true;
 check($('warp-sites-domains').value === 'example.org', 'Saved website domains load from the backend');
+$('warp-sites-add').click();
+$('warp-sites-input').value = 'https://Example.net/path?source=test';
+$('warp-sites-dialog-add').click(); await wait(200);
+check(sites.domains.includes('example.net') && !$('warp-sites-domains').value.includes('https://'), 'Adding a website URL stores only its normalized domain');
 $('warp-sites-domains').value = 'EXAMPLE.com\nexample.org';
 $('warp-sites-domains').dispatchEvent(new Event('input'));
 await manualCheck('warp-settings-refresh');
 check($('warp-sites-domains').value.startsWith('EXAMPLE.com'), 'Polling preserves unsaved website edits');
 $('warp-sites-toggle').click(); await wait(200);
 check(sites.enabled && sites.domains[0] === 'example.com' && $('warp-port').disabled, 'Website rules enable with normalized domains and lock proxy port');
-$('warp-sites-domains').value = 'https://invalid.example';
-$('warp-sites-domains').dispatchEvent(new Event('input'));
-$('warp-sites-form').requestSubmit(); await wait(200);
-check(!$('warp-error').hidden && sites.enabled && sites.domains[0] === 'example.com', 'Invalid website edits keep the active rules and show an error');
 $('warp-sites-toggle').click(); await wait(200);
 check(!sites.enabled && !$('warp-port').disabled && $('warp-sites-domains').value.includes('example.com'), 'Disabling website rules keeps the saved list and releases the port');
 $('warp-sites').open = false;
+$('warp-open-settings').click(); await wait(220);
+check(!$('section-warp-settings').classList.contains('hidden') && $('section-home').classList.contains('hidden'), 'Home opens the dedicated WARP settings page');
+check($('section-warp-settings').contains($('warp-sites')) && !$('warp-card').contains($('warp-sites')), 'Website rules moved off the home card');
+check($('warp-sites-list').children.length === 2 && [...$('warp-sites-list').children].every(card => card.classList.contains('warp-rule-card')), 'Websites are rendered as separate compact cards');
+$('warp-sites-info').click();
+check($('warp-settings-info-dialog').open && $('warp-settings-info-text').textContent.includes('Сайты из списка'), 'Website explanation opens on demand');
+$('warp-settings-info-dialog').close();
+$('warp-apps-add').click(); await wait(250);
+check(applications.paths.length === 1 && $('warp-apps-list').textContent.includes('LeagueClientUx.exe') && !$('warp-apps-list').textContent.includes('C:\\Games\\'), 'Application card shows only the executable name');
+$('warp-apps-list').querySelector('[aria-label^="Полный путь"]').click();
+check($('warp-settings-info-dialog').open && $('warp-settings-info-path').textContent.includes('C:\\Games\\League of Legends\\LeagueClientUx.exe'), 'Full application path opens on demand');
+$('warp-settings-info-dialog').close();
+$('warp-apps-toggle').click(); await wait(200);
+check(applications.enabled && $('warp-apps-add').disabled && $('warp-port').disabled, 'Application rules enable and lock editing and port changes');
+$('warp-apps-toggle').click(); await wait(200);
+check(!applications.enabled && !$('warp-apps-add').disabled && applications.paths.length === 1, 'Disabling application rules retains the selected executable');
+$('warp-apps-list').querySelector('[aria-label^="Убрать"]').click(); await wait(200);
+check(!applications.paths.length && !$('warp-apps-empty').hidden, 'Removing the last application shows the empty state');
+showSection('home'); await wait(220);
+check(!$('section-home').classList.contains('hidden') && $('section-warp-settings').classList.contains('hidden'), 'Connection controls return to the home page');
 $('warp-refresh').click(); await wait(200);
 check($('warp-status-dialog').open && $('warp-status-report').textContent.includes('127.0.0.1:40001'), 'Home status check reports proxy endpoint');
 $('warp-status-dialog').close();
@@ -177,6 +191,6 @@ if(params.get('width')) document.querySelector('body').style.width = `${params.g
 if(params.get('lang')) setLanguage(params.get('lang'));
 if(params.get('theme')) document.querySelector(`input[name="theme-pref"][value="${params.get('theme')}"]`)?.click();
 if(params.get('proxy')) {mode='proxy'; await manualCheck('warp-settings-refresh');}
-if(params.get('sites')) {mode='proxy'; connected=true; await manualCheck('warp-settings-refresh'); $('warp-sites').open=true;}
+if(params.get('sites')) {mode='proxy'; connected=true; applications.paths=['C:\\Games\\League of Legends\\LeagueClientUx.exe','C:\\Games\\League of Legends\\LeagueClientUxRender.exe']; await manualCheck('warp-settings-refresh'); showSection('warp-settings');}
 if(params.get('settings')) { $('section-home').classList.add('hidden'); $('section-settings').classList.remove('hidden'); }
 

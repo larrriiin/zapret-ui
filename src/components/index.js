@@ -9,6 +9,7 @@ import sectionIps from './sections/ips.html?raw';
 import sectionDiagnostics from './sections/diagnostics.html?raw';
 import sectionTraffic from './sections/traffic.html?raw';
 import sectionTelegram from './sections/telegram.html?raw';
+import sectionWarpSettings from './sections/warp-settings.html?raw';
 import sectionSettings from './sections/settings.html?raw';
 
 import modalCloseConfirm from './modals/close-confirm.html?raw';
@@ -45,6 +46,7 @@ export function mountComponents() {
   mount('sections-host', sectionTraffic);
   mount('sections-host', sectionSettings);
   mount('sections-host', sectionTelegram);
+  mount('sections-host', sectionWarpSettings);
 
   // Modals and the restart banner are top-level, mounted into <body>.
   mount('modals-host', modalCloseConfirm);

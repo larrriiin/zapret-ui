@@ -22,7 +22,7 @@ fn error(detail: impl ToString) -> WarpError {
     WarpError::new("warp_sites_error", detail)
 }
 
-fn persist_json(path: &std::path::Path, value: &impl Serialize) -> Result<()> {
+pub(super) fn persist_json(path: &std::path::Path, value: &impl Serialize) -> Result<()> {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(error)?
@@ -143,7 +143,11 @@ pub(super) fn pac_script(domains: &[String], port: u16) -> String {
   for (var i = 0; i < domains.length; i++) {{
     var d = domains[i];
     if (host === d || host.slice(-(d.length + 1)) === "." + d)
-      return "SOCKS5 127.0.0.1:{port}";
+      // Chromium sends SOCKS5 target hostnames to the proxy for resolution.
+      // The current WARP local proxy closes those requests, but accepts the
+      // numeric SOCKS4 form. SOCKS4 also makes Chromium resolve the selected
+      // hostname locally before opening the proxied TCP connection.
+      return "SOCKS4 127.0.0.1:{port}";
   }}
   return "DIRECT";
 }}
@@ -512,7 +516,7 @@ mod tests {
         let checks = r#"
 const assert = require('node:assert/strict');
 for (const host of ['example.com','www.example.com','a.b.example.com','EXAMPLE.COM.','xn--e1afmkfd.xn--p1ai'])
-  assert.equal(FindProxyForURL('https://' + host + '/', host), 'SOCKS5 127.0.0.1:41234', host);
+  assert.equal(FindProxyForURL('https://' + host + '/', host), 'SOCKS4 127.0.0.1:41234', host);
 for (const host of ['other.com','notexample.com','example.com.attacker.test','localhost','127.0.0.1','com'])
   assert.equal(FindProxyForURL('https://' + host + '/', host), 'DIRECT', host);
 "#;
