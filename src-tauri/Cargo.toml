@@ -1,6 +1,6 @@
 [package]
 name = "zapret-ui"
-version = "26.9.13"
+version = "26.9.14"
 description = "A Windows desktop interface for installing, configuring, and running Zapret"
 authors = ["larrriiin"]
 edition = "2021"
