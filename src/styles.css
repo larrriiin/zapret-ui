@@ -655,6 +655,30 @@ input[type="radio"]:checked::before {
   line-height: 1.5;
 }
 
+/* The three ZAPRET configuration screens share one page and switch as tabs. */
+.zapret-settings-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.zapret-settings-tab {
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-outline-variant) 30%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-surface-container-high) 55%, transparent);
+  color: var(--color-on-surface-variant);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+.zapret-settings-tab:hover, .zapret-settings-tab[aria-selected="true"] {
+  border-color: color-mix(in srgb, var(--color-primary) 60%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 16%, var(--color-surface-container-high));
+  color: var(--color-primary);
+}
+.zapret-settings-tab:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+.zapret-settings-pane-content { padding: 0 !important; }
+
 /* Optional modules inherit the provider controls and setup typography. */
 #nav-telegram[hidden], .module-actions [hidden], #setup-warp-choice[hidden], .module-progress[hidden] { display: none; }
 .module-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }

@@ -298,6 +298,8 @@ export default {
     "nav_sites": "Списки сайтов",
     "nav_ips": "Настройки IP",
     "nav_diagnostics": "Диагностика",
+    "nav_zapret_settings": "Настройки ZAPRET",
+    "zapret_settings_title": "Настройки ZAPRET",
     "nav_traffic": "Монитор трафика",
     "traffic_title": "Монитор трафика",
     "traffic_experimental": "Экспериментально",

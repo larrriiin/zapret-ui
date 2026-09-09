@@ -298,6 +298,8 @@ export default {
     "nav_sites": "Site Lists",
     "nav_ips": "IP Settings",
     "nav_diagnostics": "Diagnostics",
+    "nav_zapret_settings": "ZAPRET settings",
+    "zapret_settings_title": "ZAPRET settings",
     "nav_traffic": "Traffic Monitor",
     "traffic_title": "Traffic monitor",
     "traffic_experimental": "Experimental",

@@ -320,7 +320,9 @@ export function initWarp() {
   $('warp-sites-dialog-close').addEventListener('click', () => sitesDialog.close());
   sitesDialog.addEventListener('click', event => { if (event.target === sitesDialog) sitesDialog.close(); });
   $('warp-copy-proxy').addEventListener('click', async () => {
-    const address = $('warp-proxy-endpoint').textContent;
+    const proxy = snapshot?.proxy;
+    const address = proxy?.address && proxy?.port ? `${proxy.address}:${proxy.port}` : proxy?.address;
+    if (!address) return;
     try { await navigator.clipboard.writeText(address); }
     catch { /* Clipboard access is unavailable in some embedded webviews. */ }
   });

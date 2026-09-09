@@ -4,6 +4,7 @@
 // rest of `main.js` initialises the app.
 
 import sectionHome from './sections/home.html?raw';
+import sectionZapretSettings from './sections/zapret-settings.html?raw';
 import sectionSites from './sections/sites.html?raw';
 import sectionIps from './sections/ips.html?raw';
 import sectionDiagnostics from './sections/diagnostics.html?raw';
@@ -40,6 +41,7 @@ function mount(hostId, html) {
 export function mountComponents() {
   // Sections go inside <main> so sidebar/header layout stays intact.
   mount('sections-host', sectionHome);
+  mount('sections-host', sectionZapretSettings);
   mount('sections-host', sectionSites);
   mount('sections-host', sectionIps);
   mount('sections-host', sectionDiagnostics);
