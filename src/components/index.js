@@ -4,11 +4,13 @@
 // rest of `main.js` initialises the app.
 
 import sectionHome from './sections/home.html?raw';
+import sectionZapretSettings from './sections/zapret-settings.html?raw';
 import sectionSites from './sections/sites.html?raw';
 import sectionIps from './sections/ips.html?raw';
 import sectionDiagnostics from './sections/diagnostics.html?raw';
 import sectionTraffic from './sections/traffic.html?raw';
 import sectionTelegram from './sections/telegram.html?raw';
+import sectionWarpSettings from './sections/warp-settings.html?raw';
 import sectionSettings from './sections/settings.html?raw';
 
 import modalCloseConfirm from './modals/close-confirm.html?raw';
@@ -39,12 +41,14 @@ function mount(hostId, html) {
 export function mountComponents() {
   // Sections go inside <main> so sidebar/header layout stays intact.
   mount('sections-host', sectionHome);
+  mount('sections-host', sectionZapretSettings);
   mount('sections-host', sectionSites);
   mount('sections-host', sectionIps);
   mount('sections-host', sectionDiagnostics);
   mount('sections-host', sectionTraffic);
   mount('sections-host', sectionSettings);
   mount('sections-host', sectionTelegram);
+  mount('sections-host', sectionWarpSettings);
 
   // Modals and the restart banner are top-level, mounted into <body>.
   mount('modals-host', modalCloseConfirm);

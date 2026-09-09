@@ -13,7 +13,6 @@ export function updateStatusUI(status) {
 
   const trigger = $('strategy-trigger');
   const tempBtn = $('connect-temp-btn');
-
   if (status.running) {
 
     const lamp = $('status-lamp-divider');

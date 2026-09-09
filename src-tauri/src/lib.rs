@@ -3384,6 +3384,10 @@ fn graceful_exit(app: &tauri::AppHandle) {
     state.traffic_monitor.stop(&dll_path);
     stop_zapret_on_exit(state);
     telegram::shutdown(app);
+    let _ = providers::warp::applications::shutdown();
+    if let Err(error) = providers::warp::sites::shutdown() {
+        eprintln!("Failed to restore browser proxy: {}", error.detail);
+    }
     if let Some(window) = app.get_webview_window("main") {
         if let Err(error) = window.destroy() {
             eprintln!("Failed to destroy main WebView window during shutdown: {error}");
@@ -3509,6 +3513,17 @@ pub fn run() {
             traffic_monitor: Arc::new(TrafficMonitor::default()),
         })
         .setup(|app| {
+            if let Err(error) =
+                providers::warp::applications::initialize(app.path().app_data_dir()?)
+            {
+                eprintln!(
+                    "Failed to initialize WARP application rules: {}",
+                    error.detail
+                );
+            }
+            if let Err(error) = providers::warp::sites::initialize(app.path().app_data_dir()?) {
+                eprintln!("Failed to initialize WARP site rules: {}", error.detail);
+            }
             let is_autostart = std::env::args().any(|a| a == "--autostart");
             // Hide main window on --autostart so the app boots straight into tray
             if is_autostart {
@@ -3736,6 +3751,9 @@ pub fn run() {
             telegram::telegram_logs,
             hosts::update_hosts,
             providers::warp::get_warp_status,
+            providers::warp::set_warp_sites,
+            providers::warp::set_warp_applications,
+            providers::warp::applications::choose_warp_applications,
             providers::warp::connect_warp,
             providers::warp::disconnect_warp,
             providers::warp::get_warp_mode,
@@ -3789,6 +3807,14 @@ pub fn run() {
             exit_app,
             check_site,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                let _ = providers::warp::applications::shutdown();
+                if let Err(error) = providers::warp::sites::shutdown() {
+                    eprintln!("Failed to restore browser proxy at exit: {}", error.detail);
+                }
+            }
+        });
 }

@@ -1,6 +1,6 @@
 [package]
 name = "zapret-ui"
-version = "26.9.13"
+version = "26.9.14"
 description = "A Windows desktop interface for installing, configuring, and running Zapret"
 authors = ["larrriiin"]
 edition = "2021"
@@ -37,13 +37,15 @@ base64 = "0.23"
 minisign-verify = "0.2.5"
 zip = { version = "8", default-features = false, features = ["deflate", "deflate-flate2", "bzip2"] }
 rfd = "0.17"
-tokio = { version = "1", features = ["net", "time"] }
+tokio = { version = "1", features = ["net", "time", "io-util", "rt-multi-thread", "sync"] }
+socket2 = "0.6"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_NetworkManagement_IpHelper",
     "Win32_Networking_WinSock",
+    "Win32_Networking_WinInet",
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",
 ] }

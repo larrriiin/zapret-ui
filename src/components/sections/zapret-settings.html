@@ -1,0 +1,15 @@
+<!-- ZAPRET settings section: hosts the existing site, IP, and diagnostics screens as tabs. -->
+<section id="section-zapret-settings"
+    class="hidden fixed top-[30px] right-0 bottom-0 left-0 ml-20 pt-20 overflow-y-auto bg-surface z-10">
+    <div class="p-8 pb-24 max-w-[1400px] mx-auto">
+        <header class="mb-6">
+            <h2 class="font-headline text-2xl font-bold text-primary" data-i18n="zapret_settings_title">ZAPRET settings</h2>
+            <nav class="zapret-settings-tabs" aria-label="ZAPRET settings">
+                <button type="button" class="zapret-settings-tab" data-zapret-pane="ips" aria-selected="true" data-i18n="nav_ips">IP Settings</button>
+                <button type="button" class="zapret-settings-tab" data-zapret-pane="sites" aria-selected="false" data-i18n="nav_sites">Site Lists</button>
+                <button type="button" class="zapret-settings-tab" data-zapret-pane="diagnostics" aria-selected="false" data-i18n="nav_diagnostics">Diagnostics</button>
+            </nav>
+        </header>
+        <div id="zapret-settings-content"></div>
+    </div>
+</section>

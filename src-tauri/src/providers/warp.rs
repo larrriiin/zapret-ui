@@ -9,7 +9,9 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+pub mod applications;
 pub mod installer;
+pub mod sites;
 
 const MODES: &[&str] = &[
     "doh",
@@ -55,6 +57,8 @@ pub struct WarpStatus {
     version: Option<String>,
     modes: Vec<String>,
     proxy: Option<ProxyStatus>,
+    sites: sites::SiteStatus,
+    applications: applications::ApplicationStatus,
     pub(crate) error: Option<WarpError>,
 }
 #[derive(Debug, Serialize)]
@@ -286,17 +290,36 @@ enum Action {
     Disconnect,
     Mode(String),
     Port(u16),
+    Sites(Vec<String>, bool),
+    Applications(Vec<String>, bool),
 }
 async fn execute(action: Action) -> Result<WarpStatus> {
     tauri::async_runtime::spawn_blocking(move || {
         let mut guard = CLIENT
             .try_lock()
             .map_err(|_| WarpError::new("warp_busy", ""))?;
+        // Saving or disabling site rules must work even after WARP is removed
+        // or its CLI/signature becomes unavailable.
+        let action = match action {
+            Action::Applications(paths, false) => {
+                applications::configure(paths, false, None)?;
+                Action::Status
+            }
+            Action::Sites(domains, false) => {
+                sites::configure(domains, false, None)?;
+                Action::Status
+            }
+            other => other,
+        };
         let Some(path) = discover() else {
             *guard = None;
+            applications::disable()?;
+            sites::disable()?;
             return match action {
                 Action::Status => Ok(WarpStatus {
                     state: "disconnected".into(),
+                    sites: sites::status()?,
+                    applications: applications::status()?,
                     ..Default::default()
                 }),
                 _ => Err(WarpError::new("warp_not_installed", "")),
@@ -311,10 +334,14 @@ async fn execute(action: Action) -> Result<WarpStatus> {
                 Ok(client) => *guard = Some(client),
                 Err(error) => {
                     *guard = None;
+                    applications::disable()?;
+                    sites::disable()?;
                     return Ok(WarpStatus {
                         installed: true,
                         state: "error".into(),
                         error: Some(error),
+                        sites: sites::status()?,
+                        applications: applications::status()?,
                         ..Default::default()
                     });
                 }
@@ -327,22 +354,66 @@ async fn execute(action: Action) -> Result<WarpStatus> {
                 cli(&client.path, &["connect"])?;
             }
             Action::Disconnect => {
+                applications::disable()?;
+                sites::disable()?;
                 cli(&client.path, &["disconnect"])?;
             }
             Action::Mode(mode) => {
                 if !client.modes.contains(&mode) {
                     return Err(WarpError::new("warp_unsupported", ""));
                 }
+                sites::disable()?;
+                applications::disable()?;
                 cli(&client.path, &["mode", &mode])?;
             }
             Action::Port(port) => {
+                if sites::status()?.enabled || applications::status()?.enabled {
+                    return Err(WarpError::new("warp_sites_disable_first", ""));
+                }
                 if port == 0 || !client.port_editable {
                     return Err(WarpError::new("warp_invalid_port", ""));
                 }
                 cli(&client.path, &["proxy", "port", &port.to_string()])?;
             }
+            Action::Sites(domains, enabled) => {
+                let status = client.status();
+                let port = status
+                    .proxy
+                    .filter(|p| {
+                        p.active && p.kind.as_deref() == Some("SOCKS5") && status.error.is_none()
+                    })
+                    .and_then(|p| p.port);
+                sites::configure(domains, enabled, port)?;
+            }
+            Action::Applications(paths, enabled) => {
+                let status = client.status();
+                let port = status
+                    .proxy
+                    .filter(|p| {
+                        p.active && p.kind.as_deref() == Some("SOCKS5") && status.error.is_none()
+                    })
+                    .and_then(|p| p.port);
+                applications::configure(paths, enabled, port)?;
+            }
         }
-        Ok(client.status())
+        let mut status = client.status();
+        // External client changes also release the system proxy. Keep the list.
+        if status.error.is_none()
+            && (status.mode.as_deref() != Some("proxy") || status.state == "disconnected")
+        {
+            sites::disable()?;
+            applications::disable()?;
+        }
+        if status.error.is_none() {
+            sites::reconcile_port(status.proxy.as_ref().and_then(|proxy| proxy.port))?;
+            applications::reconcile_port(status.proxy.as_ref().and_then(|proxy| proxy.port))?;
+        }
+        match sites::status() {
+            Ok(sites) => status.sites = sites,
+            Err(error) => status.error = Some(error),
+        }
+        status.applications = applications::status()?;
+        Ok(status)
     })
     .await
     .map_err(|e| WarpError::new("warp_process", e))?
@@ -371,6 +442,16 @@ pub async fn set_warp_mode(mode: String) -> Result<WarpStatus> {
 #[tauri::command]
 pub async fn set_warp_proxy_port(port: u16) -> Result<WarpStatus> {
     execute(Action::Port(port)).await
+}
+
+#[tauri::command]
+pub async fn set_warp_sites(domains: Vec<String>, enabled: bool) -> Result<WarpStatus> {
+    execute(Action::Sites(domains, enabled)).await
+}
+
+#[tauri::command]
+pub async fn set_warp_applications(paths: Vec<String>, enabled: bool) -> Result<WarpStatus> {
+    execute(Action::Applications(paths, enabled)).await
 }
 
 #[cfg(test)]

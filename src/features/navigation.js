@@ -3,15 +3,25 @@ import { state } from '../lib/state.js';
 import { showRestartModal } from '../lib/restart.js';
 import { loadUserLists } from './user-lists.js';
 
-const ALL_SECTIONS = ['section-home', 'section-sites', 'section-ips', 'section-diagnostics', 'section-traffic', 'section-settings', 'section-telegram'];
+const ALL_SECTIONS = ['section-home', 'section-zapret-settings', 'section-traffic', 'section-settings', 'section-telegram', 'section-warp-settings'];
+const ZAPRET_PANES = ['sites', 'ips', 'diagnostics'];
+
+function normalizeSectionId(sectionId) {
+  return ZAPRET_PANES.includes(sectionId) ? 'zapret-settings' : sectionId;
+}
 
 export function showSection(sectionId) {
+  const requestedPane = ZAPRET_PANES.includes(sectionId) ? sectionId : null;
+  sectionId = normalizeSectionId(sectionId);
   if (state.pendingRestart && !state.restartGuardDismissed && sectionId !== state.currentSectionId) {
     state.pendingNavId = sectionId;
     showRestartModal();
     return;
   }
-  if (sectionId === state.currentSectionId) return;
+  if (sectionId === state.currentSectionId) {
+    if (requestedPane) showZapretSettingsPane(requestedPane);
+    return;
+  }
 
   // Update nav immediately (feels responsive)
   document.querySelectorAll('aside a').forEach((a) => {
@@ -32,6 +42,11 @@ export function showSection(sectionId) {
   const prevSection = prevId ? $(`section-${prevId}`) : null;
   const nextSection = $(`section-${sectionId}`);
 
+  if (sectionId === 'zapret-settings') {
+    showZapretSettingsPane(requestedPane || 'ips');
+    loadUserLists();
+  }
+
   if (prevSection && !prevSection.classList.contains('hidden')) {
     // Fade out current, then swap
     prevSection.classList.add('section-exit');
@@ -45,6 +60,31 @@ export function showSection(sectionId) {
     ALL_SECTIONS.forEach((id) => $(id)?.classList.add('hidden'));
     if (nextSection) showWithAnim(nextSection);
   }
+}
+
+export function showZapretSettingsPane(pane) {
+  if (!ZAPRET_PANES.includes(pane)) return;
+  ZAPRET_PANES.forEach((name) => {
+    const paneElement = $(`zapret-settings-${name}`);
+    paneElement?.classList.toggle('hidden', name !== pane);
+    const tab = document.querySelector(`[data-zapret-pane="${name}"]`);
+    if (tab) tab.setAttribute('aria-selected', String(name === pane));
+  });
+}
+
+function nestZapretSettingsPanes() {
+  const content = $('zapret-settings-content');
+  if (!content || content.children.length) return;
+
+  ZAPRET_PANES.forEach((pane) => {
+    const section = $(`section-${pane}`);
+    if (!section) return;
+    section.id = `zapret-settings-${pane}`;
+    section.className = 'zapret-settings-pane';
+    section.firstElementChild?.classList.add('zapret-settings-pane-content');
+    content.append(section);
+  });
+  showZapretSettingsPane('ips');
 }
 
 /** Show a section with the enter animation, then remove the class so
@@ -71,24 +111,19 @@ function updateNavIndicator(activeEl) {
 }
 
 export function initNavigation() {
+  nestZapretSettingsPanes();
+  $('nav-warp-settings')?.addEventListener('click', e => { e.preventDefault(); showSection('warp-settings'); });
   $('nav-telegram')?.addEventListener('click', e => { e.preventDefault(); if (!$('nav-telegram').hidden) showSection('telegram'); });
   document.querySelector('aside nav a:first-child')?.addEventListener('click', (e) => {
     e.preventDefault();
     showSection('home');
   });
-  $('nav-sites')?.addEventListener('click', (e) => {
+  $('nav-zapret-settings')?.addEventListener('click', (e) => {
     e.preventDefault();
-    showSection('sites');
-    loadUserLists();
+    showSection('zapret-settings');
   });
-  $('nav-ips')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    showSection('ips');
-    loadUserLists();
-  });
-  $('nav-diagnostics')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    showSection('diagnostics');
+  document.querySelectorAll('[data-zapret-pane]').forEach((tab) => {
+    tab.addEventListener('click', () => showZapretSettingsPane(tab.dataset.zapretPane));
   });
   $('nav-traffic')?.addEventListener('click', (e) => {
     e.preventDefault();
