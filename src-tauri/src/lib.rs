@@ -1397,7 +1397,7 @@ fn set_active_fake(fake_type: String, fake_name: String) -> Result<(), String> {
 /// Запускает стратегию по имени из runtime-каталога.
 #[tauri::command]
 fn start_zapret(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     strategy: String,
     mode: String,
     state: State<'_, AppState>,
