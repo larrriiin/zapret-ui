@@ -106,6 +106,18 @@ const screens = [
     },
   },
   {
+    name: 'warp',
+    title: 'Настройки Cloudflare WARP (WARP Settings)',
+    action: async () => {
+      await page.evaluate(async () => {
+        const { showSection } = await import('/features/navigation.js');
+        showSection('warp-settings');
+      });
+      await page.waitForSelector('#section-warp-settings:not(.hidden)');
+      await page.waitForTimeout(250);
+    },
+  },
+  {
     name: 'sites',
     title: 'Списки сайтов (Site Lists)',
     action: async () => {
@@ -113,9 +125,10 @@ const screens = [
         const { showSection } = await import('/features/navigation.js');
         const { loadUserLists } = await import('/features/user-lists.js');
         showSection('sites');
+        document.getElementById('section-zapret-settings')?.scrollTo(0, 0);
         await loadUserLists();
       });
-      await page.waitForSelector('#section-sites:not(.hidden)');
+      await page.waitForSelector('#zapret-settings-sites:not(.hidden)');
       await page.waitForTimeout(250);
     },
   },
@@ -127,9 +140,10 @@ const screens = [
         const { showSection } = await import('/features/navigation.js');
         const { loadUserLists } = await import('/features/user-lists.js');
         showSection('ips');
+        document.getElementById('section-zapret-settings')?.scrollTo(0, 0);
         await loadUserLists();
       });
-      await page.waitForSelector('#section-ips:not(.hidden)');
+      await page.waitForSelector('#zapret-settings-ips:not(.hidden)');
       await page.waitForTimeout(250);
     },
   },
@@ -140,8 +154,9 @@ const screens = [
       await page.evaluate(async () => {
         const { showSection } = await import('/features/navigation.js');
         showSection('diagnostics');
+        document.getElementById('section-zapret-settings')?.scrollTo(0, 0);
       });
-      await page.waitForSelector('#section-diagnostics:not(.hidden)');
+      await page.waitForSelector('#zapret-settings-diagnostics:not(.hidden)');
       await page.waitForTimeout(250);
     },
   },
