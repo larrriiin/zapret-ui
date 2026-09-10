@@ -41,6 +41,7 @@
                 <form id="telegram-port-form" class="telegram-config-form">
                   <fieldset id="telegram-config-fields" class="space-y-4" disabled>
                     <p class="warp-hint" data-i18n="tg_settings_stop_hint"></p>
+                    <label class="telegram-checkbox"><input id="telegram-start-with-zapret" type="checkbox"><span data-i18n="tg_start_with_zapret">Start when ZAPRET starts</span></label>
                     <label for="telegram-host" data-i18n="tg_host"></label>
                     <input id="telegram-host" type="text" required placeholder="127.0.0.1" spellcheck="false">
                     <p class="warp-hint" data-i18n="tg_host_hint"></p>
@@ -64,7 +65,7 @@
                   </fieldset>
                 </form>
                 <p class="warp-hint mt-2" data-i18n="tg_runtime_hint"></p>
-                <p id="telegram-message" class="warp-error" role="status"></p>
+                <p id="telegram-message" class="telegram-message" role="status"></p>
             </div>
 
             <div class="border-t border-outline-variant/10 pt-4">

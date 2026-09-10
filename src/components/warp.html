@@ -14,6 +14,18 @@
     <select id="warp-mode" hidden tabindex="-1" aria-hidden="true"></select>
     <div id="warp-mode-options" class="fixed z-[999] rounded-2xl border border-primary/20 overflow-hidden shadow-2xl" style="background: var(--color-popup);" hidden><div class="px-3 py-2 border-b border-outline-variant/10 flex items-center gap-2"><span class="material-symbols-outlined text-primary/60 text-base" aria-hidden="true">search</span><input id="warp-mode-search" type="text" autocomplete="off" spellcheck="false" class="flex-1 min-w-0 bg-transparent text-sm text-on-surface placeholder-on-surface-variant/50 outline-none border-none ring-0 focus:outline-none focus:ring-0" data-i18n="warp_search_modes" data-i18n-attr="placeholder"></div><div id="warp-mode-options-list" class="max-h-64 overflow-y-auto py-1" role="listbox" aria-labelledby="warp-mode-title"></div></div>
   </div>
+  <div id="warp-home-rules" class="warp-home-rules" hidden>
+    <div class="warp-home-rule">
+      <span class="material-symbols-outlined" aria-hidden="true">language</span>
+      <span class="warp-home-rule-copy"><strong data-i18n="warp_home_sites">Sites</strong></span>
+      <button id="warp-home-sites-toggle" type="button" class="warp-rule-toggle" aria-pressed="false" data-i18n="warp_home_sites" data-i18n-attr="aria-label"></button>
+    </div>
+    <div class="warp-home-rule">
+      <span class="material-symbols-outlined" aria-hidden="true">apps</span>
+      <span class="warp-home-rule-copy"><strong data-i18n="warp_home_apps">Applications</strong></span>
+      <button id="warp-home-apps-toggle" type="button" class="warp-rule-toggle" aria-pressed="false" data-i18n="warp_home_apps" data-i18n-attr="aria-label"></button>
+    </div>
+  </div>
   <button id="warp-connect" type="button" class="provider-button provider-connect connect-glow">
     <span id="warp-connect-label"></span><span class="material-symbols-outlined" aria-hidden="true">power_settings_new</span>
   </button>

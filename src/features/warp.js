@@ -51,6 +51,14 @@ function normalizeSiteDomains(value) {
   return [...new Set(value.split(/\r?\n/).map(normalizeSiteDomain).filter(Boolean))];
 }
 
+function renderRuleToggle(id, enabled, disabled) {
+  const toggle = $(id);
+  if (!toggle) return;
+  toggle.disabled = disabled;
+  toggle.dataset.enabled = String(enabled);
+  toggle.setAttribute('aria-pressed', String(enabled));
+}
+
 function openWarpInfo(kind, path = '') {
   const dialog = $('warp-settings-info-dialog');
   const title = $('warp-settings-info-title');
@@ -125,12 +133,14 @@ function render() {
   }
   const sitesEnabled = Boolean(sites?.enabled);
   const canEnableSites = Boolean(proxy?.active && proxy.kind === 'SOCKS5' && proxy.port && !s?.error && !requestError);
+  $('warp-home-rules').hidden = selected !== 'proxy';
   siteInput.disabled = busy;
   $('warp-sites-add').disabled = busy || !s?.installed;
   $('warp-sites-toggle').disabled = locked || (!sitesEnabled && (!canEnableSites || !siteInput.value.trim()));
   $('warp-sites-toggle').textContent = t(sitesEnabled ? 'warp_sites_disable' : 'warp_sites_enable');
   $('warp-sites-toggle').dataset.enabled = String(sitesEnabled);
   $('warp-sites-toggle').setAttribute('aria-pressed', String(sitesEnabled));
+  renderRuleToggle('warp-home-sites-toggle', sitesEnabled, $('warp-sites-toggle').disabled);
   const domains = siteDomains();
   $('warp-sites-empty').hidden = domains.length > 0;
   const siteList = $('warp-sites-list');
@@ -157,9 +167,7 @@ function render() {
   $('warp-apps-toggle').textContent = t(apps.enabled ? 'warp_apps_disable' : 'warp_apps_enable');
   $('warp-apps-toggle').dataset.enabled = String(apps.enabled);
   $('warp-apps-toggle').setAttribute('aria-pressed', String(apps.enabled));
-  $('warp-apps-counters').textContent = t('warp_apps_counters', { active: apps.active_connections || 0, total: apps.total_connections || 0, failed: apps.failed_connections || 0 });
-  $('warp-apps-error').hidden = !apps.error;
-  $('warp-apps-error').textContent = apps.error ? `${t('warp_apps_error')} — ${apps.error}` : '';
+  renderRuleToggle('warp-home-apps-toggle', Boolean(apps.enabled), $('warp-apps-toggle').disabled);
   const list = $('warp-apps-list');
   const listSignature = JSON.stringify([apps.paths, locked, apps.enabled, t('warp_apps_remove'), t('warp_apps_path')]);
   if (list.dataset.signature !== listSignature) {
@@ -175,6 +183,27 @@ function render() {
       remove.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">close</span>'; remove.disabled = locked || apps.enabled;
       remove.addEventListener('click', () => act('set_warp_applications', { paths: apps.paths.filter(item => item !== path), enabled: false }));
       actions.append(details, remove); row.append(icon, name, actions); return row;
+    }));
+  }
+  const connections = (s?.connections || []).slice().sort((a, b) => (a.state === 'failed') - (b.state === 'failed'));
+  $('warp-connections-count').textContent = String(connections.length);
+  $('warp-connections-count').dataset.state = connections.some(connection => connection.state === 'failed') ? 'error' : connections.length ? 'connected' : 'disconnected';
+  $('warp-connections-empty').hidden = connections.length > 0;
+  const connectionList = $('warp-connections-list');
+  const connectionSignature = JSON.stringify([connections, t('warp_connection_site'), t('warp_connection_application'), t('warp_connection_active'), t('warp_connection_failed')]);
+  if (connectionList.dataset.signature !== connectionSignature) {
+    connectionList.dataset.signature = connectionSignature;
+    connectionList.replaceChildren(...connections.map(connection => {
+      const row = document.createElement('li'); row.className = 'warp-connection-row'; row.dataset.state = connection.state;
+      const iconWrap = document.createElement('span'); iconWrap.className = 'warp-connection-icon';
+      const icon = document.createElement('span'); icon.className = 'material-symbols-outlined'; icon.setAttribute('aria-hidden', 'true'); icon.textContent = connection.source === 'site' ? 'language' : 'apps'; iconWrap.append(icon);
+      const copy = document.createElement('span'); copy.className = 'warp-connection-details';
+      const rule = document.createElement('strong'); rule.textContent = connection.source === 'application' ? connection.rule.split(/[\\/]/).pop() : connection.rule;
+      const meta = document.createElement('span'); meta.textContent = `${t(connection.source === 'site' ? 'warp_connection_site' : 'warp_connection_application')} · ${connection.target}`;
+      copy.append(rule, meta);
+      if (connection.error) { const failure = document.createElement('small'); failure.textContent = connection.error; copy.append(failure); }
+      const state = document.createElement('span'); state.className = 'warp-connection-state'; state.textContent = t(connection.state === 'failed' ? 'warp_connection_failed' : 'warp_connection_active');
+      row.append(iconWrap, copy, state); return row;
     }));
   }
   const error = operationError || requestError || s?.error;
@@ -326,7 +355,9 @@ export function initWarp() {
     try { await navigator.clipboard.writeText(address); }
     catch { /* Clipboard access is unavailable in some embedded webviews. */ }
   });
-  $('warp-apps-toggle').addEventListener('click', () => act('set_warp_applications', { paths: snapshot?.applications?.paths || [], enabled: !snapshot?.applications?.enabled }));
+  const toggleApplications = () => act('set_warp_applications', { paths: snapshot?.applications?.paths || [], enabled: !snapshot?.applications?.enabled });
+  $('warp-apps-toggle').addEventListener('click', toggleApplications);
+  $('warp-home-apps-toggle').addEventListener('click', toggleApplications);
   $('warp-apps-add').addEventListener('click', async () => {
     if (busy) return;
     busy = true; operationError = null; render();
@@ -354,10 +385,12 @@ export function initWarp() {
     sitesDialog.close();
   };
   $('warp-sites-dialog-add').addEventListener('click', addSites);
-  $('warp-sites-toggle').addEventListener('click', () => {
+  const toggleSites = () => {
     const enabled = !snapshot?.sites?.enabled;
     act('set_warp_sites', { domains: enabled ? siteDomains() : snapshot.sites.domains, enabled });
-  });
+  };
+  $('warp-sites-toggle').addEventListener('click', toggleSites);
+  $('warp-home-sites-toggle').addEventListener('click', toggleSites);
   $('warp-status-close').addEventListener('click', () => $('warp-status-dialog').close());
   const removeDialog = $('warp-remove-dialog');
   if (removeDialog) document.body.append(removeDialog);

@@ -129,9 +129,9 @@ async function refresh() {
 }
 async function action(work, output = 'telegram-message') {
   if (busy) return;
-  busy = true; $(output).textContent = ''; render();
+  busy = true; $(output).textContent = ''; delete $(output).dataset.state; render();
   try { await work(); }
-  catch (error) { $(output).textContent = moduleError(error); }
+  catch (error) { $(output).dataset.state = 'error'; $(output).textContent = moduleError(error); }
   finally { busy = false; await refresh(); }
 }
 export function initTelegram() {
@@ -163,7 +163,7 @@ export function initTelegram() {
   $('telegram-settings-open')?.addEventListener('click', () => showSection('telegram'));
   $('telegram-toggle').addEventListener('click', () => action(() => invoke(snapshot?.running ? 'stop_telegram' : 'start_telegram')));
   $('telegram-open').addEventListener('click', () => action(() => invoke('open_telegram')));
-  $('telegram-copy').addEventListener('click', () => action(async () => { await navigator.clipboard.writeText(await invoke('telegram_link')); $('telegram-message').textContent = t('tg_copied'); }));
+  $('telegram-copy').addEventListener('click', () => action(async () => { await navigator.clipboard.writeText(await invoke('telegram_link')); $('telegram-message').dataset.state = 'success'; $('telegram-message').textContent = t('tg_copied'); }));
   initTelegramSettings(action);
   $('telegram-refresh-logs').addEventListener('click', () => action(async () => { $('telegram-logs').textContent = await invoke('telegram_logs') || t('tg_logs_empty'); }));
   onLangChange(() => { render(); renderTelegramReport(); });

@@ -1396,7 +1396,7 @@ fn set_active_fake(fake_type: String, fake_name: String) -> Result<(), String> {
 /// Запускает стратегию по имени из runtime-каталога.
 #[tauri::command]
 fn start_zapret(
-    _app: tauri::AppHandle,
+    app: tauri::AppHandle,
     strategy: String,
     mode: String,
     state: State<'_, AppState>,
@@ -1536,6 +1536,7 @@ try {{
 
     *state.active_strategy.lock_unpoisoned() = Some(strategy.clone());
     *state.last_strategy.lock_unpoisoned() = Some(strategy);
+    let _ = telegram::start_if_configured(&app);
     Ok("Connected".into())
 }
 

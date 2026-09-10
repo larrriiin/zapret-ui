@@ -141,11 +141,13 @@ struct Flow {
 #[derive(Clone)]
 struct Mapping {
     flow: Flow,
+    rule: String,
     alias: u16,
     listener: u16,
     created: Instant,
     closed: Option<Instant>,
     accepted: bool,
+    failure: Option<String>,
 }
 #[derive(Default)]
 struct Table {
@@ -154,7 +156,7 @@ struct Table {
     next: u16,
 }
 impl Table {
-    fn insert(&mut self, flow: Flow, listener: u16) -> Option<Mapping> {
+    fn insert(&mut self, flow: Flow, listener: u16, rule: String) -> Option<Mapping> {
         if self.flows.len() >= MAX_FLOWS {
             return None;
         }
@@ -173,11 +175,13 @@ impl Table {
             }
             let mapping = Mapping {
                 flow: flow.clone(),
+                rule,
                 alias: self.next,
                 listener,
                 created: Instant::now(),
                 closed: None,
                 accepted: false,
+                failure: None,
             };
             self.reverse.insert(reverse, flow.clone());
             self.flows.insert(flow, mapping.clone());
@@ -217,6 +221,30 @@ impl Shared {
     }
     fn fail(&self, error: impl ToString) {
         *self.error.lock().unwrap_or_else(|e| e.into_inner()) = Some(error.to_string());
+    }
+    pub fn connections(&self) -> Vec<super::super::WarpConnection> {
+        let mut table = self.table.lock().unwrap_or_else(|e| e.into_inner());
+        table.prune();
+        table
+            .flows
+            .values()
+            .filter(|mapping| {
+                (mapping.accepted && mapping.closed.is_none()) || mapping.failure.is_some()
+            })
+            .map(|mapping| super::super::WarpConnection {
+                id: format!("application:{}:{}", mapping.flow.local, mapping.flow.remote),
+                source: "application".into(),
+                rule: mapping.rule.clone(),
+                target: mapping.flow.remote.to_string(),
+                state: if mapping.failure.is_some() {
+                    "failed"
+                } else {
+                    "active"
+                }
+                .into(),
+                error: mapping.failure.clone(),
+            })
+            .collect()
     }
 }
 pub struct Engine {
@@ -402,6 +430,7 @@ async fn accept(listener: TcpListener, shared: Arc<Shared>, port: u16) {
                 .get_mut(&flow)
             {
                 m.closed = Some(Instant::now());
+                m.failure = Some("Too many simultaneous WARP connections".into());
             }
             continue;
         }
@@ -423,13 +452,28 @@ async fn accept(listener: TcpListener, shared: Arc<Shared>, port: u16) {
                         })??;
                 let mut client = client;
                 shared.total.fetch_add(1, Ordering::Relaxed);
-                tokio::io::copy_bidirectional(&mut client, &mut upstream).await?;
+                if let Err(error) = tokio::io::copy_bidirectional(&mut client, &mut upstream).await
+                {
+                    if !super::super::connection_closed_normally(&error) {
+                        return Err(error);
+                    }
+                }
                 Ok::<(), io::Error>(())
             }
             .await;
             if let Err(e) = result {
+                let message = e.to_string();
                 shared.failures.fetch_add(1, Ordering::Relaxed);
-                shared.fail(e);
+                shared.fail(&message);
+                if let Some(mapping) = shared
+                    .table
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .flows
+                    .get_mut(&flow)
+                {
+                    mapping.failure = Some(message);
+                }
             }
         });
     }
@@ -602,7 +646,10 @@ pub fn path_key(path: &str) -> String {
 }
 
 fn capture(driver: Arc<Divert>, shared: Arc<Shared>, paths: Vec<String>, ports: (u16, u16)) {
-    let paths: Vec<String> = paths.iter().map(|p| path_key(p)).collect();
+    let paths: Vec<(String, String)> = paths
+        .into_iter()
+        .map(|path| (path_key(&path), path))
+        .collect();
     let mut buffer = vec![0; 65575];
     let mut address = [0u64; 10];
     let mut prune = Instant::now();
@@ -645,21 +692,25 @@ fn capture(driver: Arc<Divert>, shared: Arc<Shared>, paths: Vec<String>, ports: 
                 } else if parsed.syn
                     && !bypass(parsed.flow.remote.ip())
                     && parsed.flow.local.ip() != parsed.flow.remote.ip()
-                    && selected(&parsed.flow, &paths)
                 {
-                    let mapping = shared
-                        .table
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .insert(
-                            parsed.flow.clone(),
-                            if parsed.ipv6 { ports.1 } else { ports.0 },
-                        );
-                    if mapping.is_none() {
-                        drop_packet = true;
-                        shared.failures.fetch_add(1, Ordering::Relaxed);
+                    if let Some(rule) = selected(&parsed.flow, &paths) {
+                        let mapping = shared
+                            .table
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(
+                                parsed.flow.clone(),
+                                if parsed.ipv6 { ports.1 } else { ports.0 },
+                                rule,
+                            );
+                        if mapping.is_none() {
+                            drop_packet = true;
+                            shared.failures.fetch_add(1, Ordering::Relaxed);
+                        }
+                        mapping
+                    } else {
+                        None
                     }
-                    mapping
                 } else {
                     None
                 };
@@ -752,7 +803,7 @@ fn rows<T: Copy>(family: u32) -> Vec<T> {
     }
     vec![]
 }
-fn selected(flow: &Flow, paths: &[String]) -> bool {
+fn selected(flow: &Flow, paths: &[(String, String)]) -> Option<String> {
     let pid = if flow.local.is_ipv4() {
         rows::<MIB_TCPROW_OWNER_PID>(AF_INET as u32)
             .into_iter()
@@ -783,21 +834,25 @@ fn selected(flow: &Flow, paths: &[String]) -> bool {
             .map(|r| r.dwOwningPid)
     };
     let Some(pid) = pid.filter(|p| *p != 0 && *p != std::process::id()) else {
-        return false;
+        return None;
     };
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if handle.is_null() {
-            return false;
+            return None;
         }
         let mut buffer = vec![0u16; 32768];
         let mut size = buffer.len() as u32;
         let ok = QueryFullProcessImageNameW(handle, 0, buffer.as_mut_ptr(), &mut size);
         CloseHandle(handle);
-        ok != 0
-            && paths.contains(&path_key(&String::from_utf16_lossy(
-                &buffer[..size as usize],
-            )))
+        if ok == 0 {
+            return None;
+        }
+        let key = path_key(&String::from_utf16_lossy(&buffer[..size as usize]));
+        paths
+            .iter()
+            .find(|(candidate, _)| candidate == &key)
+            .map(|(_, original)| original.clone())
     }
 }
 
@@ -834,7 +889,9 @@ mod tests {
             let mut bytes = packet(v6, 50000, 443);
             let original = parse(&bytes).unwrap();
             let mut table = Table::default();
-            let mapping = table.insert(original.flow.clone(), 40001).unwrap();
+            let mapping = table
+                .insert(original.flow.clone(), 40001, "client.exe".into())
+                .unwrap();
             let other = table
                 .insert(
                     Flow {
@@ -842,6 +899,7 @@ mod tests {
                         remote: SocketAddr::new(original.flow.remote.ip(), 8443),
                     },
                     40001,
+                    "client.exe".into(),
                 )
                 .unwrap();
             assert_ne!(

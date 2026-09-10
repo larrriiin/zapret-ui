@@ -67,6 +67,8 @@ pub struct Config {
     worker: bool,
     #[serde(default)]
     worker_domains: Vec<String>,
+    #[serde(default)]
+    start_with_zapret: bool,
 }
 fn default_host() -> String {
     "127.0.0.1".into()
@@ -397,6 +399,14 @@ pub async fn start_telegram(app: tauri::AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || start_blocking(&app))
         .await
         .map_err(|e| e.to_string())?
+}
+pub fn start_if_configured(app: &tauri::AppHandle) -> Result<(), String> {
+    let path = root(app)?;
+    if !installed(&path) || !config(&path)?.start_with_zapret {
+        return Ok(());
+    }
+    let _operation = Operation::acquire()?;
+    start_blocking(app)
 }
 fn start_blocking(app: &tauri::AppHandle) -> Result<(), String> {
     let path = root(app)?;

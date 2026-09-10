@@ -14,14 +14,20 @@ static APPLICATIONS: Mutex<Option<Runtime>> = Mutex::new(None);
 pub struct ApplicationStatus {
     pub paths: Vec<String>,
     pub enabled: bool,
+    #[serde(skip)]
+    pub(crate) runtime_active: bool,
     pub active_connections: usize,
     pub total_connections: u64,
     pub failed_connections: u64,
     pub error: Option<String>,
+    #[serde(skip)]
+    pub(crate) connections: Vec<super::WarpConnection>,
 }
 #[derive(Default, Serialize, Deserialize)]
 struct Preferences {
     paths: Vec<String>,
+    #[serde(default)]
+    enabled: bool,
 }
 struct Runtime {
     directory: PathBuf,
@@ -59,17 +65,20 @@ pub fn status() -> Result<ApplicationStatus> {
     };
     let mut status = ApplicationStatus {
         paths: runtime.preferences.paths.clone(),
+        enabled: runtime.preferences.enabled,
         error: runtime.error.clone(),
         ..Default::default()
     };
     #[cfg(windows)]
     if let Some(engine) = &runtime.engine {
-        status.enabled = engine.running();
+        let running = engine.running();
+        status.runtime_active = running;
         status.active_connections = engine.shared.active.load(Ordering::Relaxed);
         status.total_connections = engine.shared.total.load(Ordering::Relaxed);
         status.failed_connections = engine.shared.failures.load(Ordering::Relaxed);
         status.error = engine.shared.error.lock().map_err(error)?.clone();
-        if !status.enabled {
+        status.connections = engine.shared.connections();
+        if !running {
             runtime.error = status.error.clone();
             runtime.engine = None;
         }
@@ -184,7 +193,7 @@ pub fn configure(paths: Vec<String>, enabled: bool, port: Option<u16>) -> Result
     if enabled && runtime.engine.is_some() {
         return Err(WarpError::new("warp_apps_stop_first", ""));
     }
-    let preferences = Preferences { paths };
+    let preferences = Preferences { paths, enabled };
     super::sites::persist_json(
         &runtime.directory.join("warp-applications.json"),
         &preferences,

@@ -39,6 +39,17 @@ impl WarpError {
 }
 type Result<T> = std::result::Result<T, WarpError>;
 
+pub(super) fn connection_closed_normally(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::NotConnected
+            | std::io::ErrorKind::UnexpectedEof
+    )
+}
+
 struct Client {
     path: PathBuf,
     modified: Option<SystemTime>,
@@ -59,7 +70,17 @@ pub struct WarpStatus {
     proxy: Option<ProxyStatus>,
     sites: sites::SiteStatus,
     applications: applications::ApplicationStatus,
+    connections: Vec<WarpConnection>,
     pub(crate) error: Option<WarpError>,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct WarpConnection {
+    pub id: String,
+    pub source: String,
+    pub rule: String,
+    pub target: String,
+    pub state: String,
+    pub error: Option<String>,
 }
 #[derive(Debug, Serialize)]
 struct ProxyStatus {
@@ -284,6 +305,28 @@ fn parse_state(status: &Value) -> &'static str {
     }
 }
 
+fn restore_selected_rules(status: &WarpStatus) -> Result<()> {
+    let port = status
+        .proxy
+        .as_ref()
+        .filter(|proxy| {
+            proxy.active && proxy.kind.as_deref() == Some("SOCKS5") && status.error.is_none()
+        })
+        .and_then(|proxy| proxy.port);
+    let Some(port) = port else {
+        return Ok(());
+    };
+    let sites_status = sites::status()?;
+    if sites_status.enabled && !sites_status.runtime_active {
+        sites::configure(sites_status.domains, true, Some(port))?;
+    }
+    let applications_status = applications::status()?;
+    if applications_status.enabled && !applications_status.runtime_active {
+        applications::configure(applications_status.paths, true, Some(port))?;
+    }
+    Ok(())
+}
+
 enum Action {
     Status,
     Connect,
@@ -362,9 +405,11 @@ async fn execute(action: Action) -> Result<WarpStatus> {
                 if !client.modes.contains(&mode) {
                     return Err(WarpError::new("warp_unsupported", ""));
                 }
-                sites::disable()?;
-                applications::disable()?;
                 cli(&client.path, &["mode", &mode])?;
+                if mode != "proxy" {
+                    sites::disable()?;
+                    applications::disable()?;
+                }
             }
             Action::Port(port) => {
                 if sites::status()?.enabled || applications::status()?.enabled {
@@ -407,12 +452,18 @@ async fn execute(action: Action) -> Result<WarpStatus> {
         if status.error.is_none() {
             sites::reconcile_port(status.proxy.as_ref().and_then(|proxy| proxy.port))?;
             applications::reconcile_port(status.proxy.as_ref().and_then(|proxy| proxy.port))?;
+            restore_selected_rules(&status)?;
         }
         match sites::status() {
-            Ok(sites) => status.sites = sites,
+            Ok(sites) => {
+                status.connections.extend(sites.connections.clone());
+                status.sites = sites;
+            }
             Err(error) => status.error = Some(error),
         }
-        status.applications = applications::status()?;
+        let applications = applications::status()?;
+        status.connections.extend(applications.connections.clone());
+        status.applications = applications;
         Ok(status)
     })
     .await
