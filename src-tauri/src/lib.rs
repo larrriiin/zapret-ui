@@ -1540,22 +1540,20 @@ try {{
     Ok("Connected".into())
 }
 
-fn stop_zapret_internal() -> Result<(), String> {
-    let ps_script = r#"$ErrorActionPreference = 'Continue'
+const STOP_ZAPRET_SCRIPT: &str = r#"$ErrorActionPreference = 'Continue'
 $sys = "$env:SystemRoot\System32"
-try { Stop-Service -Name zapret -Force -ErrorAction SilentlyContinue } catch {}
+# Kill winws before asking SCM to remove its service. Stop-Service waits for the
+# service process and can hang indefinitely while winws is handling traffic
+# through a concurrently running local proxy (for example Cloudflare WARP).
+& "$sys\taskkill.exe" /F /T /IM winws.exe 2>$null | Out-Null
 if (Get-Service -Name zapret -ErrorAction SilentlyContinue) {
+    & "$sys\sc.exe" stop zapret | Out-Null
     & "$sys\sc.exe" delete zapret | Out-Null
 }
-& "$sys\taskkill.exe" /F /IM winws.exe 2>$null | Out-Null
-foreach ($svc in @('WinDivert','WinDivert14')) {
-    try { Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue } catch {}
-    if (Get-Service -Name $svc -ErrorAction SilentlyContinue) {
-        & "$sys\sc.exe" delete $svc | Out-Null
-    }
-}
 "#;
-    let encoded = encode_powershell_command(ps_script);
+
+fn stop_zapret_internal() -> Result<(), String> {
+    let encoded = encode_powershell_command(STOP_ZAPRET_SCRIPT);
     let status = Command::new(powershell_path())
         .args([
             "-NoProfile",
@@ -2239,8 +2237,22 @@ impl Drop for OwnedDirectoryCleanup {
 mod temporary_cleanup_tests {
     use super::{
         replace_path_case_insensitive, restart_context, CoreOperationGuard, OwnedDirectoryCleanup,
-        ZapretStatus,
+        ZapretStatus, STOP_ZAPRET_SCRIPT,
     };
+
+    #[test]
+    fn zapret_stop_does_not_take_down_shared_windivert_driver() {
+        let script = STOP_ZAPRET_SCRIPT.to_ascii_lowercase();
+        let kill = script.find("taskkill.exe").unwrap();
+        let service_stop = script.find("sc.exe\" stop zapret").unwrap();
+
+        assert!(
+            kill < service_stop,
+            "winws must be killed before SCM cleanup"
+        );
+        assert!(!script.contains("stop-service -name"));
+        assert!(!script.contains("windivert"));
+    }
 
     #[test]
     fn renamed_install_paths_are_rewritten_case_insensitively() {
