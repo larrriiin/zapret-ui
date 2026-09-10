@@ -833,9 +833,7 @@ fn selected(flow: &Flow, paths: &[(String, String)]) -> Option<String> {
             })
             .map(|r| r.dwOwningPid)
     };
-    let Some(pid) = pid.filter(|p| *p != 0 && *p != std::process::id()) else {
-        return None;
-    };
+    let pid = pid.filter(|p| *p != 0 && *p != std::process::id())?;
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if handle.is_null() {
