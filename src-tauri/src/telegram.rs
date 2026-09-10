@@ -400,7 +400,7 @@ pub async fn start_telegram(app: tauri::AppHandle) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?
 }
-pub fn start_if_configured(app: &tauri::AppHandle) -> Result<(), String> {
+pub fn start_on_app_launch_if_configured(app: &tauri::AppHandle) -> Result<(), String> {
     let path = root(app)?;
     if !installed(&path) || !config(&path)?.start_with_zapret {
         return Ok(());

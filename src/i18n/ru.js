@@ -134,7 +134,7 @@ export default {
     "tg_start_failed": "Прокси не запустился. Проверьте логи и повторите запуск.",
     "tg_invalid_config": "Некорректные настройки Telegram-прокси. Порт должен быть от 1 до 65535.",
     "tg_stop_to_configure": "Выключите прокси перед изменением порта.",
-    "tg_start_with_zapret": "Включать при запуске ZAPRET",
+    "tg_start_with_zapret": "Включать при запуске приложения",
     "ipset_no_changes": "Изменений нет. Список IPSet актуален.",
     "hosts_title": "Обновить hosts",
     "hosts_description": "Загрузить актуальные hosts",

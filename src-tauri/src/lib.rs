@@ -1535,7 +1535,6 @@ try {{
 
     *state.active_strategy.lock_unpoisoned() = Some(strategy.clone());
     *state.last_strategy.lock_unpoisoned() = Some(strategy);
-    let _ = telegram::start_if_configured(&app);
     Ok("Connected".into())
 }
 
@@ -3723,6 +3722,16 @@ pub fn run() {
                 }
                 refresh_tray_menu(app.handle());
             }
+
+            // The Telegram Proxy preference belongs to the application lifecycle,
+            // not to a particular Zapret service start. Run it in the background
+            // so a slow or failed local proxy launch never delays the UI startup.
+            let telegram_app = app.handle().clone();
+            std::thread::spawn(move || {
+                if let Err(error) = telegram::start_on_app_launch_if_configured(&telegram_app) {
+                    eprintln!("Failed to start Telegram Proxy on application launch: {error}");
+                }
+            });
 
             Ok(())
         })

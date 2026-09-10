@@ -134,7 +134,7 @@ export default {
     "tg_start_failed": "The proxy could not start. Check the logs and retry.",
     "tg_invalid_config": "Invalid Telegram proxy settings. The port must be between 1 and 65535.",
     "tg_stop_to_configure": "Stop the proxy before changing the port.",
-    "tg_start_with_zapret": "Start when ZAPRET starts",
+    "tg_start_with_zapret": "Start when the app launches",
     "ipset_no_changes": "No changes. The IPSet list is up to date.",
     "hosts_title": "Update hosts",
     "hosts_description": "Download the latest hosts",
