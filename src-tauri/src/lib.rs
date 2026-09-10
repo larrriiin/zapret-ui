@@ -43,6 +43,7 @@ use core::{
 use traffic_monitor::{TrafficMonitor, TrafficSnapshot};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+const ELEVATED_PS_LAUNCH_COMMAND: &str = "$ErrorActionPreference = 'Stop'; $process = Start-Process -FilePath powershell -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList @('-NoProfile','-WindowStyle','Hidden','-EncodedCommand',$env:ZAPRET_PS_PAYLOAD); exit $process.ExitCode";
 const GITHUB_USER_AGENT: &str = "zapret-ui-updater";
 static CORE_OPERATION_ACTIVE: AtomicBool = AtomicBool::new(false);
 static EXIT_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
@@ -1413,11 +1414,12 @@ fn start_zapret(
         return Err(format!("Invalid mode: {}", mode));
     }
 
-    // Убиваем текущий процесс
-    let _ = Command::new(system32_tool("taskkill.exe"))
-        .args(["/f", "/im", "winws.exe"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
+    // A temporary strategy is our child, so stop it through its process handle
+    // instead of killing unrelated winws.exe instances by image name.
+    if let Some(mut child) = state.temp_process_child.lock_unpoisoned().take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 
     let dir = find_binaries_dir();
     // Стратегии из каталога, как и прежние BAT-файлы, ожидают эти списки.
@@ -1460,15 +1462,11 @@ fn start_zapret(
         // в который раньше можно было подменить содержимое между записью и
         // elevated-исполнением (TOCTOU).
         let ps_script = format!(
-            r#"$ErrorActionPreference = 'Continue'
+            r#"{cleanup}
 $exe = '{exe}'
 $svcArgs = '{args}'
 $strategy = '{strategy}'
 $binPath = '"' + $exe + '" ' + $svcArgs
-try {{ Stop-Service -Name zapret -Force -ErrorAction SilentlyContinue }} catch {{}}
-if (Get-Service -Name zapret -ErrorAction SilentlyContinue) {{
-    & "$env:SystemRoot\System32\sc.exe" delete zapret | Out-Null
-}}
 New-Service -Name zapret `
     -BinaryPathName $binPath `
     -StartupType Automatic `
@@ -1482,6 +1480,7 @@ try {{
 }}
 & "$env:SystemRoot\System32\reg.exe" add 'HKLM\System\CurrentControlSet\Services\zapret' /v zapret-discord-youtube /t REG_SZ /d $strategy /f | Out-Null
 "#,
+            cleanup = STOP_ZAPRET_SERVICE_SCRIPT,
             exe = ps_single_quote_escape(bin_str),
             args = ps_single_quote_escape(&args),
             strategy = ps_single_quote_escape(&strategy),
@@ -1494,7 +1493,7 @@ try {{
             "-WindowStyle",
             "Hidden",
             "-Command",
-            "Start-Process -FilePath powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList @('-NoProfile','-WindowStyle','Hidden','-EncodedCommand',$env:ZAPRET_PS_PAYLOAD)",
+            ELEVATED_PS_LAUNCH_COMMAND,
         ]);
         cmd.env("ZAPRET_PS_PAYLOAD", &encoded);
         #[cfg(windows)]
@@ -1540,27 +1539,38 @@ try {{
     Ok("Connected".into())
 }
 
-const STOP_ZAPRET_SCRIPT: &str = r#"$ErrorActionPreference = 'Continue'
+const STOP_ZAPRET_SERVICE_SCRIPT: &str = r#"$ErrorActionPreference = 'Continue'
 $sys = "$env:SystemRoot\System32"
-# Kill winws before asking SCM to remove its service. Stop-Service waits for the
-# service process and can hang indefinitely while winws is handling traffic
-# through a concurrently running local proxy (for example Cloudflare WARP).
-& "$sys\taskkill.exe" /F /T /IM winws.exe 2>$null | Out-Null
+# Stop only the process registered for our service. Waiting in Stop-Service can
+# hang while winws handles traffic through a concurrently running local proxy.
+$query = & "$sys\sc.exe" queryex zapret 2>$null
+$pidMatch = $query | Select-String -Pattern 'PID\s*:\s*(\d+)'
+if ($pidMatch -and $pidMatch.Matches[0].Groups[1].Value -ne '0') {
+    $servicePid = $pidMatch.Matches[0].Groups[1].Value
+    & "$sys\taskkill.exe" /F /T /PID $servicePid 2>$null | Out-Null
+}
 if (Get-Service -Name zapret -ErrorAction SilentlyContinue) {
     & "$sys\sc.exe" stop zapret | Out-Null
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        $remaining = Get-Service -Name zapret -ErrorAction SilentlyContinue
+        if (-not $remaining -or $remaining.Status -eq 'Stopped') { break }
+        Start-Sleep -Milliseconds 100
+    }
+    $remaining = Get-Service -Name zapret -ErrorAction SilentlyContinue
+    if ($remaining -and $remaining.Status -ne 'Stopped') { exit 1 }
     & "$sys\sc.exe" delete zapret | Out-Null
 }
 "#;
 
 fn stop_zapret_internal() -> Result<(), String> {
-    let encoded = encode_powershell_command(STOP_ZAPRET_SCRIPT);
+    let encoded = encode_powershell_command(STOP_ZAPRET_SERVICE_SCRIPT);
     let status = Command::new(powershell_path())
         .args([
             "-NoProfile",
             "-WindowStyle",
             "Hidden",
             "-Command",
-            "Start-Process -FilePath powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList @('-NoProfile','-WindowStyle','Hidden','-EncodedCommand',$env:ZAPRET_PS_PAYLOAD)",
+            ELEVATED_PS_LAUNCH_COMMAND,
         ])
         .env("ZAPRET_PS_PAYLOAD", &encoded)
         .creation_flags(CREATE_NO_WINDOW)
@@ -1576,15 +1586,17 @@ fn stop_zapret_internal() -> Result<(), String> {
 /// Полностью останавливает zapret.
 /// Требует прав администратора — запрашивает их через PowerShell -Verb RunAs.
 #[tauri::command]
-fn stop_zapret(state: State<'_, AppState>) {
+fn stop_zapret(state: State<'_, AppState>) -> Result<(), String> {
     {
         let mut child_lock = state.temp_process_child.lock_unpoisoned();
         if let Some(mut child) = child_lock.take() {
             let _ = child.kill();
+            let _ = child.wait();
         }
     }
-    let _ = stop_zapret_internal();
+    stop_zapret_internal()?;
     *state.active_strategy.lock_unpoisoned() = None;
+    Ok(())
 }
 
 fn stop_zapret_on_exit(state: State<'_, AppState>) {
@@ -2237,12 +2249,12 @@ impl Drop for OwnedDirectoryCleanup {
 mod temporary_cleanup_tests {
     use super::{
         replace_path_case_insensitive, restart_context, CoreOperationGuard, OwnedDirectoryCleanup,
-        ZapretStatus, STOP_ZAPRET_SCRIPT,
+        ZapretStatus, ELEVATED_PS_LAUNCH_COMMAND, STOP_ZAPRET_SERVICE_SCRIPT,
     };
 
     #[test]
-    fn zapret_stop_does_not_take_down_shared_windivert_driver() {
-        let script = STOP_ZAPRET_SCRIPT.to_ascii_lowercase();
+    fn zapret_service_cleanup_is_targeted_and_non_blocking() {
+        let script = STOP_ZAPRET_SERVICE_SCRIPT.to_ascii_lowercase();
         let kill = script.find("taskkill.exe").unwrap();
         let service_stop = script.find("sc.exe\" stop zapret").unwrap();
 
@@ -2251,7 +2263,15 @@ mod temporary_cleanup_tests {
             "winws must be killed before SCM cleanup"
         );
         assert!(!script.contains("stop-service -name"));
+        assert!(script.contains("queryex zapret"));
+        assert!(script.contains("/pid $servicepid"));
+        assert!(!script.contains("/im winws.exe"));
         assert!(!script.contains("windivert"));
+        assert!(script.contains("$attempt -lt 20"));
+
+        let launcher = ELEVATED_PS_LAUNCH_COMMAND.to_ascii_lowercase();
+        assert!(launcher.contains("-passthru"));
+        assert!(launcher.contains("exit $process.exitcode"));
     }
 
     #[test]
@@ -3628,7 +3648,7 @@ pub fn run() {
                             let state = app.state::<AppState>();
                             let status = get_zapret_status(state.clone());
                             if status.running {
-                                stop_zapret(state);
+                                let _ = stop_zapret(state);
                             } else {
                                 let last = state.last_strategy.lock_unpoisoned().clone();
                                 let available = get_strategies().unwrap_or_default();
