@@ -5,13 +5,14 @@
 <h1 align="center">ZAPRET UI</h1>
 
 <p align="center">
-  Удобное управление <code>zapret</code> в Windows без ручной работы с BAT-файлами.<br>
-  A modern Windows interface for managing <code>zapret</code> without working with BAT files manually.
+  <strong>Доступ к YouTube, Discord, Telegram и другим сервисам — в одном современном Windows-приложении.</strong><br>
+  ZAPRET, Cloudflare WARP и Telegram Proxy, а также трафик, диагностика и обновления — без ручной работы с BAT-файлами.
 </p>
 
 <p align="center">
-  <a href="https://github.com/larrriiin/zapret-ui/releases/latest"><strong>Скачать / Download</strong></a>
-  ·
+  <a href="https://github.com/larrriiin/zapret-ui/releases/latest"><img alt="Скачать для Windows" src="https://img.shields.io/badge/%E2%86%93_%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C_%D0%B4%D0%BB%D1%8F_Windows-7C3AED?style=for-the-badge&logo=windows&logoColor=white"></a>
+  <a href="https://larrriiin.github.io/zapret-ui/"><img alt="Сайт проекта" src="https://img.shields.io/badge/%D0%A1%D0%B0%D0%B9%D1%82_%D0%BF%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D0%B0-17213E?style=for-the-badge"></a>
+  <br>
   <a href="https://github.com/larrriiin/zapret-ui/issues">Сообщить о проблеме / Report an issue</a>
   ·
   <a href="CODE_SIGNING.md">Code signing policy</a>
@@ -29,24 +30,20 @@
 </p>
 
 <p align="center">
-  <img width="900" alt="Главное окно ZAPRET UI" src="https://github.com/larrriiin/zapret-ui/blob/main/artifacts/zapret-ui-main-26.9.1.png">
+  <img width="1000" alt="Главная страница ZAPRET UI: выбор стратегии и управление запуском" src="https://raw.githubusercontent.com/larrriiin/zapret-ui/main/docs/screenshots/home.png">
 </p>
 
-<!--
-Рекомендуемая галерея для будущего обновления README:
+<p align="center">
+  <strong>ZAPRET + WARP + Telegram Proxy</strong> &nbsp;·&nbsp; Traffic Monitor &nbsp;·&nbsp; Диагностика &nbsp;·&nbsp; Безопасные обновления и rollback
+</p>
 
-1. docs/screenshots/home.png
-   Главное окно: статус, выбранная стратегия и кнопка запуска.
-2. docs/screenshots/lists.png
-   Редактор пользовательских списков доменов и IP-адресов.
-3. docs/screenshots/core-update.png
-   Окно обновления ядра с версиями и источником Flowseal Stable.
-4. docs/screenshots/rollback.png
-   Настройки с доступной предыдущей версией и кнопкой отката.
+| Home | WARP |
+| --- | --- |
+| <img alt="Главный экран: управление стратегией" src="https://raw.githubusercontent.com/larrriiin/zapret-ui/main/docs/screenshots/home.png"> | <img alt="Настройки Cloudflare WARP" src="https://raw.githubusercontent.com/larrriiin/zapret-ui/main/docs/screenshots/warp.png"> |
+| **Traffic Monitor** | **Diagnostics** |
+| <img alt="Монитор сетевого трафика" src="https://raw.githubusercontent.com/larrriiin/zapret-ui/main/docs/screenshots/traffic.png"> | <img alt="Встроенная диагностика" src="https://raw.githubusercontent.com/larrriiin/zapret-ui/main/docs/screenshots/diagnostics.png"> |
 
-После добавления файлов можно вставить сюда таблицу 2×2. Не используйте скриншоты
-с личными путями, именами пользователей, IP-адресами или другими приватными данными.
--->
+<p align="center"><sub>Нажмите на изображение в репозитории, чтобы открыть его в полном размере.</sub></p>
 
 <a id="ru"></a>
 
@@ -54,9 +51,9 @@
 
 ### Что это
 
-**ZAPRET UI** — настольное приложение для Windows, которое предоставляет графический интерфейс для управления средствами обхода DPI из экосистемы [`zapret`](https://github.com/bol-van/zapret).
+**ZAPRET UI** — современное Windows-приложение для доступа к YouTube, Discord, Telegram и другим сервисам. Оно объединяет проверяемое ядро из экосистемы [`zapret`](https://github.com/bol-van/zapret), Cloudflare WARP и локальный Telegram Proxy в одном понятном интерфейсе.
 
-Приложение использует проверенные выпуски [`Flowseal/zapret-discord-youtube`](https://github.com/Flowseal/zapret-discord-youtube) как **поставщика ядра, готовых стратегий и сопутствующих файлов**. ZAPRET UI отвечает за удобное управление: установку и обновление ядра, запуск, работу со службой, выбор стратегии, пользовательские списки, сохранение настроек и откат.
+Приложение использует проверенные выпуски [`Flowseal/zapret-discord-youtube`](https://github.com/Flowseal/zapret-discord-youtube) как **поставщика ядра, готовых стратегий и сопутствующих файлов**. ZAPRET UI отвечает за удобный ежедневный сценарий: установку и обновление ядра, запуск, работу со службой, выбор стратегии, пользовательские списки, мониторинг трафика, диагностику, сохранение настроек и откат.
 
 > [!IMPORTANT]
 > ZAPRET UI — не VPN и не средство анонимизации. Приложение не шифрует весь трафик и не скрывает ваш IP-адрес. Результат работы зависит от сети, провайдера, выбранной стратегии и актуальности ядра.
@@ -80,6 +77,9 @@ ZAPRET UI не конкурирует с Flowseal и не присваивает
 
 ### Возможности
 
+- **Три инструмента в одном приложении:** ZAPRET для стратегий, Cloudflare WARP для раздельного туннелирования и локальный [TG WS Proxy](https://github.com/Flowseal/tg-ws-proxy) для Telegram Desktop.
+- **Traffic Monitor:** наблюдайте за сетевым трафиком прямо в приложении.
+- **Встроенная диагностика:** проверяйте HTTP, TLS, задержку и признаки DPI, смотрите системную информацию и логи без BAT- или PowerShell-скриптов.
 - Запуск выбранной стратегии как службы Windows или временного процесса.
 - Переключение между стратегиями Flowseal из графического интерфейса.
 - Управление пользовательскими списками доменов, исключений, IP-адресов и подсетей.
@@ -310,9 +310,9 @@ scripts/                     проверка версий и служебные
 
 ### What is ZAPRET UI?
 
-**ZAPRET UI** is a Windows desktop application that provides a graphical interface for managing DPI-circumvention tools from the [`zapret`](https://github.com/bol-van/zapret) ecosystem.
+**ZAPRET UI** is a modern Windows app for accessing YouTube, Discord, Telegram, and other services. It brings a verified core from the [`zapret`](https://github.com/bol-van/zapret) ecosystem, Cloudflare WARP, and a local Telegram Proxy into one clear interface.
 
-The application uses tested releases of [`Flowseal/zapret-discord-youtube`](https://github.com/Flowseal/zapret-discord-youtube) as a **provider of the core, ready-made strategies, and supporting files**. ZAPRET UI handles the user-facing lifecycle: installation and updates, service management, strategy selection, user lists, settings preservation, and rollback.
+The application uses tested releases of [`Flowseal/zapret-discord-youtube`](https://github.com/Flowseal/zapret-discord-youtube) as a **provider of the core, ready-made strategies, and supporting files**. ZAPRET UI handles the everyday workflow: installation and updates, service management, strategy selection, user lists, traffic monitoring, diagnostics, settings preservation, and rollback.
 
 > [!IMPORTANT]
 > ZAPRET UI is not a VPN or an anonymity tool. It does not encrypt all traffic or hide your IP address. Results depend on your network, ISP, selected strategy, and core version.
@@ -336,6 +336,9 @@ In short: **Flowseal supplies the working core content; ZAPRET UI makes it easie
 
 ### Features
 
+- **Three tools in one app:** ZAPRET for strategies, Cloudflare WARP for split tunneling, and local [TG WS Proxy](https://github.com/Flowseal/tg-ws-proxy) for Telegram Desktop.
+- **Traffic Monitor:** see network traffic directly in the application.
+- **Built-in diagnostics:** check HTTP, TLS, latency, and DPI signals, and inspect system information and logs without BAT or PowerShell scripts.
 - Run the selected strategy as a Windows service or a temporary process.
 - Switch between Flowseal strategies from a graphical interface.
 - Edit user domain, exclusion, IP address, and subnet lists.
