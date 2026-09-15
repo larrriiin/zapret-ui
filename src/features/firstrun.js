@@ -182,11 +182,11 @@ async function testStrategies() {
       testStarted = true; controls();
       setProgress(t('setup_testing', { index: payload.index, total: payload.total }), payload.name, payload.total ? (payload.index - 1) / payload.total * 100 : 0);
     }));
-    const results = await invoke('run_tests', { testType: 'standard', testMode: 'all', _testMode: 'all' });
+    const results = await invoke('run_tests', { testType: 'combined', testMode: 'all', _testMode: 'all' });
     if (cancelled) { goTo(2); errorMessage(t('setup_test_cancelled')); return; }
     results.sort((a, b) => (b.score || 0) - (a.score || 0));
     best = results.find(result => result.http_ok > 0) || null;
-    const payload = { timestamp: new Date().toISOString(), test_type: 'standard', best: best?.config || null, results };
+    const payload = { timestamp: new Date().toISOString(), test_type: 'combined', best: best?.config || null, results };
     await invoke('save_test_results', { payload }); state.cachedTestResults = payload;
     await loadStrategies(); goTo(2);
     if (!best) { errorMessage(t('setup_no_result')); return; }

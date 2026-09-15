@@ -16,8 +16,8 @@ const logColors = {
 };
 
 let testsRunning = false;
-let selectedTestType = 'standard';
-let wizardLastTestType = 'standard';
+let selectedTestType = 'combined';
+let wizardLastTestType = 'combined';
 let wizardUnlisten = { progress: null, configStart: null, best: null };
 
 function showWizardStep(step) {

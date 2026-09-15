@@ -56,9 +56,13 @@
         <!-- Test Type Selection -->
         <div class="mb-4">
             <p class="text-xs text-on-surface-variant mb-2 uppercase tracking-wider" data-i18n="test_type">Test Type</p>
-            <div class="flex gap-2">
+            <div class="flex flex-col sm:flex-row gap-2">
+                <button id="test-type-combined" data-type="combined"
+                    class="flex-1 py-2 rounded-xl border border-primary/30 text-xs font-bold uppercase tracking-wider transition-colors card-active" data-i18n="test_combined">
+                    Combined (recommended)
+                </button>
                 <button id="test-type-standard" data-type="standard"
-                    class="flex-1 py-2 rounded-xl border border-primary/30 text-xs font-bold uppercase tracking-wider transition-colors card-active" data-i18n="test_standard">
+                    class="flex-1 py-2 rounded-xl border border-outline-variant/30 text-xs font-bold uppercase tracking-wider text-on-surface-variant hover:border-primary/30 transition-colors" data-i18n="test_standard">
                     Standard (HTTP/Ping)
                 </button>
                 <button id="test-type-dpi" data-type="dpi"

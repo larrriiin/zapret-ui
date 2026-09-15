@@ -3140,6 +3140,35 @@ impl TestResult {
             score,
         }
     }
+
+    /// Combines the two independent test suites without letting a longer suite
+    /// outweigh the other one merely because it has more endpoints.
+    fn from_combined(standard: Self, dpi: Self) -> Self {
+        let config = standard.config.clone();
+        let mut result = Self::from_counts(
+            config,
+            standard.http_ok + dpi.http_ok,
+            standard.http_error + dpi.http_error,
+            standard.ping_ok,
+            standard.ping_fail,
+            standard.avg_ping_ms,
+        );
+        let rate = |ok: i32, error: i32| {
+            let total = ok + error;
+            if total > 0 {
+                ok * 100 / total
+            } else {
+                0
+            }
+        };
+        // Standard HTTP, DPI and TCP reachability each contribute a fixed
+        // share, so the ranking remains stable if DPI Checkers changes size.
+        let standard_http = rate(standard.http_ok, standard.http_error);
+        let dpi_http = rate(dpi.http_ok, dpi.http_error);
+        let ping = rate(standard.ping_ok, standard.ping_fail);
+        result.score = standard_http * 6 + dpi_http * 3 + ping;
+        result
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -3516,12 +3545,6 @@ pub fn run() {
                     let _ = w.show();
                     let _ = w.unminimize();
                     let _ = w.set_focus();
-
-                    let state = app.state::<AppState>();
-                    let tray_opt = state.tray_handle.lock_unpoisoned().clone();
-                    if let Some(tray) = tray_opt {
-                        let _ = tray.set_visible(false);
-                    }
                 });
         }))
         .manage(telegram::TelegramState::default())
@@ -3623,91 +3646,79 @@ pub fn run() {
             let tray = TrayIconBuilder::with_id("main-tray")
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
-                .on_menu_event(move |app, event| {
-                    match event.id.as_ref() {
-                        "quit" => {
-                            graceful_exit(app);
-                        }
-                        "show" => {
-                            if let Some(window) = app
-                                .get_webview_window("setup")
-                                .or_else(|| app.get_webview_window("main"))
-                            {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                                // Скрываем иконку при разворачивании
-                                let state = app.state::<AppState>();
-                                let tray_opt = state.tray_handle.lock_unpoisoned().clone();
-                                if let Some(tray) = tray_opt {
-                                    let _ = tray.set_visible(false);
-                                }
-                            }
-                        }
-                        "toggle" => {
-                            let state = app.state::<AppState>();
-                            let status = get_zapret_status(state.clone());
-                            if status.running {
-                                let _ = stop_zapret(state);
-                            } else {
-                                let last = state.last_strategy.lock_unpoisoned().clone();
-                                let available = get_strategies().unwrap_or_default();
-                                let strategy = last
-                                    .or(status.strategy)
-                                    .or_else(|| available.first().cloned());
-                                if let Some(s) = strategy {
-                                    let _ =
-                                        start_zapret(app.clone(), s, "service".to_string(), state);
-                                }
-                            }
-                            refresh_tray_menu(app);
-                        }
-                        "warp_toggle" => refresh_warp_tray(app, true),
-                        id if id.starts_with("strat_") => {
-                            let strategy = &id[6..];
-                            let state = app.state::<AppState>();
-                            let _ = start_zapret(
-                                app.clone(),
-                                strategy.to_string(),
-                                "service".to_string(),
-                                state,
-                            );
-                            refresh_tray_menu(app);
-                        }
-                        _ => {}
+                .on_menu_event(move |app, event| match event.id.as_ref() {
+                    "quit" => {
+                        graceful_exit(app);
                     }
+                    "show" => {
+                        if let Some(window) = app
+                            .get_webview_window("setup")
+                            .or_else(|| app.get_webview_window("main"))
+                        {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "toggle" => {
+                        let state = app.state::<AppState>();
+                        let status = get_zapret_status(state.clone());
+                        if status.running {
+                            let _ = stop_zapret(state);
+                        } else {
+                            let last = state.last_strategy.lock_unpoisoned().clone();
+                            let available = get_strategies().unwrap_or_default();
+                            let strategy = last
+                                .or(status.strategy)
+                                .or_else(|| available.first().cloned());
+                            if let Some(s) = strategy {
+                                let _ = start_zapret(app.clone(), s, "service".to_string(), state);
+                            }
+                        }
+                        refresh_tray_menu(app);
+                    }
+                    "warp_toggle" => refresh_warp_tray(app, true),
+                    id if id.starts_with("strat_") => {
+                        let strategy = &id[6..];
+                        let state = app.state::<AppState>();
+                        let _ = start_zapret(
+                            app.clone(),
+                            strategy.to_string(),
+                            "service".to_string(),
+                            state,
+                        );
+                        refresh_tray_menu(app);
+                    }
+                    _ => {}
                 })
-                .on_tray_icon_event(|tray, event| {
-                    match event {
-                        TrayIconEvent::Click {
-                            button: tauri::tray::MouseButton::Left,
-                            ..
-                        } => {
-                            let app = tray.app_handle();
-                            if let Some(window) = app
-                                .get_webview_window("setup")
-                                .or_else(|| app.get_webview_window("main"))
-                            {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                                // Скрываем иконку при разворачивании
-                                let _ = tray.set_visible(false);
-                            }
+                .on_tray_icon_event(|tray, event| match event {
+                    TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        ..
+                    } => {
+                        let app = tray.app_handle();
+                        if let Some(window) = app
+                            .get_webview_window("setup")
+                            .or_else(|| app.get_webview_window("main"))
+                        {
+                            let _ = window.show();
+                            let _ = window.set_focus();
                         }
-                        TrayIconEvent::Click {
-                            button: tauri::tray::MouseButton::Right,
-                            ..
-                        } => {
-                            refresh_tray_menu(tray.app_handle());
-                        }
-                        _ => {}
                     }
+                    TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Right,
+                        ..
+                    } => {
+                        refresh_tray_menu(tray.app_handle());
+                    }
+                    _ => {}
                 })
                 .build(app)?;
 
-            // Сохраняем обработчик трея и задаем изначальную видимость (показываем в трее при автостарте)
+            // The tray icon is a persistent control surface, whether or not
+            // the main window is currently visible.
             {
                 let state = app.state::<AppState>();
-                let _ = tray.set_visible(is_autostart);
+                let _ = tray.set_visible(true);
                 *state.tray_handle.lock_unpoisoned() = Some(tray);
             }
 
@@ -3851,7 +3862,17 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_, event| {
+        .run(|app, event| {
+            // Ensure Windows receives the visibility update after its event
+            // loop is ready; on a cold launch, setup-time updates can occur
+            // before the notification area has finished initializing.
+            if matches!(event, tauri::RunEvent::Ready) {
+                let state = app.state::<AppState>();
+                let tray = state.tray_handle.lock_unpoisoned().clone();
+                if let Some(tray) = tray {
+                    let _ = tray.set_visible(true);
+                }
+            }
             if matches!(event, tauri::RunEvent::Exit) {
                 let _ = providers::warp::applications::shutdown();
                 if let Err(error) = providers::warp::sites::shutdown() {

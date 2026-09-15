@@ -55,6 +55,13 @@ enum ProbeKind {
     Tls13,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum TestKind {
+    Standard,
+    Dpi,
+    Combined,
+}
+
 struct TestGuard;
 
 impl TestGuard {
@@ -369,9 +376,10 @@ pub async fn run(
     game_filter: &str,
 ) -> Result<Vec<TestResult>, String> {
     let _guard = TestGuard::acquire()?;
-    let is_dpi = match test_type {
-        "standard" => false,
-        "dpi" => true,
+    let test_kind = match test_type {
+        "standard" => TestKind::Standard,
+        "dpi" => TestKind::Dpi,
+        "combined" => TestKind::Combined,
         _ => return Err("wizard_error_invalid_test_type".to_string()),
     };
     let strategies = provider.strategies()?;
@@ -379,7 +387,9 @@ pub async fn run(
         return Err("wizard_no_strategies".to_string());
     }
 
-    let timeout = if is_dpi {
+    let runs_dpi = test_kind != TestKind::Standard;
+    let runs_standard = test_kind != TestKind::Dpi;
+    let timeout = if runs_dpi {
         Duration::from_secs(5)
     } else {
         Duration::from_secs(4)
@@ -390,12 +400,13 @@ pub async fn run(
         return Err("wizard_error_no_http_clients".to_string());
     }
 
-    let targets = if is_dpi {
-        load_dpi_targets().await
+    let standard_targets = runs_standard.then(|| load_standard_targets(root));
+    let dpi_targets = if runs_dpi {
+        Some(load_dpi_targets().await)
     } else {
-        load_standard_targets(root)
+        None
     };
-    let ipset_override = is_dpi.then(|| test_ipset_override(root)).transpose()?;
+    let ipset_override = runs_dpi.then(|| test_ipset_override(root)).transpose()?;
     let mut results = Vec::with_capacity(strategies.len());
     let mut best: Option<(String, i32)> = None;
 
@@ -450,10 +461,11 @@ pub async fn run(
             continue;
         }
 
-        let result = if is_dpi {
+        let dpi_clients = clients.clone();
+        let run_dpi = |targets: Vec<Target>| async move {
             let payload = dpi_payload();
             let mut probes = stream::iter(targets.clone().into_iter().map(|target| {
-                let clients = clients.clone();
+                let clients = dpi_clients.clone();
                 let payload = payload.clone();
                 async move { dpi_target(target, clients, payload).await }
             }))
@@ -478,9 +490,11 @@ pub async fn run(
                 }
             }
             TestResult::from_counts(name.clone(), http_ok, http_error, 0, 0, 0)
-        } else {
+        };
+        let standard_clients = clients.clone();
+        let run_standard = |targets: Vec<Target>| async move {
             let mut probes = stream::iter(targets.clone().into_iter().map(|target| {
-                let clients = clients.clone();
+                let clients = standard_clients.clone();
                 async move { standard_target(target, clients).await }
             }))
             .buffer_unordered(8);
@@ -535,6 +549,19 @@ pub async fn run(
             };
             TestResult::from_counts(name.clone(), http_ok, http_error, ping_ok, ping_fail, avg)
         };
+        let result = match test_kind {
+            TestKind::Standard => run_standard(standard_targets.clone().unwrap_or_default()).await,
+            TestKind::Dpi => run_dpi(dpi_targets.clone().unwrap_or_default()).await,
+            TestKind::Combined => {
+                let standard = run_standard(standard_targets.clone().unwrap_or_default()).await;
+                if TEST_CANCELLED.load(Ordering::Acquire) {
+                    standard
+                } else {
+                    let dpi = run_dpi(dpi_targets.clone().unwrap_or_default()).await;
+                    TestResult::from_combined(standard, dpi)
+                }
+            }
+        };
         drop(process);
 
         if best.as_ref().is_none_or(|(_, score)| result.score > *score) {
@@ -571,5 +598,16 @@ mod tests {
         let payload = dpi_payload();
         assert_eq!(payload.len(), 65_536);
         assert!(payload.windows(2).any(|pair| pair[0] != pair[1]));
+    }
+
+    #[test]
+    fn combined_score_weights_each_suite_independently() {
+        let standard = TestResult::from_counts("test".into(), 3, 0, 2, 0, 15);
+        let dpi = TestResult::from_counts("test".into(), 12, 0, 0, 0, 0);
+
+        let result = TestResult::from_combined(standard, dpi);
+
+        assert_eq!(result.score, 1_000);
+        assert_eq!(result.avg_ping_ms, 15);
     }
 }
