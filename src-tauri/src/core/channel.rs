@@ -1,3 +1,4 @@
+use base64::Engine;
 use futures_util::{Stream, StreamExt};
 use minisign_verify::{PublicKey, Signature};
 use reqwest::header::{CACHE_CONTROL, USER_AGENT};
@@ -13,7 +14,6 @@ const PRODUCTION_SIGNATURE_URL: &str =
 const CORE_CHANNEL_PUBLIC_KEY: &str = "RWSF180m7EnKBXIHk0nI+xssrK0ft4gpVAuq3H1BtC3ICzDhZV7pHFji";
 const MAX_MANIFEST_BYTES: usize = 256 * 1024;
 const MAX_SIGNATURE_BYTES: usize = 16 * 1024;
-const EMBEDDED: &str = include_str!("../../../core-channel/stable.json");
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -124,31 +124,34 @@ where
     Ok(body)
 }
 
-fn resolve_bytes(
-    remote: Result<(Vec<u8>, Vec<u8>), String>,
-    embedded: &[u8],
+fn resolve_remote_bytes(
+    bytes: &[u8],
+    signature: &[u8],
     provider: &str,
 ) -> Result<CoreRelease, String> {
-    match remote.and_then(|(bytes, signature)| {
-        verify_signature(&bytes, &signature)?;
-        StableManifest::parse_and_validate(&bytes, provider)
-    }) {
-        Ok(release) => Ok(release),
-        Err(reason) => {
-            eprintln!("Stable core channel fallback: {reason}");
-            StableManifest::parse_and_validate(embedded, provider)
-                .map_err(|_| "Stable core channel is temporarily unavailable".to_string())
-        }
-    }
+    verify_signature(bytes, signature)?;
+    StableManifest::parse_and_validate(bytes, provider)
 }
 
 fn verify_with_key(bytes: &[u8], signature: &[u8], public_key: &str) -> Result<(), String> {
-    let signature =
+    let encoded =
         std::str::from_utf8(signature).map_err(|_| "channel signature is not UTF-8".to_string())?;
     let public_key = PublicKey::from_base64(public_key)
         .map_err(|e| format!("embedded channel public key is invalid: {e}"))?;
-    let signature =
-        Signature::decode(signature).map_err(|e| format!("channel signature is invalid: {e}"))?;
+    let signature = match Signature::decode(encoded.trim()) {
+        Ok(signature) => signature,
+        Err(_) => {
+            // `tauri signer sign` writes the complete minisign document as a
+            // single Base64 value, which is the format published by our
+            // release workflow. Keep accepting plain minisign documents too.
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(encoded.trim())
+                .map_err(|e| format!("channel signature is invalid: {e}"))?;
+            let decoded = std::str::from_utf8(&decoded)
+                .map_err(|_| "decoded channel signature is not UTF-8".to_string())?;
+            Signature::decode(decoded).map_err(|e| format!("channel signature is invalid: {e}"))?
+        }
+    };
     public_key
         .verify(bytes, &signature, false)
         .map_err(|e| format!("channel signature verification failed: {e}"))
@@ -180,6 +183,9 @@ async fn download_limited(
     collect_limited(Box::pin(response.bytes_stream()), limit).await
 }
 
+/// Resolves an authenticated remote channel. A failed request must remain an
+/// error so the UI can offer a proxy retry instead of reporting an old core as
+/// current from a bundled manifest.
 pub async fn resolve_stable(
     client: &reqwest::Client,
     provider: &str,
@@ -196,8 +202,7 @@ pub async fn resolve_stable(
         download_limited(client, &signature_url, user_agent, MAX_SIGNATURE_BYTES),
     )
     .await;
-    let remote = manifest.and_then(|manifest| signature.map(|signature| (manifest, signature)));
-    resolve_bytes(remote, EMBEDDED.as_bytes(), provider)
+    resolve_remote_bytes(&manifest?, &signature?, provider)
 }
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
@@ -257,23 +262,8 @@ mod tests {
         assert_eq!(compare_versions("Err", "1.2.3"), CoreUpdateStatus::Unknown);
     }
     #[test]
-    fn remote_error_and_invalid_remote_use_embedded() {
-        assert_eq!(
-            resolve_bytes(Err("offline".into()), &valid(), "flowseal")
-                .unwrap()
-                .version,
-            "1.2.3"
-        );
-        assert_eq!(
-            resolve_bytes(
-                Ok((b"not json".to_vec(), b"not a signature".to_vec())),
-                &valid(),
-                "flowseal"
-            )
-            .unwrap()
-            .version,
-            "1.2.3"
-        );
+    fn remote_resolution_rejects_invalid_content() {
+        assert!(resolve_remote_bytes(b"not json", b"not a signature", "flowseal").is_err());
     }
     #[tokio::test(flavor = "current_thread")]
     async fn streaming_limit_stops_oversized_body() {
@@ -294,9 +284,24 @@ mod tests {
         assert!(verify_with_key(b"modified", SIGNATURE.as_bytes(), KEY).is_err());
     }
     #[test]
-    fn core_channel_key_matches_the_tauri_updater_identity() {
-        use base64::Engine;
+    fn verifies_tauri_base64_signature_format() {
+        const KEY: &str = "RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
+        const SIGNATURE: &str = "untrusted comment: signature from minisign secret key\nRUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=\ntrusted comment: timestamp:1633700835\tfile:test\tprehashed\nwLMDjy9FLAuxZ3q4NlEvkgtyhrr0gtTu6KC4KBJdITbbOeAi1zBIYo0v4iTgt8jJpIidRJnp94ABQkJAgAooBQ==";
+        let tauri_signature = base64::engine::general_purpose::STANDARD.encode(SIGNATURE);
 
+        assert!(verify_with_key(b"test", tauri_signature.as_bytes(), KEY).is_ok());
+        assert!(verify_with_key(b"modified", tauri_signature.as_bytes(), KEY).is_err());
+    }
+    #[test]
+    fn checked_in_channel_signature_is_valid() {
+        let manifest = String::from_utf8_lossy(include_bytes!("../../../core-channel/stable.json"))
+            .replace("\r\n", "\n");
+        let signature = include_bytes!("../../../core-channel/stable.json.sig");
+
+        verify_signature(manifest.as_bytes(), signature).unwrap();
+    }
+    #[test]
+    fn core_channel_key_matches_the_tauri_updater_identity() {
         let config: serde_json::Value =
             serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
         let encoded = config["plugins"]["updater"]["pubkey"].as_str().unwrap();

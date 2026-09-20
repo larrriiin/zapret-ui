@@ -1,6 +1,6 @@
 # Managed stable core channel
 
-Core updates are controlled by `core-channel/stable.json`; the application never promotes an upstream Flowseal release automatically. Remote manifests are accepted only with a valid detached `stable.json.sig` minisign signature. The checked-in manifest is also the trusted offline fallback embedded at compile time.
+Core updates are controlled by `core-channel/stable.json`; the application never promotes an upstream Flowseal release automatically. Remote manifests are accepted only with a valid detached `stable.json.sig` minisign signature. When the channel cannot be reached, the application reports that error and offers a proxy retry; it never treats an embedded, potentially stale manifest as the current release.
 
 ## Promotion
 
@@ -10,7 +10,7 @@ Core updates are controlled by `core-channel/stable.json`; the application never
 4. Sign the manifest with `npm run sign-core-channel`. The command uses the same `TAURI_SIGNING_PRIVATE_KEY` identity as application updates.
 5. Review both `stable.json` and `stable.json.sig`, including every URL, version, checksum, and signature change.
 6. Open a separate pull request containing the manifest promotion. The script deliberately does not commit, push, merge, or publish.
-7. Once merged to `main`, clients receive the approved version without a new application release. Builds retain that manifest as their last-known-good offline fallback.
+7. Once merged to `main`, clients receive the approved version without a new application release.
 
 The stable channel is active. Its current Flowseal version, download URL, and verified checksum are recorded in `core-channel/stable.json`.
 

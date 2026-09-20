@@ -1,7 +1,41 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { checkForUpdates, checkUIUpdate } from '../src/features/updates.js';
+import {
+  checkForUpdates,
+  checkUIUpdate,
+  coreCurrentVersionLabel,
+  shouldSurfaceUpdateCheckFailure,
+} from '../src/features/updates.js';
+
+test('an unavailable channel does not hide a known installed core version', () => {
+  const translate = (key) => key;
+  assert.equal(
+    coreCurrentVersionLabel({ status: 'unknown', current: '1.10.2' }, translate),
+    'v1.10.2',
+  );
+  assert.equal(
+    coreCurrentVersionLabel({ status: 'unknown', current: null }, translate),
+    'core_version_unknown',
+  );
+});
+
+test('a failed endpoint is surfaced when Telegram is installed but has no update', () => {
+  assert.equal(shouldSurfaceUpdateCheckFailure({
+    hasUIUpdate: false,
+    hasCoreUpdate: false,
+    hasTelegramUpdate: false,
+    uiFailed: false,
+    coreFailed: true,
+  }), true);
+  assert.equal(shouldSurfaceUpdateCheckFailure({
+    hasUIUpdate: false,
+    hasCoreUpdate: false,
+    hasTelegramUpdate: true,
+    uiFailed: false,
+    coreFailed: true,
+  }), false);
+});
 
 test('background update checks never resolve or use the built-in proxy', async () => {
   const updaterCalls = [];
@@ -21,6 +55,7 @@ test('background update checks never resolve or use the built-in proxy', async (
         invoke: async (command, args) => {
           invokeCalls.push({ command, args });
           if (command === 'get_ui_version_cmd') return '26.9.5';
+          if (command === 'get_local_version_cmd') return '1.10.2';
           if (command === 'get_core_update_info') throw new Error('offline');
           if (command === 'get_telegram_status') return { installed: false };
           if (command === 'get_update_proxy') throw new Error('background check requested proxy');
@@ -41,6 +76,7 @@ test('background update checks never resolve or use the built-in proxy', async (
   assert.deepEqual(updaterCalls, [undefined]);
   assert.deepEqual(invokeCalls, [
     { command: 'get_ui_version_cmd', args: undefined },
+    { command: 'get_local_version_cmd', args: undefined },
     { command: 'get_core_update_info', args: { useProxy: false, customProxy: null } },
     { command: 'get_telegram_status', args: undefined },
   ]);

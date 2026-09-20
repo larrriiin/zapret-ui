@@ -16,6 +16,21 @@ import { checkTelegramUpdate, mountTelegramUpdate, isTelegramUpdating } from './
 
 let currentUpdateObject = null;
 
+export function coreCurrentVersionLabel(core, translate = t) {
+  if (core.status === 'not_installed') return translate('core_not_installed');
+  return core.current ? `v${core.current}` : translate('core_version_unknown');
+}
+
+export function shouldSurfaceUpdateCheckFailure({
+  hasUIUpdate,
+  hasCoreUpdate,
+  hasTelegramUpdate,
+  uiFailed,
+  coreFailed,
+}) {
+  return !hasUIUpdate && !hasCoreUpdate && !hasTelegramUpdate && (uiFailed || coreFailed);
+}
+
 async function withTimeout(promise, timeoutMs) {
   let timeoutId;
   try {
@@ -239,11 +254,7 @@ function showDualUpdateModal(data, manual = false) {
     unknown: t('core_update_unknown'),
   };
   const coreStatus = `<span class="${data.core.available ? 'text-secondary' : 'text-on-surface-variant/70'} text-[10px] font-bold uppercase">${coreStatusLabels[data.core.status] || t('core_update_unknown')}</span>`;
-  const coreCurrentVersion = data.core.status === 'not_installed'
-    ? t('core_not_installed')
-    : data.core.status === 'unknown'
-      ? t('core_version_unknown')
-      : `v${data.core.current}`;
+  const coreCurrentVersion = coreCurrentVersionLabel(data.core);
 
   modal.innerHTML = `
     <div class="bg-surface-container-high border border-outline-variant/30 rounded-3xl p-8 max-w-lg w-full shadow-2xl animate-scale-in max-h-[90vh] overflow-y-auto">
@@ -331,26 +342,41 @@ export async function checkForUpdates(manual = false, useProxy = false, customPr
   }
 
   try {
-    const uiLocalVersion = await invoke('get_ui_version_cmd');
+    const [uiLocalVersion, coreLocalVersion] = await Promise.all([
+      invoke('get_ui_version_cmd'),
+      invoke('get_local_version_cmd'),
+    ]);
     const [uiResult, coreResult, telegramResult] = await Promise.allSettled([
       checkUIUpdate(useProxy, customProxy),
       invoke('get_core_update_info', { useProxy, customProxy }),
       checkTelegramUpdate(),
     ]);
     const telegram = telegramResult.status === 'fulfilled' ? telegramResult.value : null;
-    // A failed UI/core endpoint must not suppress a Telegram module update.
-    if (!telegram && (uiResult.status === 'rejected' || coreResult.status === 'rejected')) throw uiResult.reason || coreResult.reason;
     const uiUpdate = uiResult.status === 'fulfilled' ? uiResult.value : null;
-    const coreInfo = coreResult.status === 'fulfilled' ? coreResult.value : { status: 'unknown' };
+    const coreInfo = coreResult.status === 'fulfilled'
+      ? coreResult.value
+      : { status: 'unknown', currentVersion: coreLocalVersion };
 
     const hasUIUpdate = !!uiUpdate;
     const hasCoreUpdate = coreInfo.status === 'update_available' || coreInfo.status === 'not_installed';
+    const hasTelegramUpdate = !!telegram?.available;
+    // Preserve any actionable update from another component. With no update to
+    // show, surface the failed endpoint so a manual check can offer proxy retry.
+    if (shouldSurfaceUpdateCheckFailure({
+      hasUIUpdate,
+      hasCoreUpdate,
+      hasTelegramUpdate,
+      uiFailed: uiResult.status === 'rejected',
+      coreFailed: coreResult.status === 'rejected',
+    })) {
+      throw uiResult.reason || coreResult.reason;
+    }
     const showCoreError = manual && coreInfo.status === 'unknown';
 
     if (hasUIUpdate || hasCoreUpdate || telegram?.available || showCoreError || manual) {
       showDualUpdateModal({
         ui: { available: hasUIUpdate, current: uiLocalVersion, latest: hasUIUpdate ? uiUpdate.version : uiLocalVersion, updateObj: uiUpdate, error: uiResult.status === 'rejected' },
-        core: { available: hasCoreUpdate, current: coreInfo.currentVersion || t('core_not_installed'), latest: coreInfo.stableVersion, status: coreInfo.status, error: showCoreError },
+        core: { available: hasCoreUpdate, current: coreInfo.currentVersion || null, latest: coreInfo.stableVersion, status: coreInfo.status, error: showCoreError },
         telegram,
       }, manual);
     }
