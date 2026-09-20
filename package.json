@@ -18,6 +18,7 @@
     "test:update-privacy": "node --test scripts/update-check-privacy.test.mjs",
     "test:first-run": "node --test scripts/first-run-state.test.mjs",
     "test:status": "node --test scripts/status-check.test.mjs",
+    "test:strategy-selection": "node --test scripts/strategy-selection.test.mjs",
     "sign-core-channel": "tauri signer sign core-channel/stable.json",
     "set-version": "node scripts/set-version.mjs",
     "promote-core-stable": "node scripts/promote-core-stable.mjs",

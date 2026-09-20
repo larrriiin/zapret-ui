@@ -991,6 +991,16 @@ fn get_strategies() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+fn remember_strategy_selection(strategy: String, state: State<'_, AppState>) -> Result<(), String> {
+    let available = get_strategies()?;
+    if !available.iter().any(|candidate| candidate == &strategy) {
+        return Err("Selected strategy is not available".into());
+    }
+    *state.last_strategy.lock_unpoisoned() = Some(strategy);
+    Ok(())
+}
+
+#[tauri::command]
 fn import_custom_strategy(file_name: String, content: String) -> Result<String, String> {
     let _operation_guard =
         CoreOperationGuard::acquire().map_err(|_| "strategy_import_error_busy".to_string())?;
@@ -2212,16 +2222,25 @@ async fn download_and_install_update(
     let restart = restart_context(get_zapret_status(state.clone()), "update")?;
     let should_restart = restart.is_some();
     let filters_status = get_filters_status();
+    let traffic_monitor_was_running = state.traffic_monitor.is_running();
+    if traffic_monitor_was_running {
+        state
+            .traffic_monitor
+            .stop(&dir.join("bin").join("WinDivert.dll"));
+    }
     if restart.is_some() {
         window.emit("core-update-phase", "stopping").ok();
-        if let Err(error) = stop_zapret_internal() {
+        if let Err(error) = stop_zapret(state.clone()) {
+            if traffic_monitor_was_running {
+                let _ = start_traffic_monitor(state.clone());
+            }
             installation.remove_owned_staging(&staging)?;
             return Err(format!("Cannot stop zapret before activation: {error}"));
         }
     }
 
     window.emit("core-update-phase", "activating").ok();
-    let operation = (|| {
+    let mut operation = (|| {
         installation.activate(&staging, manager.provider())?;
         if let Err(error) = set_game_filter(
             filters_status.game_filter,
@@ -2261,10 +2280,25 @@ async fn download_and_install_update(
         window.emit("core-update-phase", "restarting").ok();
     }
     let restart_result = restart.map(|(strategy, mode)| {
-        start_zapret(app, strategy, mode, state)
+        start_zapret(app, strategy, mode, state.clone())
             .map(|_| ())
             .map_err(|e| format!("Cannot restart zapret after core update: {e}"))
     });
+    if traffic_monitor_was_running {
+        if let Err(monitor_error) = start_traffic_monitor(state.clone()) {
+            if operation.is_ok() {
+                warnings.push(format!(
+                    "Core updated, but the traffic monitor could not restart: {monitor_error}"
+                ));
+            } else {
+                operation = operation.map_err(|error| {
+                    format!(
+                        "{error}; traffic monitor could not restart after the failed update: {monitor_error}"
+                    )
+                });
+            }
+        }
+    }
     match (operation, restart_result) {
         (Err(error), Some(Err(restart_error))) => Err(format!("{error}; {restart_error}")),
         (Err(error), _) => Err(error),
@@ -2516,8 +2550,19 @@ fn rollback_core_update(
     installation.prepare(active_manager.provider())?;
     let filters = get_filters_status();
     let restart = restart_context(get_zapret_status(state.clone()), "rollback")?;
+    let traffic_monitor_was_running = state.traffic_monitor.is_running();
+    if traffic_monitor_was_running {
+        state
+            .traffic_monitor
+            .stop(&dir.join("bin").join("WinDivert.dll"));
+    }
     if restart.is_some() {
-        stop_zapret_internal().map_err(|e| format!("Cannot stop zapret before rollback: {e}"))?;
+        if let Err(error) = stop_zapret(state.clone()) {
+            if traffic_monitor_was_running {
+                let _ = start_traffic_monitor(state.clone());
+            }
+            return Err(format!("Cannot stop zapret before rollback: {error}"));
+        }
     }
 
     let operation = (|| {
@@ -2550,13 +2595,28 @@ fn rollback_core_update(
     })();
 
     let restart_result = restart.map(|(strategy, mode)| {
-        start_zapret(app, strategy, mode, state)
+        start_zapret(app, strategy, mode, state.clone())
             .map_err(|e| format!("Cannot restart zapret after rollback attempt: {e}"))
     });
-    match (operation, restart_result) {
-        (Ok(_), Some(Err(error))) => Err(error),
-        (Err(error), Some(Err(restart))) => Err(format!("{error}; {restart}")),
-        (result, _) => result,
+    let monitor_restart_result = traffic_monitor_was_running
+        .then(|| start_traffic_monitor(state).map(|_| ()))
+        .transpose();
+    match (operation, restart_result, monitor_restart_result) {
+        (Ok(_), Some(Err(restart)), Err(monitor)) => Err(format!(
+            "Core rollback completed, but zapret and the traffic monitor could not restart: {restart}; {monitor}"
+        )),
+        (Ok(_), _, Err(error)) => Err(format!(
+            "Core rollback completed, but the traffic monitor could not restart: {error}"
+        )),
+        (Err(error), Some(Err(restart)), Err(monitor)) => Err(format!(
+            "{error}; {restart}; traffic monitor could not restart: {monitor}"
+        )),
+        (Err(error), _, Err(monitor)) => Err(format!(
+            "{error}; traffic monitor could not restart: {monitor}"
+        )),
+        (Ok(_), Some(Err(error)), _) => Err(error),
+        (Err(error), Some(Err(restart)), _) => Err(format!("{error}; {restart}")),
+        (result, _, _) => result,
     }
 }
 
@@ -3964,6 +4024,7 @@ pub fn run() {
             finish_setup_window,
             show_app_window,
             get_strategies,
+            remember_strategy_selection,
             import_custom_strategy,
             get_local_version_cmd,
             get_ui_version_cmd,

@@ -9,13 +9,31 @@ import { beginRestart, endRestart } from '../lib/restart.js';
 let _strategyValue = '';
 let _allStrategies = [];
 const FAVORITES_KEY = 'zapret.favorites';
+const LAST_STRATEGY_KEY = 'zapret.lastStrategy';
 const MAX_CUSTOM_STRATEGY_SIZE = 256 * 1024;
 
 // Injected by status.js to avoid a static import cycle. See setPollStatus.
 let _pollStatus = null;
 export function setPollStatus(fn) { _pollStatus = fn; }
 
+export function readRememberedStrategy(storage) {
+  try {
+    const value = (storage || globalThis.localStorage)?.getItem(LAST_STRATEGY_KEY);
+    return typeof value === 'string' && value.length > 0 ? value : '';
+  } catch {
+    return '';
+  }
+}
+
+export function chooseStrategy(strategies, preferredStrategy = '', currentStrategy = '', rememberedStrategy = '') {
+  for (const candidate of [preferredStrategy, currentStrategy, rememberedStrategy]) {
+    if (candidate && strategies.includes(candidate)) return candidate;
+  }
+  return strategies.includes('general') ? 'general' : strategies[0] || '';
+}
+
 export function setStrategyValue(value, label) {
+  const changed = _strategyValue !== value;
   _strategyValue = value;
   const lbl = $('strategy-label');
   if (lbl) {
@@ -26,6 +44,14 @@ export function setStrategyValue(value, label) {
   }
   const sel = $('strategy-select');
   if (sel) sel.value = value;
+  if (changed && value) {
+    try { localStorage.setItem(LAST_STRATEGY_KEY, value); } catch { /* Session-only selection. */ }
+    if (globalThis.window?.__TAURI__) {
+      invoke('remember_strategy_selection', { strategy: value }).catch((error) => {
+        console.warn('Could not synchronize the selected strategy:', error);
+      });
+    }
+  }
 }
 
 export function getStrategyValue() {
@@ -234,7 +260,8 @@ export function renderStrategyList() {
 
 export async function loadStrategies(preferredStrategy = '') {
   const sel = $('strategy-select');
-  const previousStrategy = preferredStrategy || getStrategyValue();
+  const currentStrategy = getStrategyValue();
+  const rememberedStrategy = readRememberedStrategy();
   try {
     const strategies = await invoke('get_strategies');
     _allStrategies = Array.isArray(strategies) ? strategies : [];
@@ -257,9 +284,12 @@ export async function loadStrategies(preferredStrategy = '') {
       }
     });
 
-    const defaultName = _allStrategies.includes(previousStrategy)
-      ? previousStrategy
-      : (_allStrategies.includes('general') ? 'general' : _allStrategies[0]);
+    const defaultName = chooseStrategy(
+      _allStrategies,
+      preferredStrategy,
+      currentStrategy,
+      rememberedStrategy,
+    );
     setStrategyValue(defaultName, defaultName);
     renderStrategyList();
   } catch (err) {

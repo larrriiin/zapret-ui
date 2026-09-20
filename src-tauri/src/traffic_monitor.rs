@@ -479,6 +479,10 @@ impl Default for TrafficMonitor {
 }
 
 impl TrafficMonitor {
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::Acquire)
+    }
+
     pub fn refresh_filter(&self, args: &str, strategy: Option<String>) {
         let key = CapturePortFilter::source_key(args, strategy.as_deref());
         if *self.filter_key.lock_unpoisoned() == key {
