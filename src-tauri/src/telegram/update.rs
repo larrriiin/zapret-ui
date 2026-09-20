@@ -1,12 +1,14 @@
-//! Update the headless source from an exact official GitHub commit, retaining
+//! Update the headless source from an official GitHub release tag, retaining
 //! the pinned interpreter/dependencies. Incompatible releases never activate.
 use super::*;
+use reqwest::header::LOCATION;
 
-const API: &str = "https://api.github.com/repos/Flowseal/tg-ws-proxy";
+const LATEST_RELEASE_URL: &str = "https://github.com/Flowseal/tg-ws-proxy/releases/latest";
+const RELEASE_TAG_PATH: &str = "/Flowseal/tg-ws-proxy/releases/tag/";
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Release {
     pub version: String,
-    pub commit: String,
+    pub reference: String,
 }
 #[derive(Serialize)]
 pub struct UpdateInfo {
@@ -37,47 +39,54 @@ fn client() -> Result<reqwest::Client, String> {
         .build()
         .map_err(|e| e.to_string())
 }
-async fn json(client: &reqwest::Client, url: &str) -> Result<serde_json::Value, String> {
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .error_for_status()
-        .map_err(|e| e.to_string())?;
-    let mut bytes = Vec::new();
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| e.to_string())?;
-        if bytes.len() + chunk.len() > 1024 * 1024 {
-            return Err("tg_update_metadata_invalid".into());
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    serde_json::from_slice(&bytes).map_err(|e| e.to_string())
-}
-async fn latest() -> Result<Release, String> {
-    let client = client()?;
-    let release = json(&client, &format!("{API}/releases/latest")).await?;
-    if release["draft"] != false || release["prerelease"] != false {
+fn release_from_location(location: &str) -> Result<Release, String> {
+    let url = reqwest::Url::parse(location).map_err(|_| "tg_update_metadata_invalid")?;
+    if url.scheme() != "https"
+        || url.host_str() != Some("github.com")
+        || url.port_or_known_default() != Some(443)
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
         return Err("tg_update_metadata_invalid".into());
     }
-    let tag = release["tag_name"]
-        .as_str()
+    let tag = url
+        .path()
+        .strip_prefix(RELEASE_TAG_PATH)
+        .filter(|tag| !tag.contains('/'))
         .ok_or("tg_update_metadata_invalid")?;
-    let version = tag.trim_start_matches('v');
+    let version = tag.strip_prefix('v').unwrap_or(tag);
     if !valid_version(version) {
-        return Err("tg_update_metadata_invalid".into());
-    }
-    let commit = json(&client, &format!("{API}/commits/{tag}")).await?;
-    let sha = commit["sha"].as_str().ok_or("tg_update_metadata_invalid")?;
-    if sha.len() != 40 || !sha.bytes().all(|c| c.is_ascii_hexdigit()) {
         return Err("tg_update_metadata_invalid".into());
     }
     Ok(Release {
         version: version.into(),
-        commit: sha.into(),
+        reference: format!("v{version}"),
     })
+}
+async fn latest() -> Result<Release, String> {
+    let client = client()?;
+    let response = client
+        .get(LATEST_RELEASE_URL)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !response.status().is_redirection() {
+        return Err(format!("tg_update_check_http: {}", response.status()));
+    }
+    let location = response
+        .headers()
+        .get(LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .ok_or("tg_update_metadata_invalid")?;
+    release_from_location(location)
+}
+fn archive_url(release: &Release) -> String {
+    format!(
+        "https://codeload.github.com/Flowseal/tg-ws-proxy/zip/refs/tags/{}",
+        release.reference
+    )
 }
 #[tauri::command]
 pub async fn check_telegram_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
@@ -155,12 +164,10 @@ pub async fn update_telegram(app: tauri::AppHandle) -> Result<String, String> {
     if !newer(&current, &release.version) {
         return Ok(current);
     }
-    // No user paths/URLs are accepted. The commit came from the official API.
+    // No user paths/URLs are accepted. The tag came from GitHub's official
+    // latest-release redirect and passed the strict semantic-version parser.
     let response = client()?
-        .get(format!(
-            "https://codeload.github.com/Flowseal/tg-ws-proxy/zip/{}",
-            release.commit
-        ))
+        .get(archive_url(&release))
         .send()
         .await
         .map_err(|e| e.to_string())?
@@ -197,7 +204,10 @@ pub async fn update_telegram(app: tauri::AppHandle) -> Result<String, String> {
             )
             .map_err(|e| e.to_string())?;
             metadata["version"] = release.version.clone().into();
-            metadata["source_commit"] = release.commit.into();
+            if let Some(value) = metadata.as_object_mut() {
+                value.remove("source_commit");
+                value.insert("source_ref".into(), release.reference.into());
+            }
             metadata["source_sha256"] = digest(&bytes).into();
             fs::write(
                 staging.join("installed.json"),
@@ -236,15 +246,38 @@ pub async fn update_telegram(app: tauri::AppHandle) -> Result<String, String> {
 mod tests {
     use super::*;
     #[tokio::test]
-    #[ignore = "Read-only live GitHub release/commit check; requires network"]
+    #[ignore = "Read-only live GitHub release redirect check; requires network"]
     async fn official_release_metadata() {
         let release = latest().await.unwrap();
         assert!(valid_version(&release.version));
-        assert_eq!(release.commit.len(), 40);
+        assert_eq!(release.reference, format!("v{}", release.version));
         println!(
             "Official release: {} at {}",
-            release.version, release.commit
+            release.version, release.reference
         );
+    }
+    #[test]
+    fn parses_only_the_official_latest_release_redirect() {
+        let release =
+            release_from_location("https://github.com/Flowseal/tg-ws-proxy/releases/tag/v1.10.4")
+                .unwrap();
+        assert_eq!(release.version, "1.10.4");
+        assert_eq!(release.reference, "v1.10.4");
+        assert_eq!(
+            archive_url(&release),
+            "https://codeload.github.com/Flowseal/tg-ws-proxy/zip/refs/tags/v1.10.4"
+        );
+
+        for location in [
+            "http://github.com/Flowseal/tg-ws-proxy/releases/tag/v1.10.4",
+            "https://github.com.evil.test/Flowseal/tg-ws-proxy/releases/tag/v1.10.4",
+            "https://user@github.com/Flowseal/tg-ws-proxy/releases/tag/v1.10.4",
+            "https://github.com/Flowseal/tg-ws-proxy/releases/tag/v1.10.4/extra",
+            "https://github.com/Flowseal/tg-ws-proxy/releases/tag/v1.10.4-beta",
+            "https://github.com/Flowseal/tg-ws-proxy/releases/tag/v1.10.4?x=1",
+        ] {
+            assert!(release_from_location(location).is_err(), "{location}");
+        }
     }
     #[test]
     fn versions_are_strict_and_never_downgrade() {
