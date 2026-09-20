@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::core::{CoreManifest, CorePaths, CoreProvider};
+use crate::core::{CoreManifest, CorePaths, CoreProvider, GameFilterSettings};
 
 const IPSET_URL: &str = "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/.service/ipset-service.txt";
 const STRATEGY_CATALOG_NAME: &str = "strategies.json";
@@ -127,11 +127,27 @@ impl FlowsealProvider {
         Ok(Self::unescape_cmd_arguments(arguments))
     }
 
-    fn resolve_strategy_arguments(&self, arguments: &str, game_filter: &str) -> String {
-        let (gf, gftcp, gfudp) = match game_filter {
-            "all" => ("1024-65535", "1024-65535", "1024-65535"),
-            "tcp" => ("1024-65535", "1024-65535", "12"),
-            "udp" => ("1024-65535", "12", "1024-65535"),
+    fn resolve_strategy_arguments(
+        &self,
+        arguments: &str,
+        game_filter: &GameFilterSettings,
+    ) -> String {
+        let (gf, gftcp, gfudp) = match game_filter.mode.as_str() {
+            "all" => (
+                game_filter.tcp_range.as_str(),
+                game_filter.tcp_range.as_str(),
+                game_filter.udp_range.as_str(),
+            ),
+            "tcp" => (
+                game_filter.tcp_range.as_str(),
+                game_filter.tcp_range.as_str(),
+                "12",
+            ),
+            "udp" => (
+                game_filter.udp_range.as_str(),
+                "12",
+                game_filter.udp_range.as_str(),
+            ),
             _ => ("12", "12", "12"),
         };
         let suffix = std::path::MAIN_SEPARATOR.to_string();
@@ -468,7 +484,11 @@ impl CoreProvider for FlowsealProvider {
             .map(|strategy| strategy.name)
             .collect())
     }
-    fn parse_strategy(&self, strategy: &str, game_filter: &str) -> Result<String, String> {
+    fn parse_strategy(
+        &self,
+        strategy: &str,
+        game_filter: &GameFilterSettings,
+    ) -> Result<String, String> {
         let catalog = self.read_catalog()?;
         let entry = catalog
             .strategies
@@ -716,9 +736,16 @@ mod tests {
         assert!(custom_path.is_file());
         std::fs::remove_file(custom_path).expect("remove source after catalog generation");
         let arguments = provider
-            .parse_strategy("My strategy", "udp")
+            .parse_strategy(
+                "My strategy",
+                &GameFilterSettings {
+                    mode: "udp".into(),
+                    tcp_range: "1024-65535".into(),
+                    udp_range: "2000-3000".into(),
+                },
+            )
             .expect("parse catalog entry");
-        assert!(arguments.contains("--filter-udp=1024-65535"));
+        assert!(arguments.contains("--filter-udp=2000-3000"));
         assert!(arguments.contains("lists"));
         let _ = std::fs::remove_dir_all(root);
     }
@@ -759,8 +786,15 @@ mod tests {
     fn parses_multiline_strategy_and_variables() {
         let p = FlowsealProvider::new("core");
         let template = FlowsealProvider::extract_strategy_arguments("\"%BIN%winws.exe\" --filter-tcp=%GameFilterTCP% ^\n --hostlist=\"%LISTS%list.txt\" --fake=^! --literal-caret=^^ --quoted=\"^!\" --fake-file=\"@bin\\fake.bin\"", "ALT").expect("parse");
-        let args = p.resolve_strategy_arguments(&template, "tcp");
-        assert!(args.contains("1024-65535"));
+        let args = p.resolve_strategy_arguments(
+            &template,
+            &GameFilterSettings {
+                mode: "tcp".into(),
+                tcp_range: "3000-4000".into(),
+                udp_range: "5000-6000".into(),
+            },
+        );
+        assert!(args.contains("3000-4000"));
         assert!(args.contains("core"));
         assert!(args.contains("--fake=!"));
         assert!(args.contains("--literal-caret=^"));

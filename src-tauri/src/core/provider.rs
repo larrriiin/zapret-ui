@@ -27,6 +27,17 @@ pub struct CoreRelease {
     pub artifacts: Vec<CoreArtifact>,
 }
 
+/// Runtime values substituted into Flowseal's GameFilter placeholders.
+///
+/// Flowseal 1.10.3 stores these values independently, so retaining only the
+/// mode would silently reset a user's selected port ranges during an update.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GameFilterSettings {
+    pub mode: String,
+    pub tcp_range: String,
+    pub udp_range: String,
+}
+
 /// Boundary between Tauri/core orchestration and an upstream core distribution.
 pub trait CoreProvider: Send + Sync {
     fn provider_name(&self) -> &'static str;
@@ -36,7 +47,11 @@ pub trait CoreProvider: Send + Sync {
     fn local_version(&self) -> String;
     fn is_installed(&self) -> bool;
     fn strategies(&self) -> Result<Vec<String>, String>;
-    fn parse_strategy(&self, strategy: &str, game_filter: &str) -> Result<String, String>;
+    fn parse_strategy(
+        &self,
+        strategy: &str,
+        game_filter: &GameFilterSettings,
+    ) -> Result<String, String>;
     fn import_custom_strategy(&self, name: &str, content: &str) -> Result<(), String>;
     /// Validates provider-specific on-disk structure and returns its version and strategy count.
     fn validate_installation(&self) -> Result<(String, usize), String>;

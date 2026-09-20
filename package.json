@@ -1,7 +1,7 @@
 {
   "name": "zapret-ui",
   "private": true,
-  "version": "26.9.17",
+  "version": "26.9.18",
   "type": "module",
   "scripts": {
     "installer:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1",
@@ -24,7 +24,6 @@
     "screenshots": "node scripts/generate-screenshots.mjs"
   },
   "devDependencies": {
-    "@rolldown/binding-win32-x64-msvc": "^1.2.8",
     "@tailwindcss/forms": "^0.5.11",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2.11.4",
@@ -35,6 +34,7 @@
     "vite": "^8.3.0"
   },
   "optionalDependencies": {
+    "@rolldown/binding-win32-x64-msvc": "^1.2.8",
     "@tailwindcss/oxide-win32-x64-msvc": "^4.3.3"
   }
 }

@@ -38,7 +38,7 @@ mod telegram;
 mod traffic_monitor;
 use core::{
     compare_versions, resolve_stable, Checksum, CoreInstallation, CoreInstallationState,
-    CoreManager, CoreUpdateStatus,
+    CoreManager, CoreUpdateStatus, GameFilterSettings,
 };
 use traffic_monitor::{TrafficMonitor, TrafficSnapshot};
 
@@ -135,6 +135,8 @@ fn restart_context(
 struct FiltersStatus {
     /// "disabled" | "all" | "tcp" | "udp"
     game_filter: String,
+    game_tcp_range: String,
+    game_udp_range: String,
     /// "none" | "any" | "loaded"
     ipset: String,
 }
@@ -773,9 +775,14 @@ fn parse_strategy_args(strategy: &str) -> Result<String, String> {
         return Err(format!("Invalid strategy name: {}", strategy));
     }
     let filters = get_filters_status();
-    core_manager()
-        .provider()
-        .parse_strategy(strategy, &filters.game_filter)
+    core_manager().provider().parse_strategy(
+        strategy,
+        &GameFilterSettings {
+            mode: filters.game_filter,
+            tcp_range: filters.game_tcp_range,
+            udp_range: filters.game_udp_range,
+        },
+    )
 }
 
 /// Splits a command-line arguments string into separate arguments, respecting double quotes
@@ -1153,26 +1160,102 @@ fn get_traffic_snapshot(state: State<'_, AppState>) -> TrafficSnapshot {
     state.traffic_monitor.snapshot()
 }
 
+const DEFAULT_GAME_FILTER_RANGE: &str = "1024-65535";
+
+fn valid_game_filter_range(value: &str) -> bool {
+    !value.is_empty()
+        && value.split(',').all(|part| {
+            let (start, end) = part.split_once('-').unwrap_or((part, part));
+            if start.is_empty() || end.is_empty() || end.contains('-') {
+                return false;
+            }
+            let Ok(start) = start.parse::<u16>() else {
+                return false;
+            };
+            let Ok(end) = end.parse::<u16>() else {
+                return false;
+            };
+            start > 0 && end > 0 && start <= end
+        })
+}
+
+fn game_filter_settings(path: &std::path::Path) -> GameFilterSettings {
+    let defaults = || GameFilterSettings {
+        mode: "disabled".into(),
+        tcp_range: DEFAULT_GAME_FILTER_RANGE.into(),
+        udp_range: DEFAULT_GAME_FILTER_RANGE.into(),
+    };
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return defaults();
+    };
+    let content = content.trim_start_matches('\u{FEFF}').trim();
+    if content.is_empty() {
+        return defaults();
+    }
+
+    // Flowseal <= 1.10.2 used one bare mode. Keep it readable forever.
+    if !content.contains('=') {
+        return GameFilterSettings {
+            mode: match content.to_ascii_lowercase().as_str() {
+                "all" | "tcp" | "udp" => content.to_ascii_lowercase(),
+                _ => "disabled".into(),
+            },
+            tcp_range: DEFAULT_GAME_FILTER_RANGE.into(),
+            udp_range: DEFAULT_GAME_FILTER_RANGE.into(),
+        };
+    }
+
+    let mut mode = None;
+    let mut tcp_range = None;
+    let mut udp_range = None;
+    for line in content.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key.trim().to_ascii_lowercase().as_str() {
+            "mode" => mode = Some(value.trim().to_ascii_lowercase()),
+            "tcp" => tcp_range = Some(value.trim().to_string()),
+            "udp" => udp_range = Some(value.trim().to_string()),
+            _ => {}
+        }
+    }
+    let mode = mode
+        .filter(|value| matches!(value.as_str(), "all" | "tcp" | "udp"))
+        .unwrap_or_else(|| "disabled".into());
+    let tcp_range = tcp_range
+        .filter(|value| valid_game_filter_range(value))
+        .unwrap_or_else(|| DEFAULT_GAME_FILTER_RANGE.into());
+    let udp_range = udp_range
+        .filter(|value| valid_game_filter_range(value))
+        .unwrap_or_else(|| DEFAULT_GAME_FILTER_RANGE.into());
+    GameFilterSettings {
+        mode,
+        tcp_range,
+        udp_range,
+    }
+}
+
+fn save_game_filter_settings(settings: &GameFilterSettings) -> Result<(), String> {
+    let game_flag = find_binaries_dir()
+        .join("utils")
+        .join("game_filter.enabled");
+    // Flowseal 1.10.3 intentionally retains ranges even when disabled, so a
+    // later re-enable does not silently broaden a user's selected ports.
+    std::fs::write(
+        game_flag,
+        format!(
+            "mode={}\r\ntcp={}\r\nudp={}\r\n",
+            settings.mode, settings.tcp_range, settings.udp_range
+        ),
+    )
+    .map_err(|e| e.to_string())
+}
+
 /// Состояние Game Filter и IPSet Filter по файлам конфигурации.
 #[tauri::command]
 fn get_filters_status() -> FiltersStatus {
     let dir = find_binaries_dir();
-
-    // ── Game Filter: binaries/utils/game_filter.enabled ──
-    // Консольная версия: отсутствие файла = disabled
-    let game_flag = dir.join("utils").join("game_filter.enabled");
-    let game_filter = if !game_flag.exists() {
-        "disabled".to_string()
-    } else {
-        let content = std::fs::read_to_string(&game_flag).unwrap_or_default();
-        // Убираем BOM, пробелы, CRLF
-        let mode = content.trim_start_matches('\u{FEFF}').trim().to_lowercase();
-        match mode.as_str() {
-            "tcp" => "tcp".to_string(),
-            "udp" => "udp".to_string(),
-            _ => "all".to_string(),
-        }
-    };
+    let game_settings = game_filter_settings(&dir.join("utils").join("game_filter.enabled"));
 
     // ── IPSet Filter: binaries/lists/ipset-all.txt ──
     let ipset_file = dir.join("lists").join("ipset-all.txt");
@@ -1190,24 +1273,38 @@ fn get_filters_status() -> FiltersStatus {
         }
     };
 
-    FiltersStatus { game_filter, ipset }
+    FiltersStatus {
+        game_filter: game_settings.mode,
+        game_tcp_range: game_settings.tcp_range,
+        game_udp_range: game_settings.udp_range,
+        ipset,
+    }
 }
 
 #[tauri::command]
-fn set_game_filter(mode: String) -> Result<(), String> {
-    let dir = find_binaries_dir();
-    let game_flag = dir.join("utils").join("game_filter.enabled");
-
-    if mode == "disabled" {
-        // Удаляем файл для совместимости с консольной версией
-        // Консольная версия считает отсутствие файла = disabled
-        if game_flag.exists() {
-            let _ = std::fs::remove_file(&game_flag);
-        }
-    } else {
-        std::fs::write(&game_flag, mode).map_err(|e| e.to_string())?;
+fn set_game_filter(
+    mode: String,
+    tcp_range: Option<String>,
+    udp_range: Option<String>,
+) -> Result<(), String> {
+    if !matches!(mode.as_str(), "disabled" | "all" | "tcp" | "udp") {
+        return Err("invalid_game_filter_mode".into());
     }
-    Ok(())
+    let existing = game_filter_settings(
+        &find_binaries_dir()
+            .join("utils")
+            .join("game_filter.enabled"),
+    );
+    let tcp_range = tcp_range.unwrap_or(existing.tcp_range);
+    let udp_range = udp_range.unwrap_or(existing.udp_range);
+    if !valid_game_filter_range(&tcp_range) || !valid_game_filter_range(&udp_range) {
+        return Err("invalid_game_filter_range".into());
+    }
+    save_game_filter_settings(&GameFilterSettings {
+        mode,
+        tcp_range,
+        udp_range,
+    })
 }
 
 #[tauri::command]
@@ -2126,8 +2223,12 @@ async fn download_and_install_update(
     window.emit("core-update-phase", "activating").ok();
     let operation = (|| {
         installation.activate(&staging, manager.provider())?;
-        if let Err(error) = set_game_filter(filters_status.game_filter)
-            .and_then(|_| set_ipset_filter(filters_status.ipset))
+        if let Err(error) = set_game_filter(
+            filters_status.game_filter,
+            Some(filters_status.game_tcp_range),
+            Some(filters_status.game_udp_range),
+        )
+        .and_then(|_| set_ipset_filter(filters_status.ipset))
         {
             installation
                 .rollback(
@@ -2247,8 +2348,9 @@ impl Drop for OwnedDirectoryCleanup {
 #[cfg(test)]
 mod temporary_cleanup_tests {
     use super::{
-        replace_path_case_insensitive, restart_context, CoreOperationGuard, OwnedDirectoryCleanup,
-        ZapretStatus, ELEVATED_PS_LAUNCH_COMMAND, STOP_ZAPRET_SERVICE_SCRIPT,
+        game_filter_settings, replace_path_case_insensitive, restart_context,
+        valid_game_filter_range, CoreOperationGuard, OwnedDirectoryCleanup, ZapretStatus,
+        ELEVATED_PS_LAUNCH_COMMAND, STOP_ZAPRET_SERVICE_SCRIPT,
     };
 
     #[test]
@@ -2355,6 +2457,42 @@ mod temporary_cleanup_tests {
             assert!(!path.exists());
         }
     }
+
+    #[test]
+    fn game_filter_reads_legacy_and_flowseal_1103_formats() {
+        let path = std::env::temp_dir().join(format!("zapret-game-filter-{}", std::process::id()));
+        std::fs::write(&path, "udp\n").unwrap();
+        let legacy = game_filter_settings(&path);
+        assert_eq!(legacy.mode, "udp");
+        assert_eq!(legacy.tcp_range, "1024-65535");
+
+        std::fs::write(
+            &path,
+            "mode=all\r\ntcp=27015-27020,28000\r\nudp=30000-30100\r\n",
+        )
+        .unwrap();
+        let current = game_filter_settings(&path);
+        assert_eq!(current.mode, "all");
+        assert_eq!(current.tcp_range, "27015-27020,28000");
+        assert_eq!(current.udp_range, "30000-30100");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn game_filter_rejects_invalid_port_ranges_and_uses_safe_defaults() {
+        assert!(valid_game_filter_range("1,1024-65535"));
+        for value in ["", "0", "65536", "100-99", "1,,2", "1-2-3", "abc"] {
+            assert!(!valid_game_filter_range(value), "{value}");
+        }
+        let path =
+            std::env::temp_dir().join(format!("zapret-game-filter-invalid-{}", std::process::id()));
+        std::fs::write(&path, "mode=tcp\ntcp=0\nudp=bad\n").unwrap();
+        let settings = game_filter_settings(&path);
+        assert_eq!(settings.mode, "tcp");
+        assert_eq!(settings.tcp_range, "1024-65535");
+        assert_eq!(settings.udp_range, "1024-65535");
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 #[tauri::command]
@@ -2387,8 +2525,12 @@ fn rollback_core_update(
             active_manager.provider(),
             core_manager_at(&previous_dir).provider(),
         )?;
-        if let Err(error) =
-            set_game_filter(filters.game_filter).and_then(|_| set_ipset_filter(filters.ipset))
+        if let Err(error) = set_game_filter(
+            filters.game_filter,
+            Some(filters.game_tcp_range),
+            Some(filters.game_udp_range),
+        )
+        .and_then(|_| set_ipset_filter(filters.ipset))
         {
             installation
                 .rollback(
@@ -3263,7 +3405,11 @@ async fn run_tests(
         &dir,
         manager.provider(),
         &test_type,
-        &filters.game_filter,
+        &GameFilterSettings {
+            mode: filters.game_filter,
+            tcp_range: filters.game_tcp_range,
+            udp_range: filters.game_udp_range,
+        },
     )
     .await
 }

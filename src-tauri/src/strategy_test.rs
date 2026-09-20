@@ -373,7 +373,7 @@ pub async fn run(
     root: &Path,
     provider: &dyn CoreProvider,
     test_type: &str,
-    game_filter: &str,
+    game_filter: &crate::core::GameFilterSettings,
 ) -> Result<Vec<TestResult>, String> {
     let _guard = TestGuard::acquire()?;
     let test_kind = match test_type {

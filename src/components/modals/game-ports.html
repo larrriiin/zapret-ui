@@ -1,0 +1,31 @@
+<div id="game-ports-modal"
+    class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+    role="dialog" aria-modal="true" aria-labelledby="game-ports-modal-title">
+    <form id="game-port-settings" class="glass-panel rounded-2xl border border-primary/25 p-6 max-w-md w-full shadow-[0_24px_80px_rgba(0,0,0,0.55)]" style="background: var(--color-popup);" novalidate>
+        <div class="flex items-start justify-between gap-4 mb-2">
+            <div class="flex items-center gap-3 min-w-0">
+                <span class="material-symbols-outlined text-primary text-2xl" aria-hidden="true">settings</span>
+                <h3 id="game-ports-modal-title" class="font-headline text-lg font-bold text-on-surface" data-i18n="game_ports_settings">Game Filter ports</h3>
+            </div>
+            <button id="game-ports-close" type="button" class="w-9 h-9 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-white/5 transition-colors flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70" data-i18n="close" data-i18n-attr="aria-label" aria-label="Close">
+                <span class="material-symbols-outlined text-xl" aria-hidden="true">close</span>
+            </button>
+        </div>
+        <p class="mb-5 text-sm leading-relaxed text-on-surface-variant" data-i18n="game_ports_description">Choose the ports where Game Filter applies. Use commas or ranges.</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <label class="block min-w-0">
+                <span class="block mb-1.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant" data-i18n="game_tcp_ports">TCP ports</span>
+                <input id="game-tcp-range" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="1024-65535" class="w-full min-w-0 bg-surface-container-highest border border-outline-variant/30 rounded-xl px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary/60 focus-visible:ring-2 focus-visible:ring-primary/30">
+            </label>
+            <label class="block min-w-0">
+                <span class="block mb-1.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant" data-i18n="game_udp_ports">UDP ports</span>
+                <input id="game-udp-range" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="1024-65535" class="w-full min-w-0 bg-surface-container-highest border border-outline-variant/30 rounded-xl px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary/60 focus-visible:ring-2 focus-visible:ring-primary/30">
+            </label>
+        </div>
+        <p id="game-ports-status" class="mt-3 text-xs text-error-dim hidden" role="status" aria-live="polite"></p>
+        <div class="mt-6 flex justify-end gap-3">
+            <button id="game-ports-cancel" type="button" class="px-4 py-2.5 rounded-xl text-on-surface-variant text-xs font-bold uppercase tracking-wider hover:bg-white/5 hover:text-on-surface transition-colors" data-i18n="cancel">Cancel</button>
+            <button id="game-ports-save" type="submit" class="px-5 py-2.5 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70" data-i18n="save">Save</button>
+        </div>
+    </form>
+</div>

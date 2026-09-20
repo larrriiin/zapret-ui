@@ -1,6 +1,7 @@
 import { $, invoke } from '../lib/core.js';
 import { state } from '../lib/state.js';
 import { restartServiceIfRunning } from '../lib/restart.js';
+import { t } from '../lib/i18n.js';
 
 function setCardActive(id, active) {
   const el = $(id);
@@ -51,6 +52,11 @@ export function updateFiltersUI(filters) {
   setCardDisabled('game-all', !gameOn);
   setCardDisabled('game-tcp', !gameOn);
   setCardDisabled('game-udp', !gameOn);
+
+  const tcpRange = $('game-tcp-range');
+  const udpRange = $('game-udp-range');
+  if (tcpRange && document.activeElement !== tcpRange) tcpRange.value = filters.game_tcp_range || '1024-65535';
+  if (udpRange && document.activeElement !== udpRange) udpRange.value = filters.game_udp_range || '1024-65535';
 }
 
 export async function pollFilters() {
@@ -90,6 +96,39 @@ export async function handleIPSetFilterChange(mode) {
 }
 
 export function initFilterButtons() {
+  const portsModal = $('game-ports-modal');
+  const portsOpen = $('game-ports-open');
+  const portsStatus = $('game-ports-status');
+  let lastFocus = null;
+  const closePorts = () => {
+    portsModal?.classList.add('hidden');
+    portsStatus?.classList.add('hidden');
+    lastFocus?.focus({ preventScroll: true });
+  };
+  const openPorts = () => {
+    lastFocus = portsOpen;
+    const filters = state.currentFilters;
+    const tcpRange = $('game-tcp-range');
+    const udpRange = $('game-udp-range');
+    if (tcpRange) tcpRange.value = filters?.game_tcp_range || '1024-65535';
+    if (udpRange) udpRange.value = filters?.game_udp_range || '1024-65535';
+    portsStatus?.classList.add('hidden');
+    portsModal?.classList.remove('hidden');
+    tcpRange?.focus({ preventScroll: true });
+  };
+  portsOpen?.addEventListener('click', openPorts);
+  $('game-ports-close')?.addEventListener('click', closePorts);
+  $('game-ports-cancel')?.addEventListener('click', closePorts);
+  portsModal?.addEventListener('click', (event) => {
+    if (event.target === portsModal) closePorts();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !portsModal?.classList.contains('hidden')) {
+      event.preventDefault();
+      closePorts();
+    }
+  });
+
   $('game-toggle')?.addEventListener('click', () => {
     const isOn = state.currentFilters.game_filter !== 'disabled';
     if (isOn) {
@@ -102,6 +141,27 @@ export function initFilterButtons() {
   $('game-all')?.addEventListener('click', () => handleGameFilterChange('all'));
   $('game-tcp')?.addEventListener('click', () => handleGameFilterChange('tcp'));
   $('game-udp')?.addEventListener('click', () => handleGameFilterChange('udp'));
+
+  $('game-port-settings')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const tcpRange = $('game-tcp-range')?.value.trim();
+    const udpRange = $('game-udp-range')?.value.trim();
+    const mode = state.currentFilters?.game_filter || 'disabled';
+    try {
+      await invoke('set_game_filter', { mode, tcpRange, udpRange });
+      portsStatus?.classList.add('hidden');
+      await pollFilters();
+      await restartServiceIfRunning();
+      closePorts();
+    } catch (err) {
+      if (portsStatus) {
+        portsStatus.textContent = String(err) === 'invalid_game_filter_range'
+          ? t('game_ports_invalid')
+          : t('game_ports_save_failed');
+        portsStatus.classList.remove('hidden');
+      }
+    }
+  });
 
   $('ipset-toggle')?.addEventListener('click', () => {
     const isOn = state.currentFilters.ipset !== 'none';

@@ -25,6 +25,7 @@ import modalStatus from './modals/status.html?raw';
 import modalInfoHelp from './modals/info-help.html?raw';
 import modalListImport from './modals/list-import.html?raw';
 import modalConfirmDialog from './modals/confirm-dialog.html?raw';
+import modalGamePorts from './modals/game-ports.html?raw';
 import restartOverlay from './restart-overlay.html?raw';
 
 import restartBanner from './restart-banner.html?raw';
@@ -63,6 +64,7 @@ export function mountComponents() {
   mount('modals-host', modalInfoHelp);
   mount('modals-host', modalListImport);
   mount('modals-host', modalConfirmDialog);
+  mount('modals-host', modalGamePorts);
   mount('modals-host', restartBanner);
   mount('modals-host', restartOverlay);
 }
