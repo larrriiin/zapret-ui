@@ -51,7 +51,7 @@ jobs:
         run: node scripts/check-versions.mjs
       - name: Resolve target release
         id: release
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const resolveRelease = require('./scripts/resolve-release.cjs');
@@ -132,7 +132,7 @@ jobs:
           }
       - name: Scan installers and update release security sections
         timeout-minutes: 35
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
         with:
