@@ -533,10 +533,9 @@ impl CoreProvider for FlowsealProvider {
                 root.display()
             ));
         }
-        for path in [self.winws_executable()] {
-            if !path.is_file() {
-                return Err(format!("Missing required file: {}", path.display()));
-            }
+        let path = self.winws_executable();
+        if !path.is_file() {
+            return Err(format!("Missing required file: {}", path.display()));
         }
         for path in [self.paths.lists_dir(), self.paths.utils_dir()] {
             if !path.is_dir() {

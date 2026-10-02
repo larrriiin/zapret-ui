@@ -1,5 +1,5 @@
 import { $, invoke } from '../lib/core.js';
-import { escapeHtml, cleanAndValidateDomain, validateIP, showConfirm } from '../lib/dom.js';
+import { escapeHtml, cleanAndValidateDomain, validateIP, showConfirm, showAlert } from '../lib/dom.js';
 import { markRestartIfServiceRunning } from '../lib/restart.js';
 import { t } from '../lib/i18n.js';
 
@@ -8,6 +8,19 @@ const listsCache = {
   'list-exclude-user.txt': [],
   'ipset-exclude-user.txt': []
 };
+let listLoadGeneration = 0;
+
+function displayUserLists(lists, { resetSearch = false } = {}) {
+  Object.assign(listsCache, lists);
+  for (const [containerId, filename, searchInputId] of [
+    ['site-include-list', 'list-general-user.txt', 'site-include-search'],
+    ['site-exclude-list', 'list-exclude-user.txt', 'site-exclude-search'],
+    ['ip-exclude-list', 'ipset-exclude-user.txt', 'ip-exclude-search'],
+  ]) {
+    if (resetSearch && $(searchInputId)) $(searchInputId).value = '';
+    filterAndRender(containerId, filename, searchInputId);
+  }
+}
 
 export function filterAndRender(containerId, filename, searchInputId) {
   const searchInput = $(searchInputId);
@@ -18,17 +31,16 @@ export function filterAndRender(containerId, filename, searchInputId) {
 }
 
 export async function loadUserLists() {
+  const generation = ++listLoadGeneration;
   try {
-    listsCache['list-general-user.txt'] = await invoke('read_user_list', { filename: 'list-general-user.txt' });
-    filterAndRender('site-include-list', 'list-general-user.txt', 'site-include-search');
-
-    listsCache['list-exclude-user.txt'] = await invoke('read_user_list', { filename: 'list-exclude-user.txt' });
-    filterAndRender('site-exclude-list', 'list-exclude-user.txt', 'site-exclude-search');
-
-    listsCache['ipset-exclude-user.txt'] = await invoke('read_user_list', { filename: 'ipset-exclude-user.txt' });
-    filterAndRender('ip-exclude-list', 'ipset-exclude-user.txt', 'ip-exclude-search');
+    const filenames = Object.keys(listsCache);
+    const lists = await Promise.all(filenames.map(filename => invoke('read_user_list', { filename })));
+    if (generation !== listLoadGeneration) return false;
+    displayUserLists(Object.fromEntries(filenames.map((filename, index) => [filename, lists[index]])));
+    return true;
   } catch (err) {
     console.error('Error loading user lists:', err);
+    return false;
   }
 }
 
@@ -350,7 +362,13 @@ export function initUserLists() {
       try {
         const imported = await invoke('import_backup_file');
         if (imported) {
-          await loadUserLists();
+          // Invalidate reads started before the restore; they may contain old data.
+          ++listLoadGeneration;
+          displayUserLists({
+            'list-general-user.txt': imported.include,
+            'list-exclude-user.txt': imported.exclude,
+            'ipset-exclude-user.txt': imported.ips,
+          }, { resetSearch: true });
           await markRestartIfServiceRunning();
           const origHTML = importBtn.innerHTML;
           importBtn.innerHTML = `
@@ -365,6 +383,7 @@ export function initUserLists() {
         }
       } catch (err) {
         console.error('Failed to import backup:', err);
+        await showAlert(t('backup_import_error', { error: String(err) }));
       }
     };
   }

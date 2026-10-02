@@ -696,6 +696,7 @@ export default {
     "duplicate_warning": "Already in list",
     "backup_export_btn": "Create Backup",
     "backup_import_btn": "Restore Backup",
+    "backup_import_error": "Could not restore the backup: {error}",
     "site_checker_title": "Targeted Site Checker",
     "site_checker_desc": "Test if a specific website is accessible and check its connection status",
     "site_checker_run": "Check Site",

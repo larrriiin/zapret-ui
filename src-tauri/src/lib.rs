@@ -1862,12 +1862,75 @@ struct BackupData {
     ips: Vec<String>,
 }
 
+impl BackupData {
+    fn parse(content: &str) -> Result<Self, String> {
+        let mut backup: Self = serde_json::from_str(content.trim_start_matches('\u{feff}'))
+            .map_err(|e| format!("Неверный формат файла резервной копии: {e}"))?;
+        if backup.version != 1 {
+            return Err(format!(
+                "Неподдерживаемая версия резервной копии: {}",
+                backup.version
+            ));
+        }
+        // Validate every list before replacing any existing data.
+        for lines in [&mut backup.include, &mut backup.exclude, &mut backup.ips] {
+            for line in lines.iter() {
+                let trimmed = line.trim();
+                if !trimmed.is_empty() && !is_safe_list_entry(trimmed) {
+                    return Err(format!("Invalid list entry: {trimmed}"));
+                }
+            }
+            *lines = lines
+                .iter()
+                .map(|line| line.trim())
+                .filter(|line| !line.is_empty())
+                .map(str::to_owned)
+                .collect();
+        }
+        Ok(backup)
+    }
+
+    fn restore(&self, paths: &[PathBuf; 3]) -> Result<(), String> {
+        // Preserve exact file contents (including comments) for recovery.
+        let originals: Vec<Option<Vec<u8>>> = paths
+            .iter()
+            .map(|path| match std::fs::read(path) {
+                Ok(content) => Ok(Some(content)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(error) => Err(format!("Failed to read {}: {error}", path.display())),
+            })
+            .collect::<Result<_, _>>()?;
+        let lists = [&self.include, &self.exclude, &self.ips];
+        for (index, (path, lines)) in paths.iter().zip(lists).enumerate() {
+            if let Err(error) = std::fs::write(path, lines.join("\r\n")) {
+                let mut message = format!("Failed to write {}: {error}", path.display());
+                // Include the failed write: it may have truncated the file.
+                for (path, original) in paths[..=index].iter().zip(&originals) {
+                    let restored = match original {
+                        Some(content) => std::fs::write(path, content),
+                        None => match std::fs::remove_file(path) {
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                            result => result,
+                        },
+                    };
+                    if let Err(error) = restored {
+                        message
+                            .push_str(&format!("; failed to restore {}: {error}", path.display()));
+                    }
+                }
+                return Err(message);
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Exports all lists (include, exclude, ips) to a JSON backup file
 #[tauri::command]
 fn export_backup_file() -> Result<bool, String> {
-    let include = read_user_list("list-general-user.txt".to_string()).unwrap_or_default();
-    let exclude = read_user_list("list-exclude-user.txt".to_string()).unwrap_or_default();
-    let ips = read_user_list("ipset-exclude-user.txt".to_string()).unwrap_or_default();
+    let include = read_user_list("list-general-user.txt".to_string())?;
+    let exclude = read_user_list("list-exclude-user.txt".to_string())?;
+    let ips = read_user_list("ipset-exclude-user.txt".to_string())?;
 
     let backup = BackupData {
         version: 1,
@@ -1896,7 +1959,7 @@ fn export_backup_file() -> Result<bool, String> {
 
 /// Imports all lists (include, exclude, ips) from a JSON backup file
 #[tauri::command]
-fn import_backup_file() -> Result<bool, String> {
+fn import_backup_file() -> Result<Option<BackupData>, String> {
     let file_path = rfd::FileDialog::new()
         .set_title("Восстановить резервную копию...")
         .add_filter("JSON Files (*.json)", &["json"])
@@ -1906,16 +1969,138 @@ fn import_backup_file() -> Result<bool, String> {
         let content = std::fs::read_to_string(&path)
             .map_err(|e| format!("Не удалось прочитать файл резервной копии: {}", e))?;
 
-        let backup: BackupData = serde_json::from_str(&content)
-            .map_err(|e| format!("Неверный формат файла резервной копии: {}", e))?;
+        let backup = BackupData::parse(&content)?;
+        let paths = [
+            resolve_list_path("list-general-user.txt")?,
+            resolve_list_path("list-exclude-user.txt")?,
+            resolve_list_path("ipset-exclude-user.txt")?,
+        ];
+        backup.restore(&paths)?;
 
-        write_user_list("list-general-user.txt".to_string(), backup.include)?;
-        write_user_list("list-exclude-user.txt".to_string(), backup.exclude)?;
-        write_user_list("ipset-exclude-user.txt".to_string(), backup.ips)?;
-
-        Ok(true)
+        // Return the committed snapshot so the UI can render it immediately.
+        Ok(Some(backup))
     } else {
-        Ok(false)
+        Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod backup_tests {
+    use super::BackupData;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
+
+    struct ListsDirectory(PathBuf);
+
+    impl ListsDirectory {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "zapret-backup-test-{}-{}",
+                std::process::id(),
+                NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+
+        fn paths(&self) -> [PathBuf; 3] {
+            ["include.txt", "exclude.txt", "ips.txt"].map(|name| self.0.join(name))
+        }
+    }
+
+    impl Drop for ListsDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn restores_every_entry_and_returns_the_same_snapshot() {
+        let directory = ListsDirectory::new();
+        let paths = directory.paths();
+        let original = BackupData {
+            version: 1,
+            include: (0..1000).map(|i| format!("site{i}.example.com")).collect(),
+            exclude: vec!["exclude.example.com".into(), "other.example.com".into()],
+            ips: vec![
+                "192.0.2.1".into(),
+                "198.51.100.0/24".into(),
+                "2001:db8::/32".into(),
+            ],
+        };
+        let backup = BackupData::parse(&serde_json::to_string(&original).unwrap()).unwrap();
+        backup.restore(&paths).unwrap();
+        for (path, expected) in paths
+            .iter()
+            .zip([&backup.include, &backup.exclude, &backup.ips])
+        {
+            let actual: Vec<String> = std::fs::read_to_string(path)
+                .unwrap()
+                .lines()
+                .map(str::to_owned)
+                .collect();
+            assert_eq!(&actual, expected);
+        }
+    }
+
+    #[test]
+    fn accepts_utf8_bom_and_normalizes_empty_and_padded_entries() {
+        let backup = BackupData::parse(
+            "\u{feff}{\"version\":1,\"include\":[\" example.com \" ,\"\"],\"exclude\":[],\"ips\":[\" 192.0.2.1 \"]}",
+        )
+        .unwrap();
+        assert_eq!(backup.include, ["example.com"]);
+        assert!(backup.exclude.is_empty());
+        assert_eq!(backup.ips, ["192.0.2.1"]);
+    }
+
+    #[test]
+    fn rejects_invalid_later_lists_and_unsupported_or_incomplete_backups() {
+        for content in [
+            r#"{"version":1,"include":["example.com"],"exclude":["bad\nentry"],"ips":[]}"#,
+            r##"{"version":1,"include":["example.com"],"exclude":[],"ips":["#comment"]}"##,
+            r#"{"version":2,"include":[],"exclude":[],"ips":[]}"#,
+            r#"{"version":1,"include":[],"exclude":[]}"#,
+        ] {
+            assert!(BackupData::parse(content).is_err());
+        }
+    }
+
+    #[test]
+    fn restores_original_bytes_after_a_later_write_fails() {
+        let directory = ListsDirectory::new();
+        let mut paths = directory.paths();
+        let original = b"# Keep original comments\nold.example.com\n";
+        std::fs::write(&paths[0], original).unwrap();
+        // The third path cannot be created; the first two writes succeed.
+        paths[2] = directory.0.join("missing-parent").join("ips.txt");
+        let backup = BackupData::parse(
+            r#"{"version":1,"include":["new.example.com"],"exclude":["exclude.example.com"],"ips":["192.0.2.1"]}"#,
+        )
+        .unwrap();
+        assert!(backup
+            .restore(&paths)
+            .unwrap_err()
+            .contains("Failed to write"));
+        assert_eq!(std::fs::read(&paths[0]).unwrap(), original);
+        assert!(!paths[1].exists());
+    }
+
+    #[test]
+    fn empty_lists_replace_existing_contents() {
+        let directory = ListsDirectory::new();
+        let paths = directory.paths();
+        for path in &paths {
+            std::fs::write(path, "old.example.com").unwrap();
+        }
+        let backup =
+            BackupData::parse(r#"{"version":1,"include":[],"exclude":[],"ips":[]}"#).unwrap();
+        backup.restore(&paths).unwrap();
+        for path in &paths {
+            assert!(std::fs::read(path).unwrap().is_empty());
+        }
     }
 }
 

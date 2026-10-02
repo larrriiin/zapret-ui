@@ -695,6 +695,7 @@ export default {
     "duplicate_warning": "Уже в списке",
     "backup_export_btn": "Создать бэкап",
     "backup_import_btn": "Восстановить бэкап",
+    "backup_import_error": "Не удалось восстановить резервную копию: {error}",
     "site_checker_title": "Проверка доступности сайта",
     "site_checker_desc": "Проверьте доступность конкретного ресурса через текущую конфигурацию",
     "site_checker_run": "Проверить сайт",
