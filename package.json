@@ -33,7 +33,7 @@
     "playwright-core": "^1.63.0",
     "postcss": "^8.5.28",
     "tailwindcss": "^4.3.3",
-    "vite": "^8.3.1"
+    "vite": "^8.3.2"
   },
   "optionalDependencies": {
     "@rolldown/binding-win32-x64-msvc": "^1.2.11",
