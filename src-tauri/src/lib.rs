@@ -4187,6 +4187,7 @@ pub fn run() {
             telegram::get_telegram_status,
             telegram::install_telegram,
             telegram::start_telegram,
+            telegram::restart_telegram,
             telegram::stop_telegram,
             telegram::remove_telegram,
             telegram::set_telegram_port,

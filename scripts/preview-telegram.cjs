@@ -40,6 +40,7 @@ window.__TAURI__ = { core: { invoke: async (cmd, args) => {
   if (cmd === 'remove_telegram') { installed = false; running = false; }
   if (cmd === 'start_telegram') running = true;
   if (cmd === 'stop_telegram') running = false;
+  if (cmd === 'restart_telegram') running = true;
   if (cmd === 'set_telegram_port') port = args.port;
   if (cmd === 'install_warp') warp = true;
   if (cmd === 'telegram_logs') return 'INFO: Telegram MTProto WS Bridge Proxy\\nINFO: Secret: [secret]';

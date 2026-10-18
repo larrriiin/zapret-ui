@@ -80,6 +80,7 @@ function render() {
     $('telegram-status-btn').hidden = !installed;
     $('telegram-status-btn').disabled = disabled;
   }
+  $('telegram-restart').disabled = disabled || !installed || !snapshot?.running;
   if ($('telegram-settings-open')) $('telegram-settings-open').hidden = true;
   for (const id of ['telegram-install', 'telegram-remove']) {
     if ($(id)) $(id).disabled = disabled;
@@ -162,6 +163,7 @@ export function initTelegram() {
   });
   $('telegram-settings-open')?.addEventListener('click', () => showSection('telegram'));
   $('telegram-toggle').addEventListener('click', () => action(() => invoke(snapshot?.running ? 'stop_telegram' : 'start_telegram')));
+  $('telegram-restart').addEventListener('click', () => action(() => invoke('restart_telegram')));
   $('telegram-open').addEventListener('click', () => action(() => invoke('open_telegram')));
   $('telegram-copy').addEventListener('click', () => action(async () => { await navigator.clipboard.writeText(await invoke('telegram_link')); $('telegram-message').dataset.state = 'success'; $('telegram-message').textContent = t('tg_copied'); }));
   initTelegramSettings(action);
