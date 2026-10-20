@@ -148,6 +148,7 @@ struct Mapping {
     closed: Option<Instant>,
     accepted: bool,
     failure: Option<String>,
+    upstream: Option<crate::traffic_monitor::ProxyRoute>,
 }
 #[derive(Default)]
 struct Table {
@@ -182,6 +183,7 @@ impl Table {
                 closed: None,
                 accepted: false,
                 failure: None,
+                upstream: None,
             };
             self.reverse.insert(reverse, flow.clone());
             self.flows.insert(flow, mapping.clone());
@@ -209,6 +211,26 @@ pub struct Shared {
     pub error: Mutex<Option<String>>,
 }
 impl Shared {
+    pub fn traffic_routes(&self) -> Vec<crate::traffic_monitor::ProxyRoute> {
+        let mut table = self.table.lock().unwrap_or_else(|e| e.into_inner());
+        table.prune();
+        table
+            .flows
+            .values()
+            .filter(|m| m.failure.is_none() && m.upstream.is_some())
+            .flat_map(|m| {
+                let mut original =
+                    crate::traffic_monitor::ProxyRoute::new(m.flow.local, m.flow.remote);
+                original.closed = m.closed;
+                let mut routes = vec![original];
+                routes.extend(m.upstream.clone());
+                for route in &mut routes {
+                    route.closed = m.closed;
+                }
+                routes
+            })
+            .collect()
+    }
     fn new() -> Self {
         Self {
             stop: AtomicBool::new(false),
@@ -451,6 +473,18 @@ async fn accept(listener: TcpListener, shared: Arc<Shared>, port: u16) {
                             )
                         })??;
                 let mut client = client;
+                if let (Ok(local), Ok(remote)) = (upstream.local_addr(), upstream.peer_addr()) {
+                    if let Some(mapping) = shared
+                        .table
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .flows
+                        .get_mut(&flow)
+                    {
+                        mapping.upstream =
+                            Some(crate::traffic_monitor::ProxyRoute::new(local, remote));
+                    }
+                }
                 shared.total.fetch_add(1, Ordering::Relaxed);
                 if let Err(error) = tokio::io::copy_bidirectional(&mut client, &mut upstream).await
                 {

@@ -39,6 +39,10 @@ jobs:
         run: npm run test:first-run
       - name: Verify backup import refresh
         run: npm run test:backup-import
+      - name: Verify strategy notes persistence
+        run: npm run test:strategy-notes
+      - name: Verify traffic classification UI
+        run: npm run test:traffic
 
   rust-checks:
     # The backend uses Windows-only extension traits (e.g. std::os::windows::

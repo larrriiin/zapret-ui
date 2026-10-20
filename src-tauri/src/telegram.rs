@@ -24,7 +24,25 @@ static BUSY: AtomicBool = AtomicBool::new(false);
 #[derive(Default)]
 pub struct TelegramState {
     child: Mutex<Option<Child>>,
+    traffic_listener: Mutex<Option<std::net::SocketAddr>>,
     update: Mutex<Option<update::Release>>,
+}
+
+pub(crate) fn traffic_identity(
+    state: &TelegramState,
+) -> (Option<u32>, Option<std::net::SocketAddr>) {
+    let mut guard = state.child.lock_unpoisoned();
+    let pid = guard.as_mut().and_then(|child| {
+        child
+            .try_wait()
+            .is_ok_and(|status| status.is_none())
+            .then(|| child.id())
+    });
+    if pid.is_none() {
+        return (None, None);
+    }
+    let listener = *state.traffic_listener.lock_unpoisoned();
+    (pid, listener)
 }
 struct Operation;
 impl Operation {
@@ -468,6 +486,7 @@ fn start_blocking(app: &tauri::AppHandle) -> Result<(), String> {
             cfg.port,
         );
         if TcpStream::connect_timeout(&connect_address.into(), Duration::from_millis(150)).is_ok() {
+            *state.traffic_listener.lock_unpoisoned() = Some(address.into());
             *slot = Some(child);
             return Ok(());
         }
@@ -484,6 +503,9 @@ pub fn shutdown(app: &tauri::AppHandle) {
         let _ = child.kill();
         let _ = child.wait();
     }
+    *app.state::<TelegramState>()
+        .traffic_listener
+        .lock_unpoisoned() = None;
 }
 #[tauri::command]
 pub fn stop_telegram(app: tauri::AppHandle) -> Result<(), String> {
