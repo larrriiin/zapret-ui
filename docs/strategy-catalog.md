@@ -40,3 +40,9 @@ The test wizard gets strategy names and fully resolved arguments from the catalo
 Imported BAT files are kept in `binaries/custom-strategies`. Core activation and rollback copy that directory into the selected core before post-activation validation. If Flowseal later adds a strategy with the same name, the user's version takes precedence in the runtime catalog.
 
 Only the parsed `winws.exe` argument suffix is used at runtime and in the test wizard. Zapret UI does not execute an imported BAT file as a script.
+
+## Personal strategy notes
+
+Each strategy can have a personal caption of up to 50 characters, edited from the strategy dropdown. Search matches both names and notes. Saving an empty note or choosing Delete removes that note.
+
+Notes are stored under `zapret.strategyNotes` in the application's persistent WebView profile, separately from core files and the strategy catalog. Core updates, rollback, and ordinary application updates retain them. Keys ignore case and an optional `.bat` suffix. Notes for absent strategies are kept so they reappear if those strategies return. Clearing the application's user data removes notes, and a completely renamed strategy needs its note assigned again.

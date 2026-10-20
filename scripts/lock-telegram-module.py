@@ -1,7 +1,9 @@
 """Refresh the reviewed x64 download lock; never runs on end-user machines.
 
 First download binary wheels into artifacts/tg-downloads with pip download
---only-binary=:all: --platform win_amd64 --python-version 313 cryptography certifi.
+--only-binary=:all: --platform win_amd64 --python-version 313 cryptography certifi
+"httpx[http2]==0.28.1". Keep previously reviewed wheel versions unless intentionally
+updating them, and review every transitive dependency before regenerating.
 Review dependency/upstream changes and test the module before committing the lock.
 """
 import hashlib
@@ -10,7 +12,7 @@ import pathlib
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-VERSION = "1.10.2"
+VERSION = "1.11.2"
 PYTHON = "3.13.12"
 
 

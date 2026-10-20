@@ -15,10 +15,10 @@ if the module is reinstalled. Nothing is installed into the system Python.
 
 ## Distribution
 
-The initial module is Flowseal **1.10.2**, Python **3.13.12** (Windows x64), and
-five binary Python wheels. `src-tauri/telegram-module.json` pins all seven URLs,
-byte sizes, and SHA-256 values. Downloads total **16,923,850 bytes**; the tested
-module occupies approximately **33.2 MB** after extraction/imports. No archives
+The initial module is Flowseal **1.11.2**, Python **3.13.12** (Windows x64), and
+thirteen binary Python wheels, including `httpx[http2]` and its dependencies.
+`src-tauri/telegram-module.json` pins all fifteen URLs,
+byte sizes, and SHA-256 values. Downloads total **17,490,647 bytes**. No archives
 or Python runtime are bundled into the application installer.
 
 Downloads go directly to Python.org, GitHub and Python's package CDN over HTTPS.
@@ -36,10 +36,16 @@ exit stops and waits for the child; closing to tray leaves it running. The modul
 does not auto-start on the next application launch. Direct Telegram WebSocket
 and TCP fallback are used. Settings expose the bind IPv4 address, port, secret
 regeneration, DC-to-IPv4 overrides, Cloudflare Proxy and custom relay domains,
-and Cloudflare Worker domains. Cloudflare routes default to disabled. Enabling
-Cloudflare Proxy also enables upstream domain refresh; Worker routes can be
+and Cloudflare Worker domains. Cloudflare Proxy defaults to enabled, matching
+upstream and making its HTTP/2 media fallback available. Older configurations
+without a `cfproxy` field inherit this default; an explicitly saved `false` is
+preserved. Enabling Cloudflare Proxy also enables upstream domain refresh; Worker routes can be
 enabled independently. Changes require the proxy to be stopped. Secret rotation
 preserves other configuration but invalidates existing connection links.
+The Restart button stops and waits for the owned process, then starts a new one
+with the saved settings and secret. Startup logs include the relay switches and
+DC overrides, without the secret. Running status reports process/listener state;
+it does not prove that every Telegram datacenter is reachable from this network.
 
 ## Module updates
 
@@ -48,10 +54,14 @@ dialog. No Telegram release request is made if the module is absent. The global
 dialog includes a separate TG WS Proxy row, version, update button, progress and
 retry for failed checks. Installation of an update requires clicking its button.
 
-The updater resolves the latest stable official GitHub release to an exact commit
-and downloads its source over HTTPS. It records the source commit and SHA-256;
+The updater resolves the latest stable official GitHub release redirect to a validated
+version tag and downloads its source over HTTPS. It records the source tag and SHA-256;
 this is not a separately signed update manifest. Only upstream proxy source and
-license are replaced. The pinned Python runtime and dependencies are retained.
+license are replaced. The pinned Python runtime is retained. Missing or changed
+reviewed wheels from the application's lock are downloaded with size/hash checks
+and extracted only in staging. This upgrades existing 1.10.2 installations with
+the HTTP/2 dependencies required by 1.11.2; reinstalling the module is unnecessary.
+The installed metadata records these dependencies to avoid downloading them again.
 An isolated import/API compatibility check runs in staging before activation.
 Incompatible upstream releases require an application update to revise the
 adapter or dependencies; import checks cannot guarantee all runtime behavior of
@@ -60,7 +70,7 @@ future releases.
 Configuration is retained outside the module directory. A running proxy is
 stopped for activation and restarted afterward. Failed startup restores the
 previous module and attempts to restart it. A previous successful version remains
-on disk for recovery (approximately another 33 MB); removal deletes both copies.
+on disk for recovery (approximately another 37 MB); removal deletes both copies.
 An interrupted directory swap can recover the previous module on the next status
 check. Existing installations survive application updates.
 
@@ -73,13 +83,19 @@ before regenerating. Review all dependency changes before committing.
 ## Verification
 
 - `cargo test --manifest-path src-tauri/Cargo.toml telegram::`
+- `cargo test --manifest-path src-tauri/Cargo.toml upgrades_legacy_module_in_staging -- --ignored`
+  (opt-in Windows regression test; requires the locked archives plus the original
+  v1.10.2 source archive at `artifacts/tg-source/legacy-source.zip`). Verifies the
+  original import failure, dependency migration through the native staging code,
+  activation, preservation of the previous module and unchanged configuration.
 - `node --test scripts/i18n.test.mjs scripts/first-run-state.test.mjs scripts/telegram-settings.test.mjs scripts/update-check-privacy.test.mjs`
 - `node node_modules/vite/bin/vite.js build`
 - `python scripts/test-telegram-module.py` (opt-in Windows test; requires the
   already downloaded locked archives under `artifacts/tg-downloads` and
   `artifacts/tg-source/source.zip`). Uses isolated `artifacts/tg-smoke`, a free
   loopback port, verifies crypto, startup, secret redaction, configuration mapping,
-  secret regeneration and persistent config.
+  secret regeneration and persistent config. It also runs offline routing tests
+  for the default fallback, HTTP/2 media, explicitly disabled CF and Worker routing.
 - `node scripts/preview-telegram.cjs` generates an isolated browser fixture for
   the Vite dev server. All native commands are mocked. Query parameters `setup=1`,
   `installed=1`, `warp=1`, `update=1`, and `fail=1` exercise setup, installed

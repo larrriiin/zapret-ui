@@ -15,7 +15,7 @@ CONFIG = ROOT.parent / "config.json"
 
 def initialize():
     if not CONFIG.exists():
-        CONFIG.write_text(json.dumps({"port": 1443, "secret": os.urandom(16).hex()}), encoding="utf-8")
+        CONFIG.write_text(json.dumps({"port": 1443, "secret": os.urandom(16).hex(), "cfproxy": True}), encoding="utf-8")
     from proxy._aes import Cipher, algorithms, modes
     import certifi
     assert Path(certifi.where()).is_file()
@@ -47,7 +47,7 @@ def configure_proxy(config):
     proxy_config.port = config["port"]
     proxy_config.secret = config["secret"]
     proxy_config.dc_redirects = {int(dc): ip for dc, ip in config.get("dc_ips", {2: "149.154.167.220", 4: "149.154.167.220"}).items()}
-    proxy_config.fallback_cfproxy = config.get("cfproxy", False)
+    proxy_config.fallback_cfproxy = config.get("cfproxy", True)
     proxy_config.cfproxy_user_domains = config.get("cfproxy_domains", [])
     proxy_config.cfproxy_worker_domains = config.get("worker_domains", []) if config.get("worker", False) else []
     tg_ws_proxy.start_cfproxy_domain_refresh = start_cfproxy_domain_refresh if proxy_config.fallback_cfproxy else lambda: None
@@ -80,4 +80,7 @@ if __name__ == "__main__":
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     handler.addFilter(RedactSecret())
     logging.basicConfig(level=logging.INFO, handlers=[handler])
+    logging.info("Connection settings: cfproxy=%s, worker=%s, dc_redirects=%s",
+                 config.get("cfproxy", True), config.get("worker", False),
+                 tg_ws_proxy.proxy_config.dc_redirects)
     asyncio.run(tg_ws_proxy._run())

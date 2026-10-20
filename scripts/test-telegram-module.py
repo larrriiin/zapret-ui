@@ -12,15 +12,25 @@ import socket
 import subprocess
 import sys
 import time
+from urllib.parse import urlparse
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 WORK = ROOT / "artifacts/tg-smoke"
 MODULE = WORK / "module"
+# Each run must prove the complete lock is sufficient without leftover packages.
+assert MODULE.resolve().is_relative_to((ROOT / "artifacts").resolve())
+if MODULE.exists():
+    shutil.rmtree(MODULE)
 MODULE.mkdir(parents=True, exist_ok=True)
 lock = json.loads((ROOT / "src-tauri/telegram-module.json").read_text())
-archives = [ROOT / "artifacts/tg-downloads/python.zip", ROOT / "artifacts/tg-source/source.zip"] + sorted((ROOT / "artifacts/tg-downloads").glob("*.whl"))
-for item, archive in zip(lock["artifacts"], archives):
+for item in lock["artifacts"]:
+    if item["kind"] == "runtime":
+        archive = ROOT / "artifacts/tg-downloads/python.zip"
+    elif item["kind"] == "source":
+        archive = ROOT / "artifacts/tg-source/source.zip"
+    else:
+        archive = ROOT / "artifacts/tg-downloads" / Path(urlparse(item["url"]).path).name
     data = archive.read_bytes()
     assert len(data) == item["size"] and hashlib.sha256(data).hexdigest() == item["sha256"]
     with zipfile.ZipFile(archive) as z:
@@ -39,8 +49,11 @@ shutil.copy(ROOT / "src-tauri/telegram-runner.py", MODULE / "runner.py")
 command = [str(MODULE / "python.exe"), "-I", str(MODULE / "runner.py")]
 flags = subprocess.CREATE_NO_WINDOW
 subprocess.run(command + ["--check"], check=True, timeout=20, creationflags=flags)
+subprocess.run([str(MODULE / "python.exe"), "-I", str(ROOT / "scripts/test-telegram-routing.py")],
+               check=True, timeout=20, creationflags=flags)
 cfg_path = WORK / "config.json"
 cfg = json.loads(cfg_path.read_text())
+cfg.update(cfproxy=False, worker=False, dc_ips={})
 with socket.socket() as sock:
     sock.bind(("127.0.0.1", 0))
     cfg["port"] = sock.getsockname()[1]
@@ -58,6 +71,7 @@ try:
         raise AssertionError("Listener never became ready")
     print("PASS: isolated runtime, crypto, configuration and loopback listener")
     assert cfg["secret"] not in (WORK / "proxy.log").read_text(), "Secret leaked into log"
+    assert "Connection settings: cfproxy=False, worker=False, dc_redirects={}" in (WORK / "proxy.log").read_text()
     print("PASS: proxy secret is redacted")
 finally:
     child.terminate()
@@ -81,14 +95,18 @@ assert proxy_config.host == cfg['host'] and proxy_config.port == cfg['port']
 assert proxy_config.dc_redirects == {4:'149.154.167.220'}
 assert proxy_config.fallback_cfproxy and proxy_config.cfproxy_user_domains == cfg['cfproxy_domains']
 assert proxy_config.cfproxy_worker_domains == cfg['worker_domains']
+assert proxy_config.h2_enabled
+import httpx
+client = httpx.AsyncClient(http2=True)
 cfg.update(cfproxy=False, worker=False, dc_ips={})
 runner.configure_proxy(cfg)
 assert not proxy_config.fallback_cfproxy and not proxy_config.cfproxy_worker_domains and not proxy_config.dc_redirects
+assert not proxy_config.h2_enabled
 """
-subprocess.run([str(MODULE / "python.exe"), "-I", "-c", mapping_check], check=True, timeout=20, creationflags=flags)
+subprocess.run([str(MODULE / "python.exe"), "-I", "-c", mapping_check], cwd=MODULE, check=True, timeout=20, creationflags=flags)
 print("PASS: key regeneration preserves settings; DC/IP and relay switches reach upstream config")
 # Watchdog test must not contact example relay domains.
-rotated.update(cfproxy=False, worker=False)
+rotated.update(cfproxy=False, worker=False, dc_ips={})
 cfg_path.write_text(json.dumps(rotated))
 parent_code = """
 import json, os, subprocess, sys, time

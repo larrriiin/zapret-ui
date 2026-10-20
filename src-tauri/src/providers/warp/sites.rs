@@ -19,6 +19,42 @@ use std::{
 static SITES: Mutex<Option<Runtime>> = Mutex::new(None);
 static STOPPING: AtomicBool = AtomicBool::new(false);
 
+pub(crate) fn traffic_routes() -> Vec<crate::traffic_monitor::ProxyRoute> {
+    #[cfg(windows)]
+    if let Some(relay) = SITES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .and_then(|r| r.server.as_ref())
+        .and_then(|s| s.relay.as_ref())
+    {
+        let mut connections = relay
+            .shared
+            .connections
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        connections.retain(|_, c| {
+            c.closed
+                .is_none_or(|t| t.elapsed() < Duration::from_secs(120))
+        });
+        return connections
+            .values()
+            .filter(|c| c.failure.is_none())
+            .flat_map(|c| {
+                c.routes
+                    .iter()
+                    .cloned()
+                    .map(|mut route| {
+                        route.closed = c.closed;
+                        route
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+    }
+    Vec::new()
+}
+
 fn error(detail: impl ToString) -> WarpError {
     WarpError::new("warp_sites_error", detail)
 }
@@ -93,6 +129,26 @@ struct SiteConnection {
     target: String,
     closed: Option<Instant>,
     failure: Option<String>,
+    routes: Vec<crate::traffic_monitor::ProxyRoute>,
+}
+
+#[cfg(windows)]
+fn prune_traffic_history(connections: &mut HashMap<u64, SiteConnection>) {
+    connections.retain(|_, connection| {
+        connection
+            .closed
+            .is_none_or(|t| t.elapsed() < Duration::from_secs(120))
+    });
+    if connections.len() > 4096 {
+        let mut closed: Vec<u64> = connections
+            .iter()
+            .filter_map(|(id, c)| c.closed.map(|_| *id))
+            .collect();
+        closed.sort_unstable();
+        for id in closed.into_iter().take(connections.len() - 4096) {
+            connections.remove(&id);
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -194,6 +250,7 @@ impl SiteRelay {
         });
         connections
             .values()
+            .filter(|connection| connection.closed.is_none() || connection.failure.is_some())
             .map(|connection| super::WarpConnection {
                 id: format!("site:{}", connection.id),
                 source: "site".into(),
@@ -298,11 +355,27 @@ async fn handle_site_connection(
                 target,
                 closed: None,
                 failure: None,
+                routes: Vec::new(),
             },
         );
     let result = async {
         let mut upstream = warp_socks_connect(warp_port, address).await?;
         client.write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
+        let mut routes = Vec::new();
+        if let (Ok(local), Ok(remote)) = (client.peer_addr(), client.local_addr()) {
+            routes.push(crate::traffic_monitor::ProxyRoute::new(local, remote));
+        }
+        if let (Ok(local), Ok(remote)) = (upstream.local_addr(), upstream.peer_addr()) {
+            routes.push(crate::traffic_monitor::ProxyRoute::new(local, remote));
+        }
+        if let Some(connection) = shared
+            .connections
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(&id)
+        {
+            connection.routes = routes;
+        }
         if let Err(error) = tokio::io::copy_bidirectional(&mut client, &mut upstream).await {
             if !super::connection_closed_normally(&error) {
                 return Err(error);
@@ -317,9 +390,10 @@ async fn handle_site_connection(
             connection.failure = Some(failure.to_string());
             connection.closed = Some(Instant::now());
         } else {
-            connections.remove(&id);
+            connection.closed = Some(Instant::now());
         }
     }
+    prune_traffic_history(&mut connections);
 }
 
 #[cfg(windows)]

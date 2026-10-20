@@ -68,6 +68,7 @@ impl Drop for CoreOperationGuard {
 }
 
 struct AppState {
+    running_winws_args: Arc<Mutex<Option<RunningWinwsArgs>>>,
     warp_status_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
     warp_toggle_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
     warp_tray_busy: AtomicBool,
@@ -85,6 +86,13 @@ struct AppState {
     translations: Mutex<Option<TrayTranslations>>,
     temp_process_child: Mutex<Option<std::process::Child>>,
     traffic_monitor: Arc<TrafficMonitor>,
+}
+
+struct RunningWinwsArgs {
+    strategy: Option<String>,
+    args: Option<String>,
+    checked: std::time::Instant,
+    refreshing: bool,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Clone)]
@@ -1135,22 +1143,115 @@ fn get_zapret_status(state: State<'_, AppState>) -> ZapretStatus {
 fn refresh_traffic_filter(state: State<'_, AppState>) {
     let status = get_zapret_status(state.clone());
     if !status.running {
+        *state.running_winws_args.lock_unpoisoned() = None;
         state.traffic_monitor.clear_filter();
         return;
     }
-    let Some(strategy) = status.strategy else {
-        state.traffic_monitor.clear_filter();
-        return;
-    };
-    if let Ok(args) = parse_strategy_args(&strategy) {
-        state.traffic_monitor.refresh_filter(&args, Some(strategy));
+    let mut source = state.running_winws_args.lock_unpoisoned();
+    if source.as_ref().is_none_or(|cached| {
+        cached.strategy != status.strategy
+            || (!cached.refreshing && cached.checked.elapsed() > std::time::Duration::from_secs(5))
+    }) {
+        let checked = std::time::Instant::now();
+        let prior = source
+            .as_ref()
+            .filter(|cached| cached.strategy == status.strategy)
+            .and_then(|cached| cached.args.clone());
+        *source = Some(RunningWinwsArgs {
+            strategy: status.strategy.clone(),
+            args: prior,
+            checked,
+            refreshing: true,
+        });
+        let target = Arc::clone(&state.running_winws_args);
+        let strategy = status.strategy.clone();
+        std::thread::spawn(move || {
+            let args = read_running_winws_args();
+            let mut target = target.lock_unpoisoned();
+            if let Some(cached) = target
+                .as_mut()
+                .filter(|cached| cached.checked == checked && cached.strategy == strategy)
+            {
+                cached.args = args;
+                cached.refreshing = false;
+            }
+        });
+    }
+    if let Some(args) = source.as_ref().and_then(|source| source.args.as_deref()) {
+        state.traffic_monitor.refresh_filter(
+            args,
+            Some(status.strategy.unwrap_or_else(|| "winws".into())),
+        );
     } else {
-        state.traffic_monitor.clear_filter();
+        state.traffic_monitor.unknown_filter(status.strategy);
     }
 }
 
+fn read_running_winws_args() -> Option<String> {
+    let path = find_binaries_dir()
+        .join("bin/winws.exe")
+        .canonicalize()
+        .ok()
+        .map(strip_verbatim_prefix)?;
+    let output = Command::new(powershell_path())
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); $items = @(Get-CimInstance Win32_Process -OperationTimeoutSec 2 -Filter \"Name = 'winws.exe'\" | Where-Object { $_.ExecutablePath -and [IO.Path]::GetFullPath($_.ExecutablePath) -ieq $env:ZAPRET_WINWS_PATH }); if ($items.Count -eq 1 -and $items[0].CommandLine) { [Console]::Out.Write($items[0].CommandLine) }"])
+        .env("ZAPRET_WINWS_PATH",path)
+        .creation_flags(CREATE_NO_WINDOW).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let command_line = String::from_utf8(output.stdout).ok()?;
+    running_winws_argument_suffix(&command_line).map(str::to_owned)
+}
+
+fn running_winws_argument_suffix(command_line: &str) -> Option<&str> {
+    let command_line = command_line.trim();
+    let args = if let Some(quoted) = command_line.strip_prefix('"') {
+        quoted.split_once('"')?.1
+    } else {
+        command_line.split_once(char::is_whitespace)?.1
+    }
+    .trim();
+    (!args.is_empty()).then_some(args)
+}
+
+#[cfg(test)]
+mod traffic_source_tests {
+    use super::*;
+    #[test]
+    fn reads_quoted_and_unquoted_process_arguments_without_using_edited_settings() {
+        assert_eq!(
+            running_winws_argument_suffix(
+                r#""C:\Program Files\Zapret UI\bin\winws.exe" --wf-tcp=443 --filter-tcp=443"#
+            ),
+            Some("--wf-tcp=443 --filter-tcp=443")
+        );
+        assert_eq!(
+            running_winws_argument_suffix(r#"C:\Zapret\winws.exe --wf-udp=443"#),
+            Some("--wf-udp=443")
+        );
+        assert_eq!(
+            running_winws_argument_suffix(r#""C:\Zapret\winws.exe""#),
+            None
+        );
+        assert_eq!(running_winws_argument_suffix(""), None);
+    }
+}
+
+fn refresh_traffic_routes(app: &tauri::AppHandle, state: &AppState) {
+    let mut routes = providers::warp::applications::traffic_routes();
+    routes.extend(providers::warp::sites::traffic_routes());
+    let telegram = app.state::<telegram::TelegramState>();
+    let (pid, listener) = telegram::traffic_identity(&telegram);
+    state.traffic_monitor.refresh_routes(routes, pid, listener);
+}
+
 #[tauri::command]
-fn start_traffic_monitor(state: State<'_, AppState>) -> Result<TrafficSnapshot, String> {
+fn start_traffic_monitor(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<TrafficSnapshot, String> {
+    refresh_traffic_routes(&app, &state);
     refresh_traffic_filter(state.clone());
     let dll_path = find_binaries_dir().join("bin").join("WinDivert.dll");
     state.traffic_monitor.start(&dll_path)?;
@@ -1165,7 +1266,8 @@ fn stop_traffic_monitor(state: State<'_, AppState>) -> TrafficSnapshot {
 }
 
 #[tauri::command]
-fn get_traffic_snapshot(state: State<'_, AppState>) -> TrafficSnapshot {
+fn get_traffic_snapshot(app: tauri::AppHandle, state: State<'_, AppState>) -> TrafficSnapshot {
+    refresh_traffic_routes(&app, &state);
     refresh_traffic_filter(state.clone());
     state.traffic_monitor.snapshot()
 }
@@ -1532,8 +1634,10 @@ fn start_zapret(
     // Стратегии из каталога, как и прежние BAT-файлы, ожидают эти списки.
     ensure_strategy_user_lists(&dir)?;
 
+    let launch_args = parse_strategy_args(&strategy)?;
+
     if mode == "service" {
-        let args = parse_strategy_args(&strategy)?;
+        let args = launch_args.clone();
 
         // Canonicalize winws.exe before writing it into the service binPath in
         // the registry. That way the service points at the *real* executable
@@ -1623,8 +1727,7 @@ try {{
             return Err("winws.exe not found".to_string());
         }
 
-        let args_str = parse_strategy_args(&strategy)?;
-        let args = split_arguments(&args_str);
+        let args = split_arguments(&launch_args);
 
         let mut cmd = Command::new(&bin_path);
         cmd.args(&args);
@@ -1641,6 +1744,12 @@ try {{
     }
 
     *state.active_strategy.lock_unpoisoned() = Some(strategy.clone());
+    *state.running_winws_args.lock_unpoisoned() = Some(RunningWinwsArgs {
+        strategy: Some(strategy.clone()),
+        args: Some(launch_args),
+        checked: std::time::Instant::now(),
+        refreshing: false,
+    });
     *state.last_strategy.lock_unpoisoned() = Some(strategy);
     Ok("Connected".into())
 }
@@ -1702,6 +1811,8 @@ fn stop_zapret(state: State<'_, AppState>) -> Result<(), String> {
     }
     stop_zapret_internal()?;
     *state.active_strategy.lock_unpoisoned() = None;
+    *state.running_winws_args.lock_unpoisoned() = None;
+    state.traffic_monitor.clear_filter();
     Ok(())
 }
 
@@ -2417,7 +2528,7 @@ async fn download_and_install_update(
         window.emit("core-update-phase", "stopping").ok();
         if let Err(error) = stop_zapret(state.clone()) {
             if traffic_monitor_was_running {
-                let _ = start_traffic_monitor(state.clone());
+                let _ = start_traffic_monitor(app.clone(), state.clone());
             }
             installation.remove_owned_staging(&staging)?;
             return Err(format!("Cannot stop zapret before activation: {error}"));
@@ -2465,12 +2576,12 @@ async fn download_and_install_update(
         window.emit("core-update-phase", "restarting").ok();
     }
     let restart_result = restart.map(|(strategy, mode)| {
-        start_zapret(app, strategy, mode, state.clone())
+        start_zapret(app.clone(), strategy, mode, state.clone())
             .map(|_| ())
             .map_err(|e| format!("Cannot restart zapret after core update: {e}"))
     });
     if traffic_monitor_was_running {
-        if let Err(monitor_error) = start_traffic_monitor(state.clone()) {
+        if let Err(monitor_error) = start_traffic_monitor(app.clone(), state.clone()) {
             if operation.is_ok() {
                 warnings.push(format!(
                     "Core updated, but the traffic monitor could not restart: {monitor_error}"
@@ -2744,7 +2855,7 @@ fn rollback_core_update(
     if restart.is_some() {
         if let Err(error) = stop_zapret(state.clone()) {
             if traffic_monitor_was_running {
-                let _ = start_traffic_monitor(state.clone());
+                let _ = start_traffic_monitor(app.clone(), state.clone());
             }
             return Err(format!("Cannot stop zapret before rollback: {error}"));
         }
@@ -2780,11 +2891,11 @@ fn rollback_core_update(
     })();
 
     let restart_result = restart.map(|(strategy, mode)| {
-        start_zapret(app, strategy, mode, state.clone())
+        start_zapret(app.clone(), strategy, mode, state.clone())
             .map_err(|e| format!("Cannot restart zapret after rollback attempt: {e}"))
     });
     let monitor_restart_result = traffic_monitor_was_running
-        .then(|| start_traffic_monitor(state).map(|_| ()))
+        .then(|| start_traffic_monitor(app.clone(), state).map(|_| ()))
         .transpose();
     match (operation, restart_result, monitor_restart_result) {
         (Ok(_), Some(Err(restart)), Err(monitor)) => Err(format!(
@@ -3940,6 +4051,7 @@ pub fn run() {
         }))
         .manage(telegram::TelegramState::default())
         .manage(AppState {
+            running_winws_args: Arc::new(Mutex::new(None)),
             warp_status_item: Mutex::new(None),
             warp_toggle_item: Mutex::new(None),
             warp_tray_busy: AtomicBool::new(false),
@@ -4036,6 +4148,7 @@ pub fn run() {
 
             let tray = TrayIconBuilder::with_id("main-tray")
                 .icon(app.default_window_icon().unwrap().clone())
+                .tooltip(app.config().product_name.as_deref().unwrap_or("ZAPRET UI"))
                 .menu(&menu)
                 .on_menu_event(move |app, event| match event.id.as_ref() {
                     "quit" => {
@@ -4187,6 +4300,7 @@ pub fn run() {
             telegram::get_telegram_status,
             telegram::install_telegram,
             telegram::start_telegram,
+            telegram::restart_telegram,
             telegram::stop_telegram,
             telegram::remove_telegram,
             telegram::set_telegram_port,

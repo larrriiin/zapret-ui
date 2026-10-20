@@ -23,21 +23,29 @@
         </div>
 
         <div class="flex items-center justify-between gap-4 flex-wrap">
-            <div class="inline-flex rounded-xl border border-outline-variant/20 bg-surface-container-high/30 p-1">
+            <div class="traffic-mode-controls inline-flex flex-wrap rounded-xl border border-outline-variant/20 bg-surface-container-high/30 p-1">
                 <button id="traffic-mode-zapret" type="button" data-mode="zapret"
-                    class="traffic-mode-btn px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all bg-primary/15 text-primary">
-                    <span data-i18n="traffic_mode_zapret">Through Zapret</span>
+                    class="traffic-mode-btn px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all text-on-surface-variant/50 hover:text-on-surface">
+                    <span data-i18n="traffic_mode_zapret">Zapret rules</span>
                 </button>
                 <button id="traffic-mode-all" type="button" data-mode="all"
-                    class="traffic-mode-btn px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all text-on-surface-variant/50 hover:text-on-surface">
+                    class="traffic-mode-btn px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all bg-primary/15 text-primary">
                     <span data-i18n="traffic_mode_all">All traffic</span>
                 </button>
+                <button type="button" data-mode="warp" class="traffic-mode-btn" data-i18n="traffic_route_warp">WARP</button>
+                <button type="button" data-mode="tg_proxy" class="traffic-mode-btn" data-i18n="traffic_route_tg">TG Proxy</button>
+                <button type="button" data-mode="direct" class="traffic-mode-btn" data-i18n="traffic_route_direct">Direct</button>
+                <button type="button" data-mode="unknown" class="traffic-mode-btn" data-i18n="traffic_route_unknown">Unknown</button>
             </div>
-            <div class="flex items-center gap-3 ml-auto">
+            <div class="traffic-visibility-controls flex items-center gap-3 ml-auto">
                 <label class="flex items-center gap-2 cursor-pointer text-[10px] font-bold text-on-surface-variant/60 whitespace-nowrap">
                     <input id="traffic-hide-system" type="checkbox" checked
                         class="rounded border-outline-variant/30 bg-surface-container-high text-primary focus:ring-primary/30">
                     <span data-i18n="traffic_hide_system">Hide system processes</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer text-[10px] font-bold text-on-surface-variant whitespace-nowrap">
+                    <input id="traffic-hide-local" type="checkbox" checked class="rounded border-outline-variant/30 bg-surface-container-high text-primary focus:ring-primary/30">
+                    <span data-i18n="traffic_hide_local">Hide local traffic</span>
                 </label>
                 <label class="relative w-72 max-w-[36vw]">
                     <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-sm text-on-surface-variant/40">search</span>
@@ -72,7 +80,7 @@
             <div class="rounded-2xl border border-outline-variant/15 bg-surface-container-high/25 p-4">
                 <p class="text-[9px] font-black uppercase tracking-[0.18em] text-on-surface-variant/45 mb-2" data-i18n="traffic_connections">Connections</p>
                 <p id="traffic-connection-count" class="font-headline text-xl font-bold text-on-surface">0</p>
-                <p id="traffic-candidate-note" class="text-[10px] text-on-surface-variant/50 mt-1" data-i18n="traffic_candidates_note">Filter candidates</p>
+                <p id="traffic-candidate-note" class="text-[10px] text-on-surface-variant/50 mt-1" data-i18n="traffic_candidates_note">Estimate by IP and port</p>
             </div>
         </div>
 
@@ -101,7 +109,7 @@
                 <span class="ml-auto text-[9px] text-on-surface-variant/35" data-i18n="traffic_focus_hint">Click a process or IP to track it</span>
             </div>
             <div id="traffic-connections-panel">
-                <div class="grid grid-cols-[minmax(150px,1.4fr)_minmax(180px,1.5fr)_72px_90px_90px_90px] gap-3 px-4 py-3 border-b border-outline-variant/10 text-[9px] font-black uppercase tracking-wider text-on-surface-variant/40">
+                <div class="traffic-connection-grid grid gap-3 px-4 py-3 border-b border-outline-variant/10 text-[9px] font-black uppercase tracking-wider text-on-surface-variant/40">
                     <span data-i18n="traffic_process">Process</span>
                     <span data-i18n="traffic_remote">Remote endpoint</span>
                     <span data-i18n="traffic_protocol">Protocol</span>
@@ -132,7 +140,8 @@
 
         <p class="flex items-start gap-2 text-[10px] leading-relaxed text-on-surface-variant/45 px-1">
             <span class="material-symbols-outlined text-sm text-primary/50 mt-px">info</span>
-            <span data-i18n="traffic_privacy_note">Only packet headers and byte counters are processed in memory. “Through Zapret” accounts for active winws profiles and IPSet rules, but hostlist-only matches cannot always be confirmed without inspecting encrypted names.</span>
+            <span data-i18n="traffic_privacy_note">Route and Zapret processing are shown separately. Expected means a profile match, not confirmed packet modification. Missing evidence is shown as Unknown. Hostnames are read from cleartext headers in memory; HTTPS is not decrypted and packets are not written to disk.</span>
         </p>
+        <p id="traffic-limits-notice" class="hidden text-xs text-tertiary" role="status" data-i18n="traffic_limits_notice">Connection detail limit reached. All-traffic counters continue; classification is incomplete.</p>
     </div>
 </section>
