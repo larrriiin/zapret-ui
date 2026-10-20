@@ -24,7 +24,25 @@ static BUSY: AtomicBool = AtomicBool::new(false);
 #[derive(Default)]
 pub struct TelegramState {
     child: Mutex<Option<Child>>,
+    traffic_listener: Mutex<Option<std::net::SocketAddr>>,
     update: Mutex<Option<update::Release>>,
+}
+
+pub(crate) fn traffic_identity(
+    state: &TelegramState,
+) -> (Option<u32>, Option<std::net::SocketAddr>) {
+    let mut guard = state.child.lock_unpoisoned();
+    let pid = guard.as_mut().and_then(|child| {
+        child
+            .try_wait()
+            .is_ok_and(|status| status.is_none())
+            .then(|| child.id())
+    });
+    if pid.is_none() {
+        return (None, None);
+    }
+    let listener = *state.traffic_listener.lock_unpoisoned();
+    (pid, listener)
 }
 struct Operation;
 impl Operation {
@@ -44,7 +62,7 @@ struct Lock {
     version: String,
     artifacts: Vec<Artifact>,
 }
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 struct Artifact {
     url: String,
     sha256: String,
@@ -59,7 +77,7 @@ pub struct Config {
     host: String,
     #[serde(default = "default_dc_ips")]
     dc_ips: std::collections::BTreeMap<u16, String>,
-    #[serde(default)]
+    #[serde(default = "default_cfproxy")]
     cfproxy: bool,
     #[serde(default)]
     cfproxy_domains: Vec<String>,
@@ -72,6 +90,9 @@ pub struct Config {
 }
 fn default_host() -> String {
     "127.0.0.1".into()
+}
+fn default_cfproxy() -> bool {
+    true
 }
 fn default_dc_ips() -> std::collections::BTreeMap<u16, String> {
     [(2, "149.154.167.220".into()), (4, "149.154.167.220".into())].into()
@@ -219,6 +240,37 @@ fn allowed(url: &reqwest::Url) -> bool {
 fn verified(bytes: &[u8], artifact: &Artifact) -> bool {
     bytes.len() as u64 == artifact.size && digest(bytes) == artifact.sha256
 }
+async fn download_artifact(
+    client: &reqwest::Client,
+    artifact: &Artifact,
+    mut progress: impl FnMut(u64),
+) -> Result<Vec<u8>, String> {
+    let url = reqwest::Url::parse(&artifact.url).map_err(|e| e.to_string())?;
+    if !allowed(&url) {
+        return Err("Untrusted module URL".into());
+    }
+    let mut stream = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .bytes_stream();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| e.to_string())?;
+        if (bytes.len() + chunk.len()) as u64 > artifact.size {
+            return Err("tg_checksum_failed".into());
+        }
+        bytes.extend_from_slice(&chunk);
+        progress(bytes.len() as u64);
+    }
+    if !verified(&bytes, artifact) {
+        return Err("tg_checksum_failed".into());
+    }
+    Ok(bytes)
+}
 fn digest(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
@@ -334,33 +386,13 @@ pub async fn install_telegram(app: tauri::AppHandle) -> Result<(), String> {
         let total: u64 = metadata.artifacts.iter().map(|a| a.size).sum();
         let mut done = 0u64;
         for artifact in metadata.artifacts {
-            let url = reqwest::Url::parse(&artifact.url).map_err(|e| e.to_string())?;
-            if !allowed(&url) {
-                return Err("Untrusted module URL".into());
-            }
-            let mut stream = client
-                .get(url)
-                .send()
-                .await
-                .map_err(|e| e.to_string())?
-                .error_for_status()
-                .map_err(|e| e.to_string())?
-                .bytes_stream();
-            let mut bytes = Vec::new();
-            while let Some(chunk) = stream.next().await {
-                let chunk = chunk.map_err(|e| e.to_string())?;
-                if (bytes.len() + chunk.len()) as u64 > artifact.size {
-                    return Err("tg_checksum_failed".into());
-                }
-                bytes.extend_from_slice(&chunk);
+            let bytes = download_artifact(&client, &artifact, |downloaded| {
                 let _ = app.emit(
                     "telegram-download-progress",
-                    ((done + bytes.len() as u64) * 95 / total) as u32,
+                    ((done + downloaded) * 95 / total) as u32,
                 );
-            }
-            if !verified(&bytes, &artifact) {
-                return Err("tg_checksum_failed".into());
-            }
+            })
+            .await?;
             let destination = staging.clone();
             tauri::async_runtime::spawn_blocking(move || {
                 extract(&bytes, &destination, &artifact.kind)
@@ -399,6 +431,16 @@ pub async fn start_telegram(app: tauri::AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || start_blocking(&app))
         .await
         .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn restart_telegram(app: tauri::AppHandle) -> Result<(), String> {
+    let _operation = Operation::acquire()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        shutdown(&app);
+        start_blocking(&app)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 pub fn start_on_app_launch_if_configured(app: &tauri::AppHandle) -> Result<(), String> {
     let path = root(app)?;
@@ -444,6 +486,7 @@ fn start_blocking(app: &tauri::AppHandle) -> Result<(), String> {
             cfg.port,
         );
         if TcpStream::connect_timeout(&connect_address.into(), Duration::from_millis(150)).is_ok() {
+            *state.traffic_listener.lock_unpoisoned() = Some(address.into());
             *slot = Some(child);
             return Ok(());
         }
@@ -460,6 +503,9 @@ pub fn shutdown(app: &tauri::AppHandle) {
         let _ = child.kill();
         let _ = child.wait();
     }
+    *app.state::<TelegramState>()
+        .traffic_listener
+        .lock_unpoisoned() = None;
 }
 #[tauri::command]
 pub fn stop_telegram(app: tauri::AppHandle) -> Result<(), String> {
@@ -611,6 +657,12 @@ mod tests {
         assert!(validate_config(&cfg).is_ok());
         assert_eq!(cfg.host, "127.0.0.1");
         assert_eq!(cfg.dc_ips.len(), 2);
+        assert!(cfg.cfproxy);
+        let disabled: Config = serde_json::from_str(
+            r#"{"port":1443,"secret":"00000000000000000000000000000000","cfproxy":false}"#,
+        )
+        .unwrap();
+        assert!(!disabled.cfproxy);
         cfg.worker = true;
         assert!(validate_config(&cfg).is_err());
         cfg.worker_domains.push("example.workers.dev".into());
@@ -657,7 +709,7 @@ mod tests {
     #[test]
     fn lock_and_download_trust() {
         let metadata = lock();
-        assert_eq!(metadata.artifacts.len(), 7);
+        assert_eq!(metadata.artifacts.len(), 15);
         for item in metadata.artifacts {
             assert!(allowed(&item.url.parse().unwrap()));
             assert_eq!(item.sha256.len(), 64);

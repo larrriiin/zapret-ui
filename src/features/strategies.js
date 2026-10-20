@@ -2,6 +2,7 @@ import { $, invoke } from '../lib/core.js';
 import { t } from '../lib/i18n.js';
 import { state } from '../lib/state.js';
 import { beginRestart, endRestart } from '../lib/restart.js';
+import { getStrategyNote, readStrategyNotes, saveStrategyNote, MAX_STRATEGY_NOTE_LENGTH } from './strategy-notes.js';
 
 // Re-exported so other features (wizard, titlebar search, etc.) can refresh
 // the list after mutating favourites, cached test results or strategy files.
@@ -11,6 +12,7 @@ let _allStrategies = [];
 const FAVORITES_KEY = 'zapret.favorites';
 const LAST_STRATEGY_KEY = 'zapret.lastStrategy';
 const MAX_CUSTOM_STRATEGY_SIZE = 256 * 1024;
+let noteEditor = null;
 
 // Injected by status.js to avoid a static import cycle. See setPollStatus.
 let _pollStatus = null;
@@ -59,6 +61,7 @@ export function getStrategyValue() {
 }
 
 export function closeStrategyDropdown() {
+  noteEditor = null;
   const panel = $('strategy-options');
   const chevron = $('strategy-chevron');
   if (panel) panel.classList.add('hidden');
@@ -147,16 +150,101 @@ function toggleFavorite(name) {
   renderStrategyList();
 }
 
+function focusNoteButton(name) {
+  const buttons = $('strategy-options-list')?.querySelectorAll('[data-note-strategy]') || [];
+  [...buttons].find(button => button.dataset.noteStrategy === name)?.focus();
+}
+
+function createNoteEditor(name) {
+  const form = document.createElement('form');
+  form.className = 'strategy-note-editor';
+  form.setAttribute('aria-label', `${t('strategy_note')}: ${name}`);
+  form.addEventListener('click', event => event.stopPropagation());
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'strategy-note-input';
+  input.maxLength = MAX_STRATEGY_NOTE_LENGTH;
+  input.value = noteEditor.value;
+  input.placeholder = t('strategy_note_placeholder');
+  input.setAttribute('aria-label', `${t('strategy_note')}: ${name}`);
+  input.setAttribute('aria-describedby', 'strategy-note-error');
+  const counter = document.createElement('span');
+  counter.className = 'strategy-note-counter';
+  const updateCount = () => { counter.textContent = `${input.value.length}/${MAX_STRATEGY_NOTE_LENGTH}`; };
+  updateCount();
+  const error = document.createElement('p');
+  error.id = 'strategy-note-error';
+  error.className = 'strategy-note-error';
+  error.setAttribute('role', 'alert');
+  error.hidden = !noteEditor.error;
+  error.textContent = noteEditor.error ? t('strategy_note_save_error') : '';
+  input.addEventListener('input', () => {
+    noteEditor.value = input.value;
+    noteEditor.error = false;
+    error.hidden = true;
+    updateCount();
+  });
+  const finish = () => {
+    noteEditor = null;
+    renderStrategyList();
+    focusNoteButton(name);
+  };
+  const persist = value => {
+    try {
+      saveStrategyNote(name, value);
+      finish();
+    } catch {
+      noteEditor.error = true;
+      error.hidden = false;
+      error.textContent = t('strategy_note_save_error');
+    }
+  };
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    persist(input.value);
+  });
+  form.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    finish();
+  });
+  const actions = document.createElement('div');
+  actions.className = 'strategy-note-actions';
+  if (getStrategyNote(name)) {
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'strategy-note-delete';
+    remove.textContent = t('strategy_note_delete');
+    remove.addEventListener('click', () => persist(''));
+    actions.appendChild(remove);
+  }
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.textContent = t('cancel');
+  cancel.addEventListener('click', finish);
+  const save = document.createElement('button');
+  save.type = 'submit';
+  save.className = 'strategy-note-save';
+  save.textContent = t('save');
+  actions.append(counter, cancel, save);
+  form.append(input, actions, error);
+  return form;
+}
+
 export function renderStrategyList() {
   const list = $('strategy-options-list');
   if (!list) return;
   const query = ($('strategy-search')?.value || '').trim().toLowerCase();
   const favs = getFavorites();
+  const notes = readStrategyNotes();
   const current = getStrategyValue();
 
   list.innerHTML = '';
 
-  const filter = (n) => !query || n.toLowerCase().includes(query);
+  const filter = (n) => !query || `${n} ${getStrategyNote(n, notes)}`.toLowerCase().includes(query);
   const favItems = _allStrategies.filter((n) => favs.has(n) && filter(n));
   const restItems = _allStrategies.filter((n) => !favs.has(n) && filter(n));
 
@@ -186,7 +274,7 @@ export function renderStrategyList() {
       const isSelected = name === current;
       const item = document.createElement('div');
       item.dataset.value = name;
-      const baseCls = 'group w-full text-left px-4 py-2.5 text-sm font-headline text-on-surface hover:bg-primary/10 transition-colors flex items-center gap-2 cursor-pointer';
+      const baseCls = 'group strategy-option w-full text-left px-4 py-2.5 text-sm font-headline text-on-surface hover:bg-primary/10 transition-colors flex items-center gap-2 cursor-pointer';
       item.className = baseCls + (isBest ? ' border-l-2 border-secondary' : '') + (isSelected ? ' dropdown-option-selected' : '');
 
       const icon = document.createElement('span');
@@ -196,10 +284,21 @@ export function renderStrategyList() {
       icon.textContent = 'chevron_right';
       item.appendChild(icon);
 
+      const copy = document.createElement('div');
+      copy.className = 'strategy-option-copy';
       const label = document.createElement('span');
-      label.className = 'truncate flex-1';
+      label.className = 'block truncate';
       label.textContent = name;
-      item.appendChild(label);
+      copy.appendChild(label);
+      const note = getStrategyNote(name, notes);
+      if (note) {
+        const caption = document.createElement('span');
+        caption.className = 'strategy-note-caption';
+        caption.textContent = note;
+        caption.title = note;
+        copy.appendChild(caption);
+      }
+      item.appendChild(copy);
 
       if (cached) {
         const pingTxt = cached.avg_ping_ms > 0 ? `${cached.avg_ping_ms}${t('ms')}` : '—';
@@ -213,10 +312,34 @@ export function renderStrategyList() {
         item.appendChild(badge);
       }
 
+      const noteButton = document.createElement('button');
+      noteButton.type = 'button';
+      noteButton.className = 'strategy-note-button';
+      noteButton.dataset.noteStrategy = name;
+      noteButton.title = note ? t('strategy_note_edit') : t('strategy_note_add');
+      noteButton.setAttribute('aria-label', `${noteButton.title}: ${name}`);
+      noteButton.setAttribute('aria-expanded', String(noteEditor?.name === name));
+      const noteIcon = document.createElement('span');
+      noteIcon.className = 'material-symbols-outlined';
+      noteIcon.setAttribute('aria-hidden', 'true');
+      noteIcon.textContent = 'edit_note';
+      noteButton.appendChild(noteIcon);
+      noteButton.addEventListener('click', event => {
+        event.stopPropagation();
+        noteEditor = noteEditor?.name === name ? null : { name, value: note, error: false };
+        renderStrategyList();
+        const input = $('strategy-options-list')?.querySelector('.strategy-note-input');
+        if (input) { input.focus(); input.select(); }
+        else focusNoteButton(name);
+      });
+      item.appendChild(noteButton);
+
       const star = document.createElement('button');
       star.type = 'button';
-      star.className = 'ml-1 opacity-60 hover:opacity-100 transition-opacity';
+      star.className = 'strategy-note-button';
       star.setAttribute('title', t('toggle_favorite') || 'Toggle favorite');
+      star.setAttribute('aria-label', `${t('toggle_favorite')}: ${name}`);
+      star.setAttribute('aria-pressed', String(favs.has(name)));
       const starIcon = document.createElement('span');
       starIcon.className = 'material-symbols-outlined text-sm';
       starIcon.textContent = favs.has(name) ? 'star' : 'star_outline';
@@ -227,6 +350,7 @@ export function renderStrategyList() {
         toggleFavorite(name);
       });
       item.appendChild(star);
+      if (noteEditor?.name === name) item.appendChild(createNoteEditor(name));
 
       item.addEventListener('click', () => {
         setStrategyValue(name, name);

@@ -76,10 +76,7 @@ function render() {
     $('telegram-settings-status-btn').hidden = !installed;
     $('telegram-settings-status-btn').disabled = disabled;
   }
-  if ($('telegram-status-btn')) {
-    $('telegram-status-btn').hidden = !installed;
-    $('telegram-status-btn').disabled = disabled;
-  }
+  $('telegram-restart').disabled = disabled || !installed || !snapshot?.running;
   if ($('telegram-settings-open')) $('telegram-settings-open').hidden = true;
   for (const id of ['telegram-install', 'telegram-remove']) {
     if ($(id)) $(id).disabled = disabled;
@@ -120,7 +117,7 @@ function render() {
     }
   }
 
-  setTelegramSettingsBusy(disabled || !installed || snapshot?.running);
+  setTelegramSettingsBusy(disabled || !installed || snapshot?.running, snapshot?.running === true);
   renderTelegramReport();
 }
 async function refresh() {
@@ -144,7 +141,6 @@ export function initTelegram() {
     await refresh();
   };
   $('telegram-settings-status-btn')?.addEventListener('click', onStatusClick);
-  $('telegram-status-btn')?.addEventListener('click', onStatusClick);
   $('telegram-status-close')?.addEventListener('click', () => statusDialog?.close());
   statusDialog?.addEventListener('click', (event) => {
     if (event.target === statusDialog) statusDialog.close();
@@ -162,10 +158,13 @@ export function initTelegram() {
   });
   $('telegram-settings-open')?.addEventListener('click', () => showSection('telegram'));
   $('telegram-toggle').addEventListener('click', () => action(() => invoke(snapshot?.running ? 'stop_telegram' : 'start_telegram')));
+  $('telegram-restart').addEventListener('click', () => action(() => invoke('restart_telegram')));
   $('telegram-open').addEventListener('click', () => action(() => invoke('open_telegram')));
   $('telegram-copy').addEventListener('click', () => action(async () => { await navigator.clipboard.writeText(await invoke('telegram_link')); $('telegram-message').dataset.state = 'success'; $('telegram-message').textContent = t('tg_copied'); }));
   initTelegramSettings(action);
-  $('telegram-refresh-logs').addEventListener('click', () => action(async () => { $('telegram-logs').textContent = await invoke('telegram_logs') || t('tg_logs_empty'); }));
+  const refreshLogs = () => action(async () => { $('telegram-logs').textContent = await invoke('telegram_logs') || t('tg_logs_empty'); });
+  $('telegram-refresh-logs').addEventListener('click', refreshLogs);
+  $('telegram-logs-panel').addEventListener('toggle', event => { if (event.target.open) refreshLogs(); });
   onLangChange(() => { render(); renderTelegramReport(); });
   listen('telegram-module-changed', () => { invalidateTelegramSettings(); refresh(); }).catch(console.error);
   refresh();

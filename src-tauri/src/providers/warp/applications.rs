@@ -10,6 +10,19 @@ use std::{
 mod tcp;
 static APPLICATIONS: Mutex<Option<Runtime>> = Mutex::new(None);
 
+pub(crate) fn traffic_routes() -> Vec<crate::traffic_monitor::ProxyRoute> {
+    #[cfg(windows)]
+    if let Some(engine) = APPLICATIONS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .and_then(|r| r.engine.as_ref())
+    {
+        return engine.shared.traffic_routes();
+    }
+    Vec::new()
+}
+
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct ApplicationStatus {
     pub paths: Vec<String>,

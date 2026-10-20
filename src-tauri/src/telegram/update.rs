@@ -1,5 +1,6 @@
 //! Update the headless source from an official GitHub release tag, retaining
-//! the pinned interpreter/dependencies. Incompatible releases never activate.
+//! the pinned interpreter and installing reviewed dependency additions in staging.
+//! Incompatible releases never activate.
 use super::*;
 use reqwest::header::LOCATION;
 
@@ -88,6 +89,13 @@ fn archive_url(release: &Release) -> String {
         release.reference
     )
 }
+fn missing_dependencies(installed: &Lock) -> Vec<Artifact> {
+    lock()
+        .artifacts
+        .into_iter()
+        .filter(|artifact| artifact.kind == "wheel" && !installed.artifacts.contains(artifact))
+        .collect()
+}
 #[tauri::command]
 pub async fn check_telegram_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
     let path = root(&app)?;
@@ -127,6 +135,20 @@ fn copy_tree(source: &Path, target: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+fn prepare_staging(root: &Path, source: &[u8], wheels: &[Vec<u8>]) -> Result<(), String> {
+    let staging = root.join("staging");
+    if staging.exists() {
+        fs::remove_dir_all(&staging).map_err(|e| e.to_string())?;
+    }
+    copy_tree(&root.join("module"), &staging)?;
+    fs::remove_dir_all(staging.join("proxy")).map_err(|e| e.to_string())?;
+    extract(source, &staging, "source")?;
+    for wheel in wheels {
+        extract(wheel, &staging, "wheel")?;
+    }
+    fs::write(staging.join("runner.py"), RUNNER).map_err(|e| e.to_string())?;
+    check_module(&staging).map_err(|_| "tg_update_incompatible".to_string())
 }
 fn activate(root: &Path, health: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
     let module = root.join("module");
@@ -188,21 +210,45 @@ pub async fn update_telegram(app: tauri::AppHandle) -> Result<String, String> {
             .unwrap_or(0);
         let _ = app.emit("telegram-download-progress", percent);
     }
+    let mut metadata: serde_json::Value = serde_json::from_slice(
+        &fs::read(path.join("module/installed.json")).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    let installed: Lock = serde_json::from_value(metadata.clone()).map_err(|e| e.to_string())?;
+    let dependencies = missing_dependencies(&installed);
+    let total: u64 = dependencies.iter().map(|artifact| artifact.size).sum();
+    let mut done = 0u64;
+    let mut wheels = Vec::new();
+    let client = client()?;
+    for artifact in dependencies {
+        let bytes = download_artifact(&client, &artifact, |downloaded| {
+            let _ = app.emit(
+                "telegram-download-progress",
+                80 + (done + downloaded) * 15 / total,
+            );
+        })
+        .await?;
+        done += artifact.size;
+        wheels.push(bytes);
+    }
+    // Record the dependency set actually supplied by this application so the next
+    // update does not download it again. Runtime metadata remains unchanged.
+    let mut artifacts: Vec<_> = installed
+        .artifacts
+        .into_iter()
+        .filter(|artifact| artifact.kind != "wheel")
+        .collect();
+    artifacts.extend(
+        lock()
+            .artifacts
+            .into_iter()
+            .filter(|artifact| artifact.kind == "wheel"),
+    );
+    metadata["artifacts"] = serde_json::to_value(artifacts).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let staging = path.join("staging");
         let result = (|| {
-            if staging.exists() {
-                fs::remove_dir_all(&staging).map_err(|e| e.to_string())?;
-            }
-            copy_tree(&path.join("module"), &staging)?;
-            fs::remove_dir_all(staging.join("proxy")).map_err(|e| e.to_string())?;
-            extract(&bytes, &staging, "source")?;
-            fs::write(staging.join("runner.py"), RUNNER).map_err(|e| e.to_string())?;
-            check_module(&staging).map_err(|_| "tg_update_incompatible".to_string())?;
-            let mut metadata: serde_json::Value = serde_json::from_slice(
-                &fs::read(path.join("module/installed.json")).map_err(|e| e.to_string())?,
-            )
-            .map_err(|e| e.to_string())?;
+            prepare_staging(&path, &bytes, &wheels)?;
             metadata["version"] = release.version.clone().into();
             if let Some(value) = metadata.as_object_mut() {
                 value.remove("source_commit");
@@ -245,6 +291,132 @@ pub async fn update_telegram(app: tauri::AppHandle) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn legacy_lock() -> Lock {
+        let mut installed = lock();
+        let original_wheels = [
+            "certifi-",
+            "cffi-",
+            "cryptography-",
+            "pycparser-",
+            "typing_extensions-",
+        ];
+        installed.artifacts.retain(|artifact| {
+            artifact.kind != "wheel"
+                || original_wheels
+                    .iter()
+                    .any(|name| artifact.url.rsplit('/').next().unwrap().starts_with(name))
+        });
+        installed.version = "1.10.2".into();
+        installed
+    }
+    #[test]
+    fn legacy_installations_receive_reviewed_http2_dependencies() {
+        let mut installed = legacy_lock();
+        let dependencies = missing_dependencies(&installed);
+        assert_eq!(dependencies.len(), 8);
+        for name in [
+            "httpx-",
+            "httpcore-",
+            "anyio-",
+            "idna-",
+            "h2-",
+            "h11-",
+            "hpack-",
+            "hyperframe-",
+        ] {
+            assert!(
+                dependencies.iter().any(|artifact| artifact
+                    .url
+                    .rsplit('/')
+                    .next()
+                    .unwrap()
+                    .starts_with(name)),
+                "{name}"
+            );
+        }
+        installed.artifacts.extend(dependencies);
+        assert!(missing_dependencies(&installed).is_empty());
+        installed
+            .artifacts
+            .iter_mut()
+            .find(|artifact| artifact.kind == "wheel")
+            .unwrap()
+            .sha256 = "outdated".into();
+        assert_eq!(missing_dependencies(&installed).len(), 1);
+    }
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "Requires locked archives and artifacts/tg-source/legacy-source.zip (v1.10.2)"]
+    fn upgrades_legacy_module_in_staging() {
+        let artifacts = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("artifacts");
+        let root = std::env::temp_dir().join(format!(
+            "zapret-tg-migration-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let module = root.join("module");
+        fs::create_dir_all(&module).unwrap();
+        let read_artifact = |artifact: &Artifact| {
+            let file = match artifact.kind.as_str() {
+                "runtime" => artifacts.join("tg-downloads/python.zip"),
+                "source" => artifacts.join("tg-source/source.zip"),
+                _ => artifacts
+                    .join("tg-downloads")
+                    .join(artifact.url.rsplit('/').next().unwrap()),
+            };
+            let bytes = fs::read(file).unwrap();
+            assert!(verified(&bytes, artifact), "{}", artifact.url);
+            bytes
+        };
+        let installed = legacy_lock();
+        for artifact in installed
+            .artifacts
+            .iter()
+            .filter(|artifact| artifact.kind != "source")
+        {
+            extract(&read_artifact(artifact), &module, &artifact.kind).unwrap();
+        }
+        let legacy_source = fs::read(artifacts.join("tg-source/legacy-source.zip")).unwrap();
+        assert_eq!(
+            digest(&legacy_source),
+            "efe9914f9b9c1e517d8fa46c73f0fdf9e66e90dbcdc8b9a6363de6d41f42a65b"
+        );
+        extract(&legacy_source, &module, "source").unwrap();
+        fs::write(module.join("python313._pth"), "python313.zip\n.\n").unwrap();
+        fs::write(module.join("runner.py"), RUNNER).unwrap();
+        check_module(&module).unwrap();
+        let config = fs::read(root.join("config.json")).unwrap();
+        let source = read_artifact(
+            &lock()
+                .artifacts
+                .into_iter()
+                .find(|artifact| artifact.kind == "source")
+                .unwrap(),
+        );
+        assert_eq!(
+            prepare_staging(&root, &source, &[]).unwrap_err(),
+            "tg_update_incompatible"
+        );
+        check_module(&module).unwrap();
+        assert!(!module.join("httpx").exists());
+        let wheels: Vec<_> = missing_dependencies(&installed)
+            .iter()
+            .map(read_artifact)
+            .collect();
+        prepare_staging(&root, &source, &wheels).unwrap();
+        assert!(!module.join("httpx").exists());
+        activate(&root, || check_module(&module)).unwrap();
+        assert!(module.join("httpx").is_dir());
+        assert!(!root.join("previous/httpx").exists());
+        assert_eq!(fs::read(root.join("config.json")).unwrap(), config);
+        fs::remove_dir_all(root).unwrap();
+    }
     #[tokio::test]
     #[ignore = "Read-only live GitHub release redirect check; requires network"]
     async fn official_release_metadata() {

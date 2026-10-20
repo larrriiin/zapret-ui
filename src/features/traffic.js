@@ -4,16 +4,94 @@ import { t } from '../lib/i18n.js';
 const monitor = {
   running: false,
   busy: false,
-  mode: 'zapret',
+  mode: 'all',
   snapshot: null,
   timer: null,
   history: [],
   focus: null,
   tab: 'connections',
   hideSystem: true,
+  hideLocal: true,
 };
 
 const HISTORY_LENGTH = 90;
+
+const ROUTE_KEYS = { direct: 'traffic_route_direct', warp: 'traffic_route_warp', tg_proxy: 'traffic_route_tg', tg_proxy_warp: 'traffic_route_tg_warp', local: 'traffic_route_local', unknown: 'traffic_route_unknown' };
+const ZAPRET_KEYS = { expected: 'traffic_zapret_expected', excluded: 'traffic_zapret_excluded', not_matched: 'traffic_zapret_not_matched', unknown: 'traffic_zapret_unknown', off: 'traffic_zapret_off' };
+const REASON_KEYS = { ports: 'traffic_reason_ports', ipset: 'traffic_reason_ipset', hostlist: 'traffic_reason_hostlist', l7: 'traffic_reason_l7', global: 'traffic_reason_global', excluded: 'traffic_reason_excluded', waiting_hostname: 'traffic_reason_hostname', waiting_protocol: 'traffic_reason_protocol', unsupported: 'traffic_reason_unsupported', no_profile: 'traffic_reason_no_profile', off: 'traffic_zapret_off', rules_unknown: 'traffic_reason_rules', no_action: 'traffic_reason_no_action', proxy: 'traffic_reason_proxy', autohostlist: 'traffic_reason_auto' };
+
+export function matchesTrafficMode(connection, mode, hideLocal = true) {
+  if (hideLocal && connection.route === 'local') return false;
+  if (mode === 'zapret') return connection.zapret?.state === 'expected';
+  if (mode === 'warp') return ['warp', 'tg_proxy_warp'].includes(connection.route);
+  if (mode === 'tg_proxy') return ['tg_proxy', 'tg_proxy_warp'].includes(connection.route);
+  if (mode === 'direct') return connection.route === 'direct';
+  if (mode === 'unknown') return connection.route === 'unknown' || connection.zapret?.state === 'unknown';
+  return true;
+}
+
+export function trafficClassificationLabels(connection) {
+  const zapret = connection.zapret || { state: 'unknown', reason: 'rules_unknown' };
+  const reason = t(REASON_KEYS[zapret.reason] || 'traffic_reason_rules');
+  return { route: t(ROUTE_KEYS[connection.route] || 'traffic_route_unknown'), zapret: t(ZAPRET_KEYS[zapret.state] || 'traffic_zapret_unknown'), reason, profile: zapret.profile ? t('traffic_profile_number', { number: zapret.profile }) : '' };
+}
+
+function classificationBadges(connection) {
+  const labels = trafficClassificationLabels(connection);
+  const detail = [labels.profile, labels.reason].filter(Boolean).join(' · ');
+  return `<span class="traffic-route" data-route="${escapeHtml(connection.route || 'unknown')}" title="${escapeHtml(t('traffic_route_label'))}">${escapeHtml(labels.route)}</span><span class="traffic-zapret" data-state="${escapeHtml(connection.zapret?.state || 'unknown')}" title="${escapeHtml(detail)}">${escapeHtml(labels.zapret)}</span>`;
+}
+
+const TRAFFIC_COUNTERS = ['download_bps', 'upload_bps', 'download_bytes', 'upload_bytes', 'zapret_download_bps', 'zapret_upload_bps', 'zapret_download_bytes', 'zapret_upload_bytes'];
+
+export function groupTrafficConnections(connections) {
+  const groups = new Map();
+  for (const connection of connections) {
+    const processName = connection.process_name || '';
+    const key = JSON.stringify([processName.toLowerCase(), processName ? null : connection.pid, connection.remote_address]);
+    let group = groups.get(key);
+    if (!group) {
+      group = { process_name: processName, remote_address: connection.remote_address, connections: [], pids: new Set(), ports: new Set(), protocols: new Set(), hostnames: new Set(), states: new Set() };
+      for (const field of TRAFFIC_COUNTERS) group[field] = 0;
+      groups.set(key, group);
+    }
+    group.connections.push(connection);
+    group.pids.add(connection.pid || '—');
+    group.ports.add(connection.remote_port);
+    group.protocols.add(connection.protocol);
+    if (connection.hostname) group.hostnames.add(connection.hostname);
+    if (connection.state) group.states.add(connection.state);
+    for (const field of TRAFFIC_COUNTERS) group[field] += Number(connection[field]) || 0;
+  }
+  return Array.from(groups.values(), (group) => ({
+    ...group,
+    pids: [...group.pids].sort((a, b) => a - b),
+    ports: [...group.ports].sort((a, b) => a - b),
+    protocols: [...group.protocols].sort(),
+    hostnames: [...group.hostnames].sort(),
+    states: [...group.states].sort(),
+  }));
+}
+
+function groupClassificationBadges(group) {
+  const routes = new Map();
+  const states = new Map();
+  for (const connection of group.connections) {
+    const labels = trafficClassificationLabels(connection);
+    const route = connection.route || 'unknown';
+    const state = connection.zapret?.state || 'unknown';
+    if (!routes.has(route)) routes.set(route, { label: labels.route, count: 0 });
+    routes.get(route).count += 1;
+    if (!states.has(state)) states.set(state, { label: labels.zapret, count: 0, details: new Set() });
+    const status = states.get(state);
+    status.count += 1;
+    status.details.add([labels.profile, labels.reason].filter(Boolean).join(' · '));
+  }
+  const countTitle = (count) => t('traffic_connection_group_count', { count });
+  const routeBadges = [...routes].map(([route, { label, count }]) => `<span class="traffic-route" data-route="${escapeHtml(route)}" title="${escapeHtml(`${t('traffic_route_label')} · ${countTitle(count)}`)}">${escapeHtml(label)}</span>`);
+  const stateBadges = [...states].map(([state, { label, count, details }]) => `<span class="traffic-zapret" data-state="${escapeHtml(state)}" title="${escapeHtml([countTitle(count), ...details].join('\n'))}">${escapeHtml(label)}</span>`);
+  return [...routeBadges, ...stateBadges].join('');
+}
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -39,10 +117,10 @@ function formatBytes(value, suffix = '') {
 
 function selectedMetrics(snapshot = monitor.snapshot) {
   if (!snapshot) return { uploadBps: 0, downloadBps: 0, uploadBytes: 0, downloadBytes: 0 };
-  if (monitor.focus) {
+  if (monitor.focus || !['all', 'zapret'].includes(monitor.mode)) {
     return (snapshot.connections || [])
       .filter(connectionMatchesFocus)
-      .filter((connection) => monitor.mode !== 'zapret' || connection.zapret_candidate)
+      .filter((connection) => matchesTrafficMode(connection, monitor.mode, monitor.hideLocal))
       .reduce((total, connection) => {
         const prefix = monitor.mode === 'zapret' ? 'zapret_' : '';
         total.uploadBps += connection[`${prefix}upload_bps`] || 0;
@@ -83,7 +161,7 @@ function eventMatchesFocus(event) {
 function filteredConnections() {
   const query = ($('traffic-search')?.value || '').trim().toLowerCase();
   return (monitor.snapshot?.connections || []).filter((connection) => {
-    if (monitor.mode === 'zapret' && !connection.zapret_candidate) return false;
+    if (!matchesTrafficMode(connection, monitor.mode, monitor.hideLocal)) return false;
     if (monitor.hideSystem && connection.system_process) return false;
     if (!connectionMatchesFocus(connection)) return false;
     if (!query) return true;
@@ -95,6 +173,8 @@ function filteredConnections() {
       connection.local_address,
       connection.local_port,
       connection.protocol,
+      connection.hostname,
+      connection.route,
     ].some((value) => String(value).toLowerCase().includes(query));
   });
 }
@@ -149,26 +229,26 @@ function renderConnections() {
   $('traffic-connection-count').textContent = String(connections.length);
   empty.classList.toggle('hidden', connections.length > 0);
 
-  list.innerHTML = connections.map((connection) => {
+  list.innerHTML = groupTrafficConnections(connections).map((connection) => {
     const downloadBps = monitor.mode === 'zapret' ? connection.zapret_download_bps : connection.download_bps;
     const uploadBps = monitor.mode === 'zapret' ? connection.zapret_upload_bps : connection.upload_bps;
     const downloadBytes = monitor.mode === 'zapret' ? connection.zapret_download_bytes : connection.download_bytes;
     const uploadBytes = monitor.mode === 'zapret' ? connection.zapret_upload_bytes : connection.upload_bytes;
-    const endpoint = connection.remote_address.includes(':')
-      ? `[${connection.remote_address}]:${connection.remote_port}`
-      : `${connection.remote_address}:${connection.remote_port}`;
-    const candidate = connection.zapret_candidate
-      ? `<span class="px-1.5 py-0.5 rounded-md bg-primary/10 text-primary text-[8px] font-black uppercase">${escapeHtml(t('traffic_candidate'))}</span>`
-      : '';
-    return `<div class="grid grid-cols-[minmax(150px,1.4fr)_minmax(180px,1.5fr)_72px_90px_90px_90px] gap-3 items-center px-4 py-3 hover:bg-primary/[0.035] transition-colors text-[11px]">
+    const address = connection.remote_address.includes(':') ? `[${connection.remote_address}]` : connection.remote_address;
+    const endpoint = connection.ports.length === 1 ? `${address}:${connection.ports[0]}` : address;
+    const count = t('traffic_connection_group_count', { count: connection.connections.length });
+    const processDetail = `PID ${connection.pids.join(', ')} · ${connection.states.join(', ')}`;
+    const endpointDetail = [t('traffic_track_ip'), endpoint, t('traffic_group_ports', { ports: connection.ports.join(', ') }), ...connection.hostnames].join('\n');
+    return `<div class="traffic-connection-grid grid gap-3 items-center px-4 py-3 hover:bg-primary/[0.035] transition-colors text-[11px]">
       <div class="min-w-0">
         <div class="flex items-center gap-2 min-w-0">
-          <button type="button" data-focus-type="process" data-focus-value="${escapeHtml(connection.process_name.toLowerCase())}" data-focus-label="${escapeHtml(connection.process_name)}" class="truncate font-semibold text-on-surface hover:text-tertiary transition-colors" title="${escapeHtml(t('traffic_track_process'))}">${escapeHtml(connection.process_name)}</button>${candidate}
+          <button type="button" data-focus-type="process" data-focus-value="${escapeHtml(connection.process_name.toLowerCase())}" data-focus-label="${escapeHtml(connection.process_name)}" class="truncate font-semibold text-on-surface hover:text-tertiary transition-colors" title="${escapeHtml(t('traffic_track_process'))}">${escapeHtml(connection.process_name)}</button>
         </div>
-        <span class="text-[9px] text-on-surface-variant/40">PID ${connection.pid || '—'} · ${escapeHtml(connection.state)}</span>
+        <span class="block truncate text-[9px] text-on-surface-variant/55" title="${escapeHtml(processDetail)}">${escapeHtml(count)}</span>
+        <div class="traffic-classification">${groupClassificationBadges(connection)}</div>
       </div>
-      <button type="button" data-focus-type="ip" data-focus-value="${escapeHtml(connection.remote_address)}" data-focus-label="${escapeHtml(connection.remote_address)}" class="min-w-0 text-left font-mono text-[10px] text-on-surface-variant/75 hover:text-tertiary truncate transition-colors" title="${escapeHtml(t('traffic_track_ip'))}: ${escapeHtml(endpoint)}">${escapeHtml(endpoint)}</button>
-      <span class="text-[9px] font-black tracking-wider text-on-surface-variant/55">${escapeHtml(connection.protocol)}</span>
+      <button type="button" data-focus-type="ip" data-focus-value="${escapeHtml(connection.remote_address)}" data-focus-label="${escapeHtml(connection.remote_address)}" class="min-w-0 text-left font-mono text-[10px] text-on-surface-variant/75 hover:text-tertiary truncate transition-colors" title="${escapeHtml(endpointDetail)}">${connection.hostnames.length ? `<span class="block truncate text-on-surface">${escapeHtml(connection.hostnames[0])}${connection.hostnames.length > 1 ? ` (+${connection.hostnames.length - 1})` : ''}</span>` : ''}${escapeHtml(endpoint)}${connection.ports.length > 1 ? `<span class="block truncate text-[9px] text-on-surface-variant/55">${escapeHtml(t('traffic_group_ports', { ports: connection.ports.join(', ') }))}</span>` : ''}</button>
+      <span class="text-[9px] font-black text-on-surface-variant/55">${escapeHtml(connection.protocols.join('/'))}</span>
       <span class="text-right font-mono text-secondary">${formatBytes(downloadBps, '/s')}</span>
       <span class="text-right font-mono text-primary">${formatBytes(uploadBps, '/s')}</span>
       <span class="text-right font-mono text-on-surface-variant/55">${formatBytes(downloadBytes + uploadBytes)}</span>
@@ -179,7 +259,7 @@ function renderConnections() {
 function filteredEvents() {
   const query = ($('traffic-search')?.value || '').trim().toLowerCase();
   return (monitor.snapshot?.events || []).filter((event) => {
-    if (monitor.mode === 'zapret' && !event.zapret_candidate) return false;
+    if (!matchesTrafficMode(event, monitor.mode, monitor.hideLocal)) return false;
     if (monitor.hideSystem && event.system_process) return false;
     if (!eventMatchesFocus(event)) return false;
     if (!query) return true;
@@ -201,6 +281,7 @@ function renderLog() {
     reset: 'traffic_event_reset',
     udp: 'traffic_event_udp',
     observed: 'traffic_event_observed',
+    classified: 'traffic_event_classified',
   };
   list.innerHTML = events.map((event) => {
     const endpoint = event.remote_address.includes(':')
@@ -212,7 +293,7 @@ function renderLog() {
     const icon = success ? 'check_circle' : failed ? 'error' : event.event_type === 'connecting' ? 'sync' : 'info';
     return `<div class="grid grid-cols-[86px_minmax(140px,1fr)_minmax(180px,1.5fr)_110px] gap-3 items-center px-4 py-3 text-[10px] hover:bg-primary/[0.035]">
       <span class="font-mono text-on-surface-variant/45">${new Date(event.timestamp_ms).toLocaleTimeString()}</span>
-      <button type="button" data-focus-type="process" data-focus-value="${escapeHtml(event.process_name.toLowerCase())}" data-focus-label="${escapeHtml(event.process_name)}" class="text-left truncate text-on-surface hover:text-tertiary">${escapeHtml(event.process_name)} <span class="text-on-surface-variant/35">· ${event.pid || '—'}</span></button>
+      <div class="min-w-0"><button type="button" data-focus-type="process" data-focus-value="${escapeHtml(event.process_name.toLowerCase())}" data-focus-label="${escapeHtml(event.process_name)}" class="text-left truncate text-on-surface hover:text-tertiary">${escapeHtml(event.process_name)} <span class="text-on-surface-variant/35">· ${event.pid || '—'}</span></button><div class="traffic-classification">${classificationBadges(event)}</div></div>
       <button type="button" data-focus-type="ip" data-focus-value="${escapeHtml(event.remote_address)}" data-focus-label="${escapeHtml(event.remote_address)}" class="text-left truncate font-mono text-on-surface-variant/70 hover:text-tertiary" title="${escapeHtml(endpoint)}">${escapeHtml(endpoint)}</button>
       <span class="flex items-center gap-1.5 ${resultClass}"><span class="material-symbols-outlined text-sm">${icon}</span>${escapeHtml(t(eventLabels[event.event_type] || 'traffic_event_observed'))}</span>
     </div>`;
@@ -321,9 +402,9 @@ function drawChart() {
   plot('upload', color('primary'), `${color('primary')}21`);
 }
 
-document.addEventListener('zapret:theme-changed', drawChart);
 
 function render() {
+  $('traffic-limits-notice')?.classList.toggle('hidden', !monitor.snapshot?.details_limited);
   setStatus(monitor.snapshot);
   renderMetrics();
   renderConnections();
@@ -377,6 +458,7 @@ function setMode(mode) {
   monitor.mode = mode;
   document.querySelectorAll('.traffic-mode-btn').forEach((button) => {
     const active = button.dataset.mode === mode;
+    button.setAttribute('aria-pressed', String(active));
     button.classList.toggle('bg-primary/15', active);
     button.classList.toggle('text-primary', active);
     button.classList.toggle('text-on-surface-variant/50', !active);
@@ -391,9 +473,9 @@ export function refreshTrafficTranslations() {
 }
 
 export function initTrafficMonitor() {
+  document.addEventListener('zapret:theme-changed', drawChart);
   $('traffic-toggle-btn')?.addEventListener('click', toggleMonitor);
-  $('traffic-mode-zapret')?.addEventListener('click', () => setMode('zapret'));
-  $('traffic-mode-all')?.addEventListener('click', () => setMode('all'));
+  document.querySelectorAll('.traffic-mode-btn').forEach(button => button.addEventListener('click', () => setMode(button.dataset.mode)));
   $('traffic-search')?.addEventListener('input', () => {
     renderConnections();
     renderLog();
@@ -402,6 +484,7 @@ export function initTrafficMonitor() {
     monitor.hideSystem = event.target.checked;
     render();
   });
+  $('traffic-hide-local')?.addEventListener('change', event => { monitor.hideLocal = event.target.checked; render(); });
   $('traffic-focus-clear')?.addEventListener('click', clearFocus);
   $('traffic-tab-connections')?.addEventListener('click', () => setTab('connections'));
   $('traffic-tab-log')?.addEventListener('click', () => setTab('log'));
@@ -417,5 +500,5 @@ export function initTrafficMonitor() {
   monitor.timer = window.setInterval(() => {
     if (document.visibilityState === 'visible') pollSnapshot();
   }, 1000);
-  render();
+  setMode(monitor.mode);
 }
