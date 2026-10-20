@@ -165,9 +165,11 @@ jobs:
 
       - name: Install signing tool
         if: steps.decision.outputs.promote == 'true' && steps.pull_request.outputs.exists == 'false' && steps.existing_branch.outputs.exists == 'false'
-        # This job only needs the Tauri signer. Do not install optional native
-        # frontend bindings: they target Windows and are irrelevant on Ubuntu.
-        run: npm ci --omit=optional
+        # The Tauri signer needs its platform-specific optional native binding.
+        # npm skips optional bindings that do not match the runner platform.
+        run: |
+          npm ci --include=optional
+          npm run tauri -- --version
 
       - name: Sign stable core channel
         if: steps.decision.outputs.promote == 'true' && steps.pull_request.outputs.exists == 'false' && steps.existing_branch.outputs.exists == 'false'
