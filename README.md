@@ -16,6 +16,8 @@
   <a href="https://github.com/larrriiin/zapret-ui/issues">Сообщить о проблеме / Report an issue</a>
   ·
   <a href="CODE_SIGNING.md">Code signing policy</a>
+  <br>
+  <sub>⚠️ Установщики Windows пока не имеют цифровой подписи. <a href="CODE_SIGNING.md">Подробнее</a></sub>
 </p>
 
 <p align="center">
