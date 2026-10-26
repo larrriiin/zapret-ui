@@ -1,6 +1,22 @@
 # Code signing policy
 
-Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+## Current signing status
+
+**Status: Pending — Windows installers are not yet Authenticode-signed.**
+
+ZAPRET UI has applied to the [SignPath Foundation](https://signpath.org/) free code signing program. The initial application was not approved due to insufficient public visibility and community recognition.
+
+As the project continues to grow, we intend to reapply for the program.
+
+Currently, Windows installers distributed through GitHub Releases are not signed with a publicly trusted code signing certificate. Windows SmartScreen may therefore display an "Unknown publisher" warning.
+
+The `.sig` files included in GitHub Releases are used by the Tauri updater to verify update authenticity and integrity. They are not Windows Authenticode signatures and do not replace a trusted code signing certificate.
+
+Once the project is accepted into the SignPath Foundation program, this policy will be updated accordingly.
+
+--- 
+
+~~Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).~~
 
 ## Team roles
 
