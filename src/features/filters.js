@@ -76,6 +76,7 @@ export async function pollFilters() {
 }
 
 export async function handleGameFilterChange(mode) {
+  if (mode === state.currentFilters?.game_filter) return;
   try {
     await invoke('set_game_filter', { mode });
     await pollFilters();
@@ -86,6 +87,7 @@ export async function handleGameFilterChange(mode) {
 }
 
 export async function handleIPSetFilterChange(mode) {
+  if (mode === state.currentFilters?.ipset) return;
   try {
     await invoke('set_ipset_filter', { mode });
     await pollFilters();

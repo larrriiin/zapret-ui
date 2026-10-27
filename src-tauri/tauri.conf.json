@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "ZAPRET",
+        "title": "ZAPRET UI",
         "visible": false,
         "width": 1100,
         "height": 1040,

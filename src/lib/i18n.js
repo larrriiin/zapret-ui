@@ -84,6 +84,7 @@ export async function syncTrayLocalization() {
         warp_loading: t('warp_detecting'),
         exit: t('tray_exit'),
         show: t('tray_show'),
+        updates: t('updates_view'),
         status_prefix: t('tray_status_prefix'),
         strategy_prefix: t('tray_strategy_prefix'),
         toggle_on: t('tray_toggle_on'),

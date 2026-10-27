@@ -53,6 +53,40 @@ button:disabled { cursor: not-allowed; }
 
 :root { color-scheme: dark; }
 
+.brand-credit {
+  font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .035em;
+  color: color-mix(in srgb, var(--color-on-surface-variant) 65%, var(--color-background));
+}
+
+.warp-preference { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 14px 0; font-size: 13px; }
+.warp-advanced-body { margin-top: 20px; }
+#warp-advanced > summary { cursor: pointer; color: var(--color-on-surface); }
+.warp-setting-label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.warp-setting-label .warp-icon-button { flex-shrink: 0; }
+.warp-protocol-dropdown { width: min(230px, 100%); flex-shrink: 0; }
+#warp-protocol-trigger { min-height: 48px; text-align: left; }
+#warp-protocol-trigger:disabled { opacity: .55; cursor: not-allowed; }
+#warp-protocol-trigger:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+#warp-protocol-options[hidden], #warp-protocol[hidden], #warp-protocol-hint[hidden] { display: none; }
+@media (max-width: 620px) { .warp-protocol-setting { align-items: flex-start; flex-direction: column; gap: 10px; } .warp-protocol-dropdown { width: 100%; } }
+.warp-rule-status { font-size: 12px; color: var(--color-on-surface-variant); overflow-wrap: anywhere; }
+.warp-rule-status[data-state="active"] { color: var(--color-secondary); }
+.warp-rule-status[data-state="error"], #telegram-autostart-status[data-state="error"] { color: var(--color-tertiary); }
+.warp-text-button { color: var(--color-primary); text-decoration: underline; text-underline-offset: 3px; font-size: 12px; margin-top: 8px; }
+.warp-text-button[hidden], #warp-diag-reveal[hidden], #warp-diag-support[hidden] { display: none; }
+.warp-diagnostics { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--color-outline-variant); }
+.warp-diagnostic-errors { font-size: 12px; color: var(--color-tertiary); overflow-wrap: anywhere; max-height: 160px; overflow: auto; margin-top: 12px; }
+.warp-diagnostic-errors li + li { margin-top: 8px; }
+.warp-diagnostic-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.warp-diagnostic-actions > .provider-button { min-width: 0; }
+.warp-diagnostic-actions .material-symbols-outlined { flex-shrink: 0; font-size: 20px; }
+.warp-diagnostic-reveal { margin-top: 10px; }
+#warp-diag-result { overflow-wrap: anywhere; }
+#warp-diag-create[aria-busy="true"] { cursor: progress; }
+
 /* WARP only changes the home composition after successful installation detection. */
 .provider-heading[hidden], .connection-heading[hidden], #warp-card[hidden],
 .warp-proxy[hidden], .warp-port-form[hidden], .warp-error[hidden], #warp-install[hidden] { display: none; }
@@ -357,7 +391,7 @@ input, textarea { caret-color: var(--color-primary); }
 .theme-system-hint { margin-top: 16px; }
 .accent-settings { margin-top: 24px; padding: 0; min-width: 0; }
 .accent-settings legend { font-size: 14px; font-weight: 600; }
-.accent-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
+.accent-options { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
 .accent-choice { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 10px 2px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
 .accent-choice:hover { background: color-mix(in srgb, var(--color-primary) 8%, transparent); }
 .accent-choice:has(input:checked) { border-color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 8%, transparent); }

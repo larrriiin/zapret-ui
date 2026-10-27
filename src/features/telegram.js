@@ -117,7 +117,7 @@ function render() {
     }
   }
 
-  setTelegramSettingsBusy(disabled || !installed || snapshot?.running, snapshot?.running === true);
+  setTelegramSettingsBusy(disabled || !installed || snapshot?.running, snapshot?.running === true, disabled || !installed);
   renderTelegramReport();
 }
 async function refresh() {

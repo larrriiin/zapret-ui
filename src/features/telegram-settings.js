@@ -2,10 +2,11 @@ import { $, invoke } from '../lib/core.js';
 import { t, onLangChange } from '../lib/i18n.js';
 import { showConfirm } from '../lib/dom.js';
 
-let settings = null, dirty = false, controlsDisabled = true;
-const fields = ['telegram-start-with-zapret', 'telegram-host', 'telegram-port', 'telegram-dc-ips', 'telegram-cfproxy', 'telegram-cf-domains', 'telegram-worker', 'telegram-worker-domains'];
+let settings = null, dirty = false, controlsDisabled = true, autostartDisabled = true;
+let savingAutostart = false;
+const fields = ['telegram-host', 'telegram-port', 'telegram-dc-ips', 'telegram-cfproxy', 'telegram-cf-domains', 'telegram-worker', 'telegram-worker-domains'];
 function updateSaveState() {
-  $('telegram-save').disabled = controlsDisabled || !dirty;
+  $('telegram-save').disabled = controlsDisabled || savingAutostart || !dirty;
   $('telegram-unsaved').hidden = !dirty;
 }
 function syncRelayFields() {
@@ -62,11 +63,13 @@ export async function refreshTelegramSettings(installed) {
   if (!installed) { settings = null; dirty = false; updateSaveState(); return; }
   if (!settings) show(await invoke('get_telegram_config'));
 }
-export function setTelegramSettingsBusy(disabled, running = false) {
+export function setTelegramSettingsBusy(disabled, running = false, unavailable = disabled) {
   controlsDisabled = Boolean(disabled);
+  autostartDisabled = Boolean(unavailable);
   // Help remains available while the proxy runs; only editable controls lock.
   $('telegram-config-fields').disabled = false;
   for (const id of [...fields, 'telegram-secret', 'telegram-regenerate']) $(id).disabled = controlsDisabled;
+  $('telegram-start-with-zapret').disabled = autostartDisabled || savingAutostart || !settings;
   updateSaveState();
   $('telegram-settings-lock').hidden = !running;
 }
@@ -82,6 +85,7 @@ export function parseDcIps(text) {
 }
 export function initTelegramSettings(action) {
   initInfoButtons();
+  $('telegram-start-with-zapret').addEventListener('change', saveTelegramAutostart);
   for (const id of fields) $(id).addEventListener('input', () => {
     dirty = true;
     syncRelayFields();
@@ -96,10 +100,10 @@ export function initTelegramSettings(action) {
   }, true);
   $('telegram-port-form').addEventListener('submit', event => {
     event.preventDefault();
-    if (controlsDisabled || !event.target.reportValidity() || !settings) return;
+    if (controlsDisabled || savingAutostart || !event.target.reportValidity() || !settings) return;
     let value;
     try {
-      value = { ...settings, start_with_zapret: $('telegram-start-with-zapret').checked, host: $('telegram-host').value.trim(), port: Number($('telegram-port').value), dc_ips: parseDcIps($('telegram-dc-ips').value),
+      value = { ...settings, host: $('telegram-host').value.trim(), port: Number($('telegram-port').value), dc_ips: parseDcIps($('telegram-dc-ips').value),
         cfproxy: $('telegram-cfproxy').checked, cfproxy_domains: $('telegram-cf-domains').value.split(/\s+/).filter(Boolean),
         worker: $('telegram-worker').checked, worker_domains: $('telegram-worker-domains').value.split(/\s+/).filter(Boolean) };
     } catch (error) { $('telegram-message').dataset.state = 'error'; $('telegram-message').textContent = error.message; return; }
@@ -116,4 +120,31 @@ export function initTelegramSettings(action) {
       $('telegram-message').textContent = t('tg_secret_changed');
     });
   });
+}
+
+// Independent of form validation and dirty state; never re-render draft fields.
+export async function saveTelegramAutostart() {
+  const toggle = $('telegram-start-with-zapret');
+  if (!settings || savingAutostart || autostartDisabled) return;
+  const confirmed = Boolean(settings.start_with_zapret);
+  const requested = toggle.checked;
+  savingAutostart = true;
+  toggle.disabled = true;
+  syncRelayFields(); updateSaveState();
+  const message = $('telegram-autostart-status');
+  message.dataset.state = 'saving'; message.textContent = t('tg_autostart_saving');
+  try {
+    settings.start_with_zapret = await invoke('set_telegram_autostart', { enabled: requested });
+    message.dataset.state = 'success'; message.textContent = t('tg_config_saved');
+  } catch (error) {
+    settings.start_with_zapret = confirmed;
+    message.dataset.state = 'error';
+    const code = error?.code || error?.message || String(error);
+    message.textContent = `${t('tg_autostart_failed')}: ${t(code)}`;
+  } finally {
+    toggle.checked = Boolean(settings.start_with_zapret);
+    savingAutostart = false;
+    toggle.disabled = autostartDisabled;
+    syncRelayFields(); updateSaveState();
+  }
 }

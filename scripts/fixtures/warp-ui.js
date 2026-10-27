@@ -8,6 +8,7 @@ import { initStrategyDropdown, loadStrategies } from '/features/strategies.js';
 import { initInfoModals } from '/features/info-modals.js';
 import { initStatusCheck } from '/features/status-check.js';
 import { initNavigation, showSection } from '/features/navigation.js';
+import { initTrafficMonitor } from '/features/traffic.js';
 
 mountComponents();
 localStorage.setItem('zapret_theme', 'graphite');
@@ -19,10 +20,15 @@ let installed = false, connected = false, mode = 'warp', port = 40000, failed = 
 let inFlight = 0, maximum = 0, calls = [];
 let startupBusy = 2;
 let pendingConnection = false;
-let sites = { domains: ['example.org'], enabled: false };
+let protocol = 'MASQUE', protocolEditable = true, probeFailure = false;
+let automation = { restore_rules: false };
+let sites = { domains: ['example.org'], enabled: false, runtime_active: false };
+let activationFailure = false;
 let applications = { paths: [], enabled: false, active_connections: 0, total_connections: 0, failed_connections: 0, error: null };
 const modes = ['doh','dot','warp','warp+dot','warp+doh','proxy','tunnel_only'];
 window.__TAURI__ = { core: { invoke: async (command, args) => {
+  if (command === 'notify_available_updates') return false;
+  if (command === 'get_traffic_snapshot') return { running: false, connections: [], events: [] };
   if (command === 'get_strategies') return ['general (ALT12)', 'general'];
   if (command === 'check_status_full') return {running:true, strategy:'general (ALT12)', windivert_service:'running', bypass_process:'running', zapret_service:'running'};
   if (!command.includes('warp')) return {};
@@ -35,14 +41,37 @@ window.__TAURI__ = { core: { invoke: async (command, args) => {
   if (command === 'disconnect_warp') { connected = false; pendingConnection = false; }
   if (command === 'set_warp_mode') mode = args.mode;
   if (command === 'set_warp_proxy_port') port = args.port;
-  if (command === 'set_warp_sites') {
+  if (command === 'save_warp_sites' || command === 'set_warp_sites') {
     if (args.domains.some(domain => domain.includes('/'))) throw {code:'warp_sites_invalid', detail:''};
-    sites = { domains: [...new Set(args.domains.map(domain => domain.toLowerCase()))], enabled: args.enabled };
+    sites.domains = [...new Set(args.domains.map(domain => domain.toLowerCase()))];
+    if (command === 'set_warp_sites') sites.enabled = args.enabled;
   }
-  if (!connected || mode !== 'proxy' || !installed) sites.enabled = false;
-  if (command === 'set_warp_applications') applications = { ...applications, paths: args.paths, enabled: args.enabled };
-  if (!connected || mode !== 'proxy' || !installed) applications.enabled = false;
-  return {installed, connected, sites: structuredClone(sites), applications: structuredClone(applications), state:connected ? 'connected':pendingConnection ? 'connecting':'disconnected', mode, modes, version:'warp-cli 2026.7.1343.0', proxy:mode === 'proxy' ? {address:'127.0.0.1',port,kind:'SOCKS5',active:connected,port_editable:true}:null};
+  if (command === 'save_warp_applications' || command === 'set_warp_applications') {
+    applications.paths = args.paths;
+    if (command === 'set_warp_applications') applications.enabled = args.enabled;
+  }
+  if (['set_warp_sites','set_warp_applications'].includes(command) && args.enabled) {
+    if (activationFailure) { sites.runtime_active = false; applications.runtime_active = false; connected = false; throw {code:'warp_proxy_unavailable',detail:'Mock connection refused'}; }
+    if (!installed) throw {code:'warp_not_installed',detail:''};
+    if (['warp','warp+dot','warp+doh','tunnel_only'].includes(mode) && !args.confirmed) throw {code:'warp_confirm_proxy',detail:''};
+    mode = 'proxy'; protocol = 'MASQUE'; connected = true;
+  }
+  if (command === 'set_warp_automation') automation = args.preferences;
+  if (command === 'set_warp_protocol') {
+    if (args.protocol === 'WireGuard' && mode === 'proxy') {
+      if (!args.confirmed) throw {code:'warp_confirm_wireguard',detail:''};
+      mode = 'warp'; sites.enabled = applications.enabled = false;
+    }
+    protocol = args.protocol;
+  }
+  sites.runtime_active = sites.enabled && installed && connected && mode === 'proxy' && protocol === 'MASQUE';
+  applications.runtime_active = applications.enabled && installed && connected && mode === 'proxy' && protocol === 'MASQUE';
+  if (command === 'check_warp_connection') {
+    if (probeFailure === 'throw') throw {code:'warp_timeout',detail:'Mock health probe unavailable'};
+    return { installed, connected, mode, protocol, proxy_available: mode === 'proxy' ? connected : null,
+      route: probeFailure ? 'failed' : connected ? 'working' : 'unverified', error: probeFailure ? {code:'warp_check_failed',detail:'Mock route failed'} : null };
+  }
+  return {installed, connected, protocol, protocol_editable: protocolEditable, diag_supported: false, automation: structuredClone(automation), last_errors: [], sites: structuredClone(sites), applications: structuredClone(applications), state:connected ? 'connected':pendingConnection ? 'connecting':'disconnected', mode, modes, version:'warp-cli 2026.7.1343.0', proxy:mode === 'proxy' ? {address:'127.0.0.1',port,kind:'SOCKS5',active:connected,port_editable:true}:null};
 }}};
 setLanguage('ru');
 updateStatusUI({running:true, strategy:'general (ALT12)'});
@@ -56,7 +85,7 @@ await document.fonts.ready;
 const before = JSON.stringify(rects());
 const loadingVisible = getComputedStyle($('startup-loader')).display === 'flex' && getComputedStyle($('sections-host')).visibility === 'hidden';
 await initWarp();
-initNavigation();
+initNavigation(); initTrafficMonitor();
 const detectionFinished = $('warp-settings-status').textContent.includes('WARP');
 document.documentElement.classList.remove('app-loading');
 initInfoModals(); initStatusCheck();
@@ -76,6 +105,11 @@ async function manualCheck(id) {
 check(before === JSON.stringify(rects()), 'WARP absent: all original hero element bounds unchanged');
 check($('warp-card').hidden, 'WARP absent: no visible WARP card');
 check(!$('warp-install').hidden && !$('warp-install').disabled, 'Missing WARP offers installation in Settings');
+// Lists are editable before installing or connecting WARP.
+$('warp-sites-add').click(); $('warp-sites-input').value = 'offline.example';
+$('warp-sites-dialog-add').click(); await wait(200);
+check(sites.domains.includes('offline.example') && !connected, 'Website list saves with WARP disconnected and absent');
+[...$('warp-sites-list').querySelectorAll('button')].find(b => b.getAttribute('aria-label').includes('offline.example')).click(); await wait(200);
 installed = true; $('warp-settings-refresh').click();
 check($('warp-status-dialog').open && $('warp-status-report').getAttribute('aria-busy') === 'true', 'Settings status check opens a loading report');
 await wait(200);
@@ -101,6 +135,15 @@ pendingConnection = true; $('warp-connect').click(); await wait(200);
 check(!$('warp-connect').disabled && $('warp-connect-label').textContent === 'Отменить подключение', 'An unestablished tunnel remains cancellable after CLI returns');
 $('warp-connect').click(); await wait(200);
 check(!connected && !pendingConnection, 'Cancellation stops an unestablished tunnel');
+const connectionsBeforeModeChange = calls.filter(command => command === 'connect_warp').length;
+for (const value of ['proxy', 'warp']) {
+  $('warp-mode-trigger').click();
+  $('warp-mode-options').querySelector(`[data-value="${value}"]`).click();
+  if (!$('confirm-modal').classList.contains('hidden')) $('confirm-modal-ok').click();
+  await wait(200);
+  check(!connected && $('warp-connect').dataset.action === 'start', `Selecting ${value} leaves disconnected WARP off`);
+}
+check(calls.filter(command => command === 'connect_warp').length === connectionsBeforeModeChange, 'Changing mode does not issue a frontend connect command');
 updateStatusUI({running:false}); await wait(350);
 check(['connect-btn','warp-connect'].every(id => getComputedStyle($(id)).backgroundColor === 'rgba(0, 0, 0, 0)'), 'Disconnected connection buttons are both outlined');
 updateStatusUI({running:true, strategy:'general (ALT12)'});
@@ -109,7 +152,7 @@ check(connected && $('connect-btn').dataset.action === 'stop', 'Both providers s
 check(getComputedStyle($('connect-btn')).backgroundColor === getComputedStyle($('warp-connect')).backgroundColor, 'Connected buttons use the same fill');
 for (const [left, right] of [['connect-btn', 'warp-connect'], ['check-status-btn', 'warp-refresh']]) {
   const a = $(left).getBoundingClientRect(), b = $(right).getBoundingClientRect();
-  check(Math.abs(a.width - b.width) < 1 && a.height === b.height, `${left} and ${right} have equal dimensions`);
+  check((left !== 'connect-btn' || Math.abs(a.width - b.width) < 1) && a.height === b.height, `${left} and ${right} align; settings stays available beside WARP status`);
 }
 $('warp-mode-trigger').click();
 const warpRow = $('warp-mode-options-list').querySelector('[aria-selected="true"]');
@@ -122,7 +165,9 @@ check($('header-status').textContent.endsWith('WARP'), 'Header shows WARP alone 
 updateStatusUI({running:true, strategy:'general (ALT12)'});
 $('warp-mode-trigger').click();
 check(!$('warp-mode-options').hidden, 'Custom mode dropdown opens');
-$('warp-mode-options').querySelector('[data-value="proxy"]').click(); await wait(200);
+$('warp-mode-options').querySelector('[data-value="proxy"]').click();
+if (!$('confirm-modal').classList.contains('hidden')) $('confirm-modal-ok').click();
+await wait(200);
 check($('warp-mode-options').hidden && $('warp-mode-label').textContent === 'Локальный прокси', 'Custom dropdown selects mode and closes');
 check(!$('warp-proxy').hidden && $('warp-proxy-endpoint').textContent.includes('40000'), 'Local proxy reports endpoint and type');
 $('warp-port').value = '40001'; $('warp-port-form').requestSubmit(); await wait(200);
@@ -155,7 +200,7 @@ $('warp-apps-list').querySelector('[aria-label^="Полный путь"]').click
 check($('warp-settings-info-dialog').open && $('warp-settings-info-path').textContent.includes('C:\\Games\\League of Legends\\LeagueClientUx.exe'), 'Full application path opens on demand');
 $('warp-settings-info-dialog').close();
 $('warp-apps-toggle').click(); await wait(200);
-check(applications.enabled && $('warp-apps-add').disabled && $('warp-port').disabled, 'Application rules enable and lock editing and port changes');
+check(applications.runtime_active && !$('warp-apps-add').disabled && $('warp-port').disabled, 'Application rules enable while list editing remains available');
 $('warp-apps-toggle').click(); await wait(200);
 check(!applications.enabled && !$('warp-apps-add').disabled && applications.paths.length === 1, 'Disabling application rules retains the selected executable');
 $('warp-apps-list').querySelector('[aria-label^="Убрать"]').click(); await wait(200);
@@ -183,6 +228,57 @@ installed = true; connected = true; mode='proxy'; await manualCheck('warp-settin
 setLanguage('en');
 check($('warp-state').textContent === 'Connected' && $('warp-mode').selectedOptions[0].textContent === 'Local proxy', 'Dynamic labels change language');
 setLanguage('ru'); mode='warp'; await manualCheck('warp-settings-refresh');
+// Switch from a full tunnel through a single routing action and confirm the consequence.
+connected = false; protocol = 'WireGuard'; mode = 'warp'; await manualCheck('warp-settings-refresh');
+check(!$('warp-open-settings').hidden && !$('warp-sites-toggle').disabled, 'Settings and routing are accessible from a full-tunnel mode');
+$('warp-sites-toggle').click();
+check(!$('confirm-modal').classList.contains('hidden'), 'Changing a full tunnel requires confirmation');
+$('confirm-modal-cancel').click(); await wait(50);
+check(mode === 'warp' && protocol === 'WireGuard' && !connected, 'Cancellation preserves the official client mode and protocol');
+$('warp-sites-toggle').click(); $('confirm-modal-ok').click(); await wait(250);
+check(mode === 'proxy' && protocol === 'MASQUE' && sites.runtime_active, 'Confirmed activation prepares MASQUE proxy and starts website rules');
+failed = true; await manualCheck('warp-settings-refresh');
+check($('warp-sites-toggle').dataset.enabled === 'false' && $('warp-sites-state').dataset.state === 'error', 'An unavailable status never presents a stale active routing snapshot as verified');
+failed = false; await manualCheck('warp-settings-refresh');
+$('warp-apps-add').click(); await wait(250); $('warp-apps-toggle').click(); await wait(200);
+$('warp-sites-toggle').click(); await wait(200);
+check(!sites.runtime_active && applications.runtime_active && connected, 'Disabling sites preserves application routing and the WARP connection');
+$('warp-apps-toggle').click(); await wait(200);
+check(!applications.runtime_active && connected, 'Disabling application rules leaves WARP connected');
+activationFailure = true; $('warp-sites-toggle').click(); await wait(350);
+check($('warp-sites-toggle').dataset.enabled === 'false' && !$('warp-page-error').hidden && sites.domains.length > 0, 'Failed activation never shows a working toggle or loses the website list');
+activationFailure = false; await manualCheck('warp-settings-refresh');
+check($('warp-sites-state').textContent.includes('Настроено') && $('warp-sites-toggle').dataset.enabled === 'false', 'Persisted desired rules are displayed as configured, not active');
+$('warp-sites-toggle').click(); await wait(200);
+$('warp-auto-restore').click(); await wait(200);
+check(automation.restore_rules && !Object.hasOwn(automation, 'connect_on_start'), 'Only the restore preference is saved; removed autoconnect cannot be re-enabled');
+check($('warp-advanced').contains($('warp-auto-restore')) && $('warp-advanced').contains($('warp-view-traffic')), 'Restore and traffic link are inside advanced settings');
+check(!$('warp-auto-connect') && !$('warp-check') && !$('warp-page-connect') && !$('warp-page-connection-title'), 'Connection panel and separate check button are removed');
+$('warp-refresh').click(); await wait(200);
+check($('warp-status-dialog').open && $('warp-status-report').textContent.includes('Тестовый маршрут через WARP') && $('warp-status-report').textContent.includes('Работает') && $('warp-status-report').textContent.includes('MASQUE'), 'WARP status dialog includes protocol, SOCKS5 probe and route result');
+$('warp-status-dialog').close();
+probeFailure = true; $('warp-refresh').click(); await wait(200);
+check($('warp-status-report').textContent.includes('Mock route failed') && $('warp-status-report').textContent.includes('Не работает'), 'Failed route is explained inside the status dialog');
+$('warp-status-dialog').close(); probeFailure = 'throw'; $('warp-refresh').click(); await wait(200);
+check($('warp-status-report').textContent.includes('Mock health probe unavailable') && $('warp-status-report').textContent.includes('Не проверен'), 'A failed health command leaves the route explicitly unverified');
+$('warp-status-dialog').close(); probeFailure = false;
+protocol = null; await manualCheck('warp-settings-refresh');
+check($('warp-protocol').value === '' && $('warp-protocol-label').textContent === 'Выберите протокол', 'Unknown protocol is a placeholder, never an invented selection');
+$('warp-protocol-trigger').click();
+check([...$('warp-protocol-options-list').querySelectorAll('button')].map(b => b.dataset.value).join(',') === 'MASQUE,WireGuard', 'Protocol dropdown contains only MASQUE and WireGuard');
+$('warp-protocol-trigger').click();
+protocol = 'MASQUE'; protocolEditable = false; await manualCheck('warp-settings-refresh');
+check($('warp-protocol-trigger').disabled && !$('warp-protocol-hint').hidden, 'Unsupported protocol control is disabled with an explanation');
+protocolEditable = true; await manualCheck('warp-settings-refresh');
+for (const button of document.querySelectorAll('[data-warp-info]')) {
+  button.click();
+  check($('warp-settings-info-dialog').open && $('warp-settings-info-text').textContent.length > 40, `Information dialog describes ${button.dataset.warpInfo}`);
+  $('warp-settings-info-dialog').close();
+}
+$('warp-view-traffic').click(); await wait(220);
+check(!$('section-traffic').classList.contains('hidden') && document.querySelector('.traffic-mode-btn[data-mode="warp"]').getAttribute('aria-pressed') === 'true', 'WARP traffic link opens the existing monitor with the WARP filter');
+check(!$('warp-connections') && !$('section-warp-settings').querySelector('.warp-experimental'), 'Settings contain neither duplicate connections monitor nor Experimental badge');
+showSection('warp-settings'); await wait(220);
 const report = document.createElement('pre'); report.id='test-results'; report.textContent=results.join('\n');
 report.style.cssText='position:relative;margin:24px;padding:16px;background:#20232a;color:white;font:12px monospace;white-space:pre-wrap';
 $('sections-host').append(report);

@@ -10,6 +10,8 @@ use std::{
 };
 
 pub mod applications;
+pub mod control;
+pub mod diagnostics;
 pub mod installer;
 pub mod sites;
 
@@ -57,6 +59,8 @@ struct Client {
     modes: Vec<String>,
     proxy_type: Option<String>,
     port_editable: bool,
+    protocol_editable: bool,
+    diag_supported: bool,
 }
 
 #[derive(Default, Debug, Serialize)]
@@ -66,6 +70,14 @@ pub struct WarpStatus {
     state: String,
     mode: Option<String>,
     version: Option<String>,
+    protocol: Option<String>,
+    protocol_editable: bool,
+    diag_supported: bool,
+    automation: control::Automation,
+    last_errors: Vec<WarpError>,
+    sites_error: Option<WarpError>,
+    applications_error: Option<WarpError>,
+    automation_error: Option<WarpError>,
     modes: Vec<String>,
     proxy: Option<ProxyStatus>,
     sites: sites::SiteStatus,
@@ -230,7 +242,13 @@ impl Client {
             .map(|_| "SOCKS5".into());
         let port_help = cli(&path, &["proxy", "port", "--help"]).unwrap_or_default();
         let port_editable = port_help.contains("<PORT>") && port_help.contains("127.0.0.1");
+        let protocol_help =
+            cli(&path, &["tunnel", "protocol", "set", "--help"]).unwrap_or_default();
+        let protocol_editable = control::protocol_supported(&protocol_help);
+        let diag_supported = diagnostics::supported(&path).unwrap_or(false);
         Ok(Self {
+            protocol_editable,
+            diag_supported,
             modified: path.metadata().ok().and_then(|m| m.modified().ok()),
             path,
             version,
@@ -245,6 +263,8 @@ impl Client {
             installed: true,
             state: "error".into(),
             version: Some(self.version.clone()),
+            protocol_editable: self.protocol_editable,
+            diag_supported: self.diag_supported,
             modes: self.modes.clone(),
             ..Default::default()
         };
@@ -259,6 +279,12 @@ impl Client {
             Ok((status, settings)) => {
                 result.state = parse_state(&status).into();
                 result.connected = result.state == "connected";
+                result.protocol = control::parse_protocol(&settings).or_else(|| {
+                    cli(&self.path, &["settings"])
+                        .ok()
+                        .as_deref()
+                        .and_then(control::parse_text_protocol)
+                });
                 result.mode = settings
                     .pointer("/settings/operation_mode")
                     .and_then(Value::as_str)
@@ -305,165 +331,266 @@ fn parse_state(status: &Value) -> &'static str {
     }
 }
 
-fn restore_selected_rules(status: &WarpStatus) -> Result<()> {
-    let port = status
-        .proxy
-        .as_ref()
-        .filter(|proxy| {
-            proxy.active && proxy.kind.as_deref() == Some("SOCKS5") && status.error.is_none()
-        })
-        .and_then(|proxy| proxy.port);
-    let Some(port) = port else {
-        return Ok(());
-    };
-    let sites_status = sites::status()?;
-    if sites_status.enabled && !sites_status.runtime_active {
-        sites::configure(sites_status.domains, true, Some(port))?;
-    }
-    let applications_status = applications::status()?;
-    if applications_status.enabled && !applications_status.runtime_active {
-        applications::configure(applications_status.paths, true, Some(port))?;
-    }
-    Ok(())
-}
-
 enum Action {
     Status,
     Connect,
     Disconnect,
-    Mode(String),
+    Mode(String, bool),
+    Protocol(String, bool),
     Port(u16),
-    Sites(Vec<String>, bool),
-    Applications(Vec<String>, bool),
+    SiteList(Vec<String>),
+    ApplicationList(Vec<String>),
+    Sites(Vec<String>, bool, bool),
+    Applications(Vec<String>, bool, bool),
+    Automation(control::Automation),
 }
 async fn execute(action: Action) -> Result<WarpStatus> {
     tauri::async_runtime::spawn_blocking(move || {
         let mut guard = CLIENT
             .try_lock()
             .map_err(|_| WarpError::new("warp_busy", ""))?;
-        // Saving or disabling site rules must work even after WARP is removed
-        // or its CLI/signature becomes unavailable.
-        let action = match action {
-            Action::Applications(paths, false) => {
-                applications::configure(paths, false, None)?;
-                Action::Status
-            }
-            Action::Sites(domains, false) => {
-                sites::configure(domains, false, None)?;
-                Action::Status
-            }
-            other => other,
-        };
-        let Some(path) = discover() else {
-            *guard = None;
-            applications::disable()?;
-            sites::disable()?;
-            return match action {
-                Action::Status => Ok(WarpStatus {
-                    state: "disconnected".into(),
-                    sites: sites::status()?,
-                    applications: applications::status()?,
-                    ..Default::default()
-                }),
-                _ => Err(WarpError::new("warp_not_installed", "")),
+        let mut controls = control::CONTROL
+            .lock()
+            .map_err(|e| WarpError::new("warp_process", e))?;
+        let control = controls.as_mut().ok_or_else(|| {
+            WarpError::new("warp_preferences_error", "WARP preferences unavailable")
+        })?;
+        let status_action = matches!(&action, Action::Status);
+        let site_action = matches!(&action, Action::Sites(..) | Action::SiteList(..));
+        let app_action = matches!(
+            &action,
+            Action::Applications(..) | Action::ApplicationList(..)
+        );
+        let mut local_change_succeeded = false;
+        let result = (|| -> Result<WarpStatus> {
+            // List editing and disabling are independent of the official client's availability.
+            let action = match action {
+                Action::SiteList(domains) => {
+                    sites::save_list(domains)?;
+                    local_change_succeeded = true;
+                    control.sites_error = None;
+                    Action::Status
+                }
+                Action::ApplicationList(paths) => {
+                    applications::save_list(paths)?;
+                    local_change_succeeded = true;
+                    control.applications_error = None;
+                    Action::Status
+                }
+                Action::Sites(domains, false, _) => {
+                    sites::configure(domains, false, None)?;
+                    local_change_succeeded = true;
+                    control.sites_error = None;
+                    Action::Status
+                }
+                Action::Applications(paths, false, _) => {
+                    applications::configure(paths, false, None)?;
+                    local_change_succeeded = true;
+                    control.applications_error = None;
+                    Action::Status
+                }
+                Action::Automation(preferences) => {
+                    sites::persist_json(
+                        &control.directory.join("warp-automation.json"),
+                        &preferences,
+                    )?;
+                    if !control.automation.restore_rules && preferences.restore_rules {
+                        control.sites_restore_attempted = false;
+                        control.applications_restore_attempted = false;
+                    }
+                    control.automation = preferences;
+                    local_change_succeeded = true;
+                    Action::Status
+                }
+                other => other,
             };
-        };
-        let modified = path.metadata().ok().and_then(|m| m.modified().ok());
-        if guard
-            .as_ref()
-            .is_none_or(|c| c.path != path || c.modified != modified)
-        {
-            match Client::load(path) {
-                Ok(client) => *guard = Some(client),
-                Err(error) => {
-                    *guard = None;
-                    applications::disable()?;
+            let Some(path) = discover() else {
+                *guard = None;
+                sites::disable()?;
+                applications::disable()?;
+                if control.automation.restore_rules
+                    && (sites::status()?.enabled || applications::status()?.enabled)
+                {
+                    let error = WarpError::new("warp_not_installed", "");
+                    control.automation_error = Some(error.clone());
+                    control::remember_error(control, error);
+                }
+                return match action {
+                    Action::Status => Ok(WarpStatus {
+                        state: "disconnected".into(),
+                        ..Default::default()
+                    }),
+                    _ => Err(WarpError::new("warp_not_installed", "")),
+                };
+            };
+            control.automation_error = None;
+            let modified = path.metadata().ok().and_then(|m| m.modified().ok());
+            if guard
+                .as_ref()
+                .is_none_or(|c| c.path != path || c.modified != modified)
+            {
+                *guard = Some(Client::load(path)?);
+            }
+            let client = guard.as_ref().unwrap();
+            match action {
+                Action::Status => {}
+                Action::Connect => {
+                    cli(&client.path, &["connect"])?;
+                }
+                Action::Disconnect => {
                     sites::disable()?;
-                    return Ok(WarpStatus {
-                        installed: true,
+                    applications::disable()?;
+                    cli(&client.path, &["disconnect"])?;
+                }
+                Action::Mode(mode, confirmed) => {
+                    if !client.modes.contains(&mode) {
+                        return Err(WarpError::new("warp_unsupported", ""));
+                    }
+                    let current = client.status();
+                    if let Some(error) = current.error {
+                        return Err(error);
+                    }
+                    if control::full_tunnel(current.mode.as_deref())
+                        && !control::full_tunnel(Some(&mode))
+                        && !confirmed
+                    {
+                        return Err(WarpError::new("warp_confirm_mode_change", ""));
+                    }
+                    if mode != "proxy" {
+                        sites::disable()?;
+                        applications::disable()?;
+                    }
+                    control::set_mode(client, &current, &mode)?;
+                }
+                Action::Protocol(protocol, confirmed) => {
+                    if !client.protocol_editable
+                        || !matches!(protocol.as_str(), "MASQUE" | "WireGuard")
+                    {
+                        return Err(WarpError::new("warp_protocol_unavailable", ""));
+                    }
+                    let status = client.status();
+                    if let Some(error) = &status.error {
+                        return Err(error.clone());
+                    }
+                    let leave_proxy = protocol == "WireGuard"
+                        && (status.mode.as_deref() == Some("proxy")
+                            || sites::status()?.enabled
+                            || applications::status()?.enabled);
+                    if leave_proxy {
+                        if !confirmed {
+                            return Err(WarpError::new("warp_confirm_wireguard", ""));
+                        }
+                        if !client.modes.iter().any(|mode| mode == "warp") {
+                            return Err(WarpError::new("warp_unsupported", ""));
+                        }
+                        let sites = sites::status()?;
+                        let apps = applications::status()?;
+                        sites::configure(sites.domains, false, None)?;
+                        applications::configure(apps.paths, false, None)?;
+                        control.sites_error = None;
+                        control.applications_error = None;
+                    }
+                    control::preserve_connection(client, &status, || {
+                        if leave_proxy {
+                            cli(&client.path, &["mode", "warp"])?;
+                        }
+                        cli(&client.path, &["tunnel", "protocol", "set", &protocol])?;
+                        if client.status().protocol.as_deref() != Some(protocol.as_str()) {
+                            return Err(WarpError::new("warp_protocol_not_applied", ""));
+                        }
+                        Ok(())
+                    })?;
+                }
+                Action::Port(port) => {
+                    if sites::status()?.runtime_active || applications::status()?.runtime_active {
+                        return Err(WarpError::new("warp_sites_disable_first", ""));
+                    }
+                    if port == 0 || !client.port_editable {
+                        return Err(WarpError::new("warp_invalid_port", ""));
+                    }
+                    cli(&client.path, &["proxy", "port", &port.to_string()])?;
+                }
+                Action::Sites(domains, true, confirmed) => {
+                    let domains = sites::normalize_domains(domains)?;
+                    if domains.is_empty() {
+                        return Err(WarpError::new("warp_sites_invalid", ""));
+                    }
+                    sites::save_list(domains.clone())?;
+                    let port = control::ensure_proxy(client, confirmed)?;
+                    control.sites_restore_attempted = true;
+                    sites::configure(domains, true, Some(port))?;
+                    control.sites_error = None;
+                }
+                Action::Applications(paths, true, confirmed) => {
+                    let paths = applications::validate_paths(paths)?;
+                    if paths.is_empty() {
+                        return Err(WarpError::new("warp_apps_invalid", ""));
+                    }
+                    applications::save_list(paths.clone())?;
+                    let port = control::ensure_proxy(client, confirmed)?;
+                    control.applications_restore_attempted = true;
+                    if !applications::status()?.runtime_active {
+                        applications::configure(paths, true, Some(port))?;
+                    }
+                    control.applications_error = None;
+                }
+                _ => unreachable!(),
+            }
+            let status = client.status();
+            if status.connected && status.error.is_none() {
+                control.automation_error = None;
+            }
+            control::reconcile(control, &status)?;
+            Ok(status)
+        })();
+        // Return accurate routing state even on a failed status read, and release resources
+        // when we cannot verify the official client. Never clear desired selections here.
+        let mut status = match result {
+            Ok(status) => status,
+            Err(error) => {
+                if site_action {
+                    control.sites_error = Some(error.clone());
+                }
+                if app_action {
+                    control.applications_error = Some(error.clone());
+                }
+                control::remember_error(control, error.clone());
+                let verified = guard.as_ref().map(Client::status);
+                if verified.as_ref().is_none_or(|s| {
+                    s.error.is_some()
+                        || !s.connected
+                        || s.mode.as_deref() != Some("proxy")
+                        || s.protocol.as_deref() != Some("MASQUE")
+                }) {
+                    let _ = sites::disable();
+                    let _ = applications::disable();
+                }
+                if status_action || local_change_succeeded {
+                    WarpStatus {
+                        installed: discover().is_some(),
                         state: "error".into(),
                         error: Some(error),
-                        sites: sites::status()?,
-                        applications: applications::status()?,
                         ..Default::default()
-                    });
+                    }
+                } else {
+                    return Err(error);
                 }
             }
+        };
+        if let Some(error) = &status.error {
+            control::remember_error(control, error.clone());
         }
-        let client = guard.as_ref().unwrap();
-        match action {
-            Action::Status => {}
-            Action::Connect => {
-                cli(&client.path, &["connect"])?;
-            }
-            Action::Disconnect => {
-                applications::disable()?;
-                sites::disable()?;
-                cli(&client.path, &["disconnect"])?;
-            }
-            Action::Mode(mode) => {
-                if !client.modes.contains(&mode) {
-                    return Err(WarpError::new("warp_unsupported", ""));
-                }
-                cli(&client.path, &["mode", &mode])?;
-                if mode != "proxy" {
-                    sites::disable()?;
-                    applications::disable()?;
-                }
-            }
-            Action::Port(port) => {
-                if sites::status()?.enabled || applications::status()?.enabled {
-                    return Err(WarpError::new("warp_sites_disable_first", ""));
-                }
-                if port == 0 || !client.port_editable {
-                    return Err(WarpError::new("warp_invalid_port", ""));
-                }
-                cli(&client.path, &["proxy", "port", &port.to_string()])?;
-            }
-            Action::Sites(domains, enabled) => {
-                let status = client.status();
-                let port = status
-                    .proxy
-                    .filter(|p| {
-                        p.active && p.kind.as_deref() == Some("SOCKS5") && status.error.is_none()
-                    })
-                    .and_then(|p| p.port);
-                sites::configure(domains, enabled, port)?;
-            }
-            Action::Applications(paths, enabled) => {
-                let status = client.status();
-                let port = status
-                    .proxy
-                    .filter(|p| {
-                        p.active && p.kind.as_deref() == Some("SOCKS5") && status.error.is_none()
-                    })
-                    .and_then(|p| p.port);
-                applications::configure(paths, enabled, port)?;
-            }
-        }
-        let mut status = client.status();
-        // External client changes also release the system proxy. Keep the list.
-        if status.error.is_none()
-            && (status.mode.as_deref() != Some("proxy") || status.state == "disconnected")
-        {
-            sites::disable()?;
-            applications::disable()?;
-        }
-        if status.error.is_none() {
-            sites::reconcile_port(status.proxy.as_ref().and_then(|proxy| proxy.port))?;
-            applications::reconcile_port(status.proxy.as_ref().and_then(|proxy| proxy.port))?;
-            restore_selected_rules(&status)?;
-        }
-        match sites::status() {
-            Ok(sites) => {
-                status.connections.extend(sites.connections.clone());
-                status.sites = sites;
-            }
-            Err(error) => status.error = Some(error),
-        }
-        let applications = applications::status()?;
-        status.connections.extend(applications.connections.clone());
-        status.applications = applications;
+        status.sites = sites::status()?;
+        status.applications = applications::status()?;
+        status.connections.extend(status.sites.connections.clone());
+        status
+            .connections
+            .extend(status.applications.connections.clone());
+        status.automation = control.automation.clone();
+        status.last_errors = control.errors.clone();
+        status.sites_error = control.sites_error.clone();
+        status.applications_error = control.applications_error.clone();
+        status.automation_error = control.automation_error.clone();
         Ok(status)
     })
     .await
@@ -487,27 +614,105 @@ pub async fn get_warp_mode() -> Result<WarpStatus> {
     execute(Action::Status).await
 }
 #[tauri::command]
-pub async fn set_warp_mode(mode: String) -> Result<WarpStatus> {
-    execute(Action::Mode(mode)).await
+pub async fn set_warp_mode(mode: String, confirmed: Option<bool>) -> Result<WarpStatus> {
+    execute(Action::Mode(mode, confirmed.unwrap_or(false))).await
+}
+#[tauri::command]
+pub async fn set_warp_protocol(protocol: String, confirmed: Option<bool>) -> Result<WarpStatus> {
+    execute(Action::Protocol(protocol, confirmed.unwrap_or(false))).await
 }
 #[tauri::command]
 pub async fn set_warp_proxy_port(port: u16) -> Result<WarpStatus> {
     execute(Action::Port(port)).await
 }
-
 #[tauri::command]
-pub async fn set_warp_sites(domains: Vec<String>, enabled: bool) -> Result<WarpStatus> {
-    execute(Action::Sites(domains, enabled)).await
+pub async fn save_warp_sites(domains: Vec<String>) -> Result<WarpStatus> {
+    execute(Action::SiteList(domains)).await
 }
-
 #[tauri::command]
-pub async fn set_warp_applications(paths: Vec<String>, enabled: bool) -> Result<WarpStatus> {
-    execute(Action::Applications(paths, enabled)).await
+pub async fn save_warp_applications(paths: Vec<String>) -> Result<WarpStatus> {
+    execute(Action::ApplicationList(paths)).await
+}
+#[tauri::command]
+pub async fn set_warp_sites(
+    domains: Vec<String>,
+    enabled: bool,
+    confirmed: Option<bool>,
+) -> Result<WarpStatus> {
+    execute(Action::Sites(domains, enabled, confirmed.unwrap_or(false))).await
+}
+#[tauri::command]
+pub async fn set_warp_applications(
+    paths: Vec<String>,
+    enabled: bool,
+    confirmed: Option<bool>,
+) -> Result<WarpStatus> {
+    execute(Action::Applications(
+        paths,
+        enabled,
+        confirmed.unwrap_or(false),
+    ))
+    .await
+}
+#[tauri::command]
+pub async fn set_warp_automation(preferences: control::Automation) -> Result<WarpStatus> {
+    execute(Action::Automation(preferences)).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn saved_lists_and_explicit_selection_survive_restart_without_starting_routes() {
+        let directory =
+            std::env::temp_dir().join(format!("warp-preferences-test-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        sites::initialize(directory.clone()).unwrap();
+        sites::save_list(vec!["Example.org".into()]).unwrap();
+        let status = sites::status().unwrap();
+        assert_eq!(status.domains, vec!["example.org"]);
+        assert!(!status.enabled && !status.runtime_active);
+        sites::persist_json(&directory.join("warp-sites-state.json"), &true).unwrap();
+        sites::initialize(directory.clone()).unwrap();
+        let status = sites::status().unwrap();
+        assert!(status.enabled && !status.runtime_active);
+        assert_eq!(status.domains, vec!["example.org"]);
+        let value = serde_json::to_value(&status).unwrap();
+        assert_eq!(value["runtime_active"], false);
+        sites::configure(status.domains.clone(), false, None).unwrap();
+        sites::initialize(directory.clone()).unwrap();
+        assert!(!sites::status().unwrap().enabled);
+        assert_eq!(sites::status().unwrap().domains, status.domains);
+
+        // Missing saved executables can be retained or removed while offline.
+        let missing = directory
+            .join("uninstalled.exe")
+            .to_string_lossy()
+            .to_string();
+        sites::persist_json(
+            &directory.join("warp-applications.json"),
+            &serde_json::json!({"paths":[missing],"enabled":true}),
+        )
+        .unwrap();
+        applications::initialize(directory.clone()).unwrap();
+        let apps = applications::status().unwrap();
+        assert!(apps.enabled && !apps.runtime_active);
+        applications::save_list(apps.paths.clone()).unwrap();
+        applications::configure(apps.paths.clone(), false, None).unwrap();
+        applications::initialize(directory.clone()).unwrap();
+        assert!(!applications::status().unwrap().enabled);
+        assert_eq!(applications::status().unwrap().paths, apps.paths);
+        assert!(!sites::status().unwrap().enabled);
+        // This fixture creates only preference files: there is no system recovery journal.
+        for file in [
+            "warp-sites.json",
+            "warp-sites-state.json",
+            "warp-applications.json",
+        ] {
+            std::fs::remove_file(directory.join(file)).unwrap();
+        }
+        std::fs::remove_dir(directory).unwrap();
+    }
     #[test]
     fn modes_require_exact_help_entries() {
         assert_eq!(
@@ -568,7 +773,7 @@ mod tests {
             port: None,
         };
         for mode in original.modes {
-            let status = set_warp_mode(mode.clone()).await.unwrap();
+            let status = set_warp_mode(mode.clone(), Some(true)).await.unwrap();
             assert!(status.error.is_none(), "{:?}", status.error);
             assert_eq!(status.mode.as_deref(), Some(mode.as_str()));
             assert!(!status.connected);
@@ -588,7 +793,7 @@ mod tests {
                 assert!(set_warp_proxy_port(0).await.is_err());
             }
         }
-        assert!(set_warp_mode("warp; calc.exe".into()).await.is_err());
+        assert!(set_warp_mode("warp; calc.exe".into(), None).await.is_err());
         drop(restore);
     }
 }

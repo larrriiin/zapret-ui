@@ -552,6 +552,18 @@ fn write_config(path: &Path, cfg: &Config) -> Result<(), String> {
 pub fn get_telegram_config(app: tauri::AppHandle) -> Result<Config, String> {
     config(&root(&app)?)
 }
+fn save_autostart(path: &Path, enabled: bool) -> Result<bool, String> {
+    let mut cfg = config(path)?;
+    cfg.start_with_zapret = enabled;
+    write_config(path, &cfg)?;
+    Ok(enabled)
+}
+#[tauri::command]
+pub fn set_telegram_autostart(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
+    let _operation = Operation::acquire()?;
+    // This preference only affects future launches; running proxy settings stay intact.
+    save_autostart(&root(&app)?, enabled)
+}
 #[tauri::command]
 pub fn save_telegram_config(app: tauri::AppHandle, settings: Config) -> Result<Config, String> {
     let _operation = Operation::acquire()?;
@@ -562,6 +574,7 @@ pub fn save_telegram_config(app: tauri::AppHandle, settings: Config) -> Result<C
     let mut settings = settings;
     // Secret changes have a dedicated command and never come from an editable form.
     settings.secret = config(&path)?.secret;
+    settings.start_with_zapret = config(&path)?.start_with_zapret;
     write_config(&path, &settings)?;
     Ok(settings)
 }
@@ -649,6 +662,34 @@ pub fn telegram_logs(app: tauri::AppHandle) -> Result<String, String> {
 mod tests {
     use super::*;
     use std::io::{Cursor, Write};
+    #[test]
+    fn autostart_changes_only_the_persisted_flag() {
+        let path = std::env::temp_dir().join(format!(
+            "zapret-autostart-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        fs::create_dir_all(&path).unwrap();
+        let cfg: Config = serde_json::from_str(
+            r#"{"port":1443,"secret":"00000000000000000000000000000000","host":"127.0.0.1"}"#,
+        )
+        .unwrap();
+        write_config(&path, &cfg).unwrap();
+        assert!(save_autostart(&path, true).unwrap());
+        let mut expected = serde_json::to_value(&cfg).unwrap();
+        expected["start_with_zapret"] = true.into();
+        assert_eq!(
+            serde_json::to_value(config(&path).unwrap()).unwrap(),
+            expected
+        );
+        assert!(!save_autostart(&path, false).unwrap());
+        assert_eq!(
+            serde_json::to_value(config(&path).unwrap()).unwrap(),
+            serde_json::to_value(cfg).unwrap()
+        );
+        fs::remove_file(path.join("config.json")).unwrap();
+        fs::remove_dir(path).unwrap();
+    }
     #[test]
     fn migrates_original_config_and_validates_extended_settings() {
         let mut cfg: Config =
