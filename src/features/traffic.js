@@ -1,5 +1,6 @@
 import { $, invoke } from '../lib/core.js';
 import { t } from '../lib/i18n.js';
+import { showSection } from './navigation.js';
 
 const monitor = {
   running: false,
@@ -466,6 +467,15 @@ function setMode(mode) {
   monitor.history = [];
   if (monitor.snapshot) addHistoryPoint();
   render();
+}
+
+export function openWarpTraffic() {
+  monitor.focus = null;
+  if ($('traffic-search')) $('traffic-search').value = '';
+  monitor.hideSystem = false; // Internal relays belong to the same observed WARP route.
+  if ($('traffic-hide-system')) $('traffic-hide-system').checked = false;
+  setMode('warp');
+  showSection('traffic');
 }
 
 export function refreshTrafficTranslations() {

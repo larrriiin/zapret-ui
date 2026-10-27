@@ -27,7 +27,6 @@ pub(crate) fn traffic_routes() -> Vec<crate::traffic_monitor::ProxyRoute> {
 pub struct ApplicationStatus {
     pub paths: Vec<String>,
     pub enabled: bool,
-    #[serde(skip)]
     pub(crate) runtime_active: bool,
     pub active_connections: usize,
     pub total_connections: u64,
@@ -130,7 +129,7 @@ pub fn reconcile_port(port: Option<u16>) -> Result<()> {
     }
     Ok(())
 }
-fn validate_paths(paths: Vec<String>) -> Result<Vec<String>> {
+pub(super) fn validate_paths(paths: Vec<String>) -> Result<Vec<String>> {
     if paths.len() > 100 {
         return Err(WarpError::new(
             "warp_apps_invalid",
@@ -175,6 +174,50 @@ fn validate_paths(paths: Vec<String>) -> Result<Vec<String>> {
         }
     }
     Ok(result)
+}
+pub(super) fn save_list(paths: Vec<String>) -> Result<()> {
+    if paths.is_empty() {
+        return configure(paths, false, None);
+    }
+    let current = status()?;
+    // Retained paths may refer to an uninstalled application; deletion must still work.
+    let added = paths
+        .iter()
+        .filter(|p| !current.paths.contains(p))
+        .cloned()
+        .collect();
+    validate_paths(added)?;
+    if paths.len() > 100 {
+        return Err(WarpError::new(
+            "warp_apps_invalid",
+            "Maximum: 100 applications",
+        ));
+    }
+    #[cfg(windows)]
+    if current.runtime_active {
+        let port = APPLICATIONS
+            .lock()
+            .map_err(error)?
+            .as_ref()
+            .and_then(|r| r.engine.as_ref())
+            .map(|e| e.port);
+        disable()?;
+        return configure(paths, current.enabled, port);
+    }
+    let mut guard = APPLICATIONS.lock().map_err(error)?;
+    let runtime = guard
+        .as_mut()
+        .ok_or_else(|| error("Application settings are unavailable"))?;
+    let preferences = Preferences {
+        paths,
+        enabled: current.enabled,
+    };
+    super::sites::persist_json(
+        &runtime.directory.join("warp-applications.json"),
+        &preferences,
+    )?;
+    runtime.preferences = preferences;
+    Ok(())
 }
 pub fn configure(paths: Vec<String>, enabled: bool, port: Option<u16>) -> Result<()> {
     let mut guard = APPLICATIONS.lock().map_err(error)?;

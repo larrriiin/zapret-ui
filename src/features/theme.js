@@ -9,18 +9,24 @@ const PALETTES = {
     cyan: ['#73dded', '#3594a4', '#09343c'],
     blue: ['#94baff', '#5b86cc', '#142c52'],
     mint: ['#87ddbd', '#469d80', '#133c30'],
+    rose: ['#f6a4d0', '#bd7398', '#351425'],
+    coral: ['#ffb09b', '#c77b67', '#38190f'],
   },
   graphite: {
     steel: ['#b8c7e0', '#8199bb', '#172334'],
     sage: ['#b1cbb0', '#7c9c7b', '#233523'],
     sand: ['#dec69f', '#ac8d5f', '#3c2e19'],
     lavender: ['#c8b8df', '#9983b7', '#30223f'],
+    rose: ['#dda0c2', '#b9789b', '#341325'],
+    coral: ['#e3ad9d', '#b47c6d', '#2f1b15'],
   },
   light: {
     violet: ['#6539b7', '#54299f', '#ffffff'],
     blue: ['#245bb5', '#19488f', '#ffffff'],
     teal: ['#086d60', '#075b51', '#ffffff'],
     plum: ['#873c79', '#6b2f60', '#ffffff'],
+    rose: ['#a61d62', '#81234f', '#ffffff'],
+    coral: ['#a74130', '#8d3527', '#ffffff'],
   },
 };
 const THEMES = ['zapret', 'graphite', 'light', 'system'];
@@ -35,7 +41,8 @@ try {
 try {
   const saved = JSON.parse(localStorage.getItem(ACCENT_KEY));
   for (const theme of Object.keys(PALETTES)) {
-    if (saved && Object.hasOwn(PALETTES[theme], saved[theme])) accents[theme] = saved[theme];
+    const name = saved?.[theme] === 'amber' ? 'rose' : saved?.[theme];
+    if (Object.hasOwn(PALETTES[theme], name)) accents[theme] = name;
   }
 } catch { /* Ignore malformed or unavailable storage. */ }
 
@@ -126,7 +133,8 @@ export function syncThemeFromStorage() {
     const savedAccents = JSON.parse(localStorage.getItem(ACCENT_KEY));
     for (const theme of Object.keys(PALETTES)) {
       delete accents[theme];
-      if (savedAccents && Object.hasOwn(PALETTES[theme], savedAccents[theme])) accents[theme] = savedAccents[theme];
+      const name = savedAccents?.[theme] === 'amber' ? 'rose' : savedAccents?.[theme];
+      if (Object.hasOwn(PALETTES[theme], name)) accents[theme] = name;
     }
   } catch { /* Keep the in-memory preference if storage is unavailable. */ }
   applyTheme();

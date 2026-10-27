@@ -87,7 +87,7 @@ pub(super) fn persist_json(path: &std::path::Path, value: &impl Serialize) -> Re
 pub struct SiteStatus {
     pub domains: Vec<String>,
     pub enabled: bool,
-    #[serde(skip)]
+    #[serde(default)]
     pub(crate) runtime_active: bool,
     #[serde(skip)]
     pub(crate) connections: Vec<super::WarpConnection>,
@@ -682,6 +682,31 @@ pub fn disable() -> Result<()> {
     if let Some(runtime) = guard.as_mut() {
         runtime.recover()?;
     }
+    Ok(())
+}
+
+// Save the user's selection without requiring a live tunnel or touching WinINet.
+pub(super) fn save_list(domains: Vec<String>) -> Result<()> {
+    let domains = normalize_domains(domains)?;
+    if domains.is_empty() {
+        return configure(domains, false, None);
+    }
+    let status = status()?;
+    if status.runtime_active {
+        let port = SITES
+            .lock()
+            .map_err(error)?
+            .as_ref()
+            .and_then(|r| r.server.as_ref())
+            .map(|s| s.port);
+        return configure(domains, status.enabled, port);
+    }
+    let mut guard = SITES.lock().map_err(error)?;
+    let runtime = guard
+        .as_mut()
+        .ok_or_else(|| error("Site settings are unavailable"))?;
+    persist_json(&runtime.directory.join("warp-sites.json"), &domains)?;
+    runtime.domains = domains;
     Ok(())
 }
 

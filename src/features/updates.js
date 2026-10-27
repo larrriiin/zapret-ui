@@ -14,7 +14,12 @@ import { loadStrategies } from './strategies.js';
 import { showConfirm, showAlert } from '../lib/dom.js';
 import { checkTelegramUpdate, mountTelegramUpdate, isTelegramUpdating } from './telegram-updates.js';
 
+import { notifyUpdates } from './update-notifications.js';
+
 let currentUpdateObject = null;
+let updateCheck = null;
+let latestUpdateData = null;
+let updatesInitialized = false;
 
 export function coreCurrentVersionLabel(core, translate = t) {
   if (core.status === 'not_installed') return translate('core_not_installed');
@@ -332,6 +337,34 @@ export async function checkUIUpdate(useProxy = false, customProxy = null) {
   return withTimeout(check({ proxy: proxyUrl }), 8000);
 }
 
+async function collectUpdateInfo(useProxy, customProxy) {
+  const [uiLocal, coreLocal] = await Promise.allSettled([
+    invoke('get_ui_version_cmd'), invoke('get_local_version_cmd'),
+  ]);
+  const uiLocalVersion = uiLocal.status === 'fulfilled' ? uiLocal.value : t('warp_unknown');
+  const coreLocalVersion = coreLocal.status === 'fulfilled' ? coreLocal.value : null;
+  const [uiResult, coreResult, telegramResult] = await Promise.allSettled([
+    checkUIUpdate(useProxy, customProxy),
+    invoke('get_core_update_info', { useProxy, customProxy }),
+    checkTelegramUpdate(),
+  ]);
+  const telegram = telegramResult.status === 'fulfilled' ? telegramResult.value : null;
+  const uiUpdate = uiResult.status === 'fulfilled' ? uiResult.value : null;
+  const coreInfo = coreResult.status === 'fulfilled' ? coreResult.value : { status: 'unknown', currentVersion: coreLocalVersion };
+  const hasUIUpdate = Boolean(uiUpdate);
+  const hasCoreUpdate = coreInfo.status === 'update_available' || coreInfo.status === 'not_installed';
+  if (shouldSurfaceUpdateCheckFailure({ hasUIUpdate, hasCoreUpdate, hasTelegramUpdate: Boolean(telegram?.available),
+    uiFailed: uiResult.status === 'rejected', coreFailed: coreResult.status === 'rejected' })) {
+    throw uiResult.reason || coreResult.reason;
+  }
+  return {
+    ui: { available: hasUIUpdate, current: uiLocalVersion, latest: hasUIUpdate ? uiUpdate.version : uiLocalVersion, updateObj: uiUpdate, error: uiResult.status === 'rejected' },
+    // A missing core is actionable in the manual dialog, but isn't an update notification.
+    core: { available: hasCoreUpdate, current: coreInfo.currentVersion || null, latest: coreInfo.stableVersion, status: coreInfo.status, error: coreInfo.status === 'unknown' || coreInfo.status === 'not_installed' },
+    telegram,
+  };
+}
+
 export async function checkForUpdates(manual = false, useProxy = false, customProxy = null, promptOnFailure = true) {
   if (!window.__TAURI__ || isTelegramUpdating()) return;
   const checkUpdatesBtn = $('check-updates-btn');
@@ -342,44 +375,12 @@ export async function checkForUpdates(manual = false, useProxy = false, customPr
   }
 
   try {
-    const [uiLocalVersion, coreLocalVersion] = await Promise.all([
-      invoke('get_ui_version_cmd'),
-      invoke('get_local_version_cmd'),
-    ]);
-    const [uiResult, coreResult, telegramResult] = await Promise.allSettled([
-      checkUIUpdate(useProxy, customProxy),
-      invoke('get_core_update_info', { useProxy, customProxy }),
-      checkTelegramUpdate(),
-    ]);
-    const telegram = telegramResult.status === 'fulfilled' ? telegramResult.value : null;
-    const uiUpdate = uiResult.status === 'fulfilled' ? uiResult.value : null;
-    const coreInfo = coreResult.status === 'fulfilled'
-      ? coreResult.value
-      : { status: 'unknown', currentVersion: coreLocalVersion };
-
-    const hasUIUpdate = !!uiUpdate;
-    const hasCoreUpdate = coreInfo.status === 'update_available' || coreInfo.status === 'not_installed';
-    const hasTelegramUpdate = !!telegram?.available;
-    // Preserve any actionable update from another component. With no update to
-    // show, surface the failed endpoint so a manual check can offer proxy retry.
-    if (shouldSurfaceUpdateCheckFailure({
-      hasUIUpdate,
-      hasCoreUpdate,
-      hasTelegramUpdate,
-      uiFailed: uiResult.status === 'rejected',
-      coreFailed: coreResult.status === 'rejected',
-    })) {
-      throw uiResult.reason || coreResult.reason;
-    }
-    const showCoreError = manual && coreInfo.status === 'unknown';
-
-    if (hasUIUpdate || hasCoreUpdate || telegram?.available || showCoreError || manual) {
-      showDualUpdateModal({
-        ui: { available: hasUIUpdate, current: uiLocalVersion, latest: hasUIUpdate ? uiUpdate.version : uiLocalVersion, updateObj: uiUpdate, error: uiResult.status === 'rejected' },
-        core: { available: hasCoreUpdate, current: coreInfo.currentVersion || null, latest: coreInfo.stableVersion, status: coreInfo.status, error: showCoreError },
-        telegram,
-      }, manual);
-    }
+    // Manual checks join a background request and still show their detailed result.
+    updateCheck ||= collectUpdateInfo(useProxy, customProxy).finally(() => { updateCheck = null; });
+    const data = await updateCheck;
+    latestUpdateData = data;
+    if (manual) showDualUpdateModal(data, true);
+    else await notifyUpdates(data, current => showDualUpdateModal(current, true));
   } catch (err) {
     console.warn(`Update check failed${useProxy ? ' with proxy' : ' directly'}:`, err);
     if (manual && promptOnFailure) {
@@ -540,9 +541,21 @@ function initCoreRollback() {
 }
 
 export function initUpdates() {
+  if (updatesInitialized) return;
+  updatesInitialized = true;
+  const openRequested = async () => {
+    if (await invoke('take_update_open_request')) {
+      if (latestUpdateData) showDualUpdateModal(latestUpdateData, true);
+      else await checkForUpdates(true);
+    }
+  };
+  listen('open-updates', openRequested).catch(console.error);
+  window.addEventListener('focus', () => openRequested().catch(console.error));
+  openRequested().catch(console.error);
   const checkUpdatesBtn = $('check-updates-btn');
   if (checkUpdatesBtn) checkUpdatesBtn.addEventListener('click', () => checkForUpdates(true));
   setTimeout(() => checkForUpdates(false), 3000);
+  setInterval(() => checkForUpdates(false), 6 * 60 * 60 * 1000);
 
   initIPSetUpdateButton();
   initLegacyUpdateNowButton();

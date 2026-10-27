@@ -91,7 +91,10 @@ export async function pollFakes() {
 
 export async function handleFakeChange(fakeType, fakeName) {
   if (!fakeName) return;
+  const current = fakeType === 'discord' ? currentDiscordFake : fakeType === 'game' ? currentGameFake : null;
+  if (fakeName === current) return;
   try {
+    await invoke('set_active_fake', { fakeType, fakeName });
     if (fakeType === 'discord') currentDiscordFake = fakeName;
     if (fakeType === 'game') currentGameFake = fakeName;
 
@@ -100,7 +103,6 @@ export async function handleFakeChange(fakeType, fakeName) {
     const gameLabel = $('game-fake-label');
     if (fakeType === 'game' && gameLabel) gameLabel.textContent = fakeName;
 
-    await invoke('set_active_fake', { fakeType, fakeName });
     await pollFakes();
     await restartServiceIfRunning();
   } catch (err) {

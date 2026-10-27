@@ -545,6 +545,8 @@ scripts/                     version checks and release helpers
 
 ### Contributing
 
+WARP routing, automation, diagnostic checks, update notifications and the independent TG WS Proxy autostart preference are described in [the behavior and verification guide](docs/warp-and-update-notifications.md).
+
 - Report reproducible bugs through [Issues](https://github.com/larrriiin/zapret-ui/issues).
 - Include the ZAPRET UI version, core version, Windows version, run mode, and selected strategy.
 - Do not publish private domains, IP addresses, logs containing personal data, or secrets.

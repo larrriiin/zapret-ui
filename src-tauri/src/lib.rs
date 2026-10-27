@@ -79,6 +79,8 @@ struct AppState {
     toggle_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
     quit_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
     show_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
+    updates_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
+    update_open_requested: AtomicBool,
     strategies_submenu: Mutex<Option<tauri::menu::Submenu<tauri::Wry>>>,
     tray_handle: Mutex<Option<tauri::tray::TrayIcon<tauri::Wry>>>,
     notification_shown: AtomicBool,
@@ -104,6 +106,7 @@ struct TrayTranslations {
     warp_loading: String,
     exit: String,
     show: String,
+    updates: String,
     status_prefix: String,
     strategy_prefix: String,
     toggle_on: String,
@@ -2677,6 +2680,24 @@ impl Drop for OwnedDirectoryCleanup {
 
 #[cfg(test)]
 mod temporary_cleanup_tests {
+    #[test]
+    fn only_component_update_notification_actions_open_updates() {
+        use super::{is_update_notification_action, UPDATE_NOTIFICATION_ID};
+        assert!(is_update_notification_action(
+            Some(UPDATE_NOTIFICATION_ID),
+            "tap"
+        ));
+        assert!(is_update_notification_action(
+            Some(UPDATE_NOTIFICATION_ID),
+            "view-updates"
+        ));
+        assert!(!is_update_notification_action(
+            Some(UPDATE_NOTIFICATION_ID),
+            "dismiss"
+        ));
+        assert!(!is_update_notification_action(Some(0), "tap"));
+        assert!(!is_update_notification_action(None, "tap"));
+    }
     use super::{
         game_filter_settings, replace_path_case_insensitive, restart_context,
         valid_game_filter_range, CoreOperationGuard, OwnedDirectoryCleanup, ZapretStatus,
@@ -3788,6 +3809,9 @@ fn update_tray_translations(
     if let Some(mi) = state.show_item.lock_unpoisoned().as_ref() {
         let _ = mi.set_text(&translations.show);
     }
+    if let Some(mi) = state.updates_item.lock_unpoisoned().as_ref() {
+        let _ = mi.set_text(&translations.updates);
+    }
     if let Some(mi) = state.strategies_submenu.lock_unpoisoned().as_ref() {
         let _ = mi.set_text(&translations.change_strategy);
     }
@@ -4021,6 +4045,67 @@ fn show_app_window(app: tauri::AppHandle, force: bool) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn notify_available_updates(
+    app: tauri::AppHandle,
+    title: String,
+    body: String,
+    action_label: Option<String>,
+    open_updates: Option<bool>,
+    show_notification: Option<bool>,
+) -> Result<bool, String> {
+    let main = app
+        .get_webview_window("main")
+        .ok_or("Main window unavailable")?;
+    let hidden = !main.is_visible().map_err(|e| e.to_string())?
+        || main.is_minimized().map_err(|e| e.to_string())?;
+    if hidden && show_notification.unwrap_or(true) {
+        let mut notification = app.notification().builder().title(title).body(body);
+        if open_updates.unwrap_or(true) {
+            use tauri_plugin_notification::{Action, ActionType};
+            let action = Action::builder(
+                "view-updates",
+                action_label.unwrap_or_else(|| "View updates".into()),
+            )
+            .build();
+            app.notification()
+                .register_action_types(vec![ActionType::builder("component-updates")
+                    .actions(vec![action])
+                    .build()])
+                .map_err(|e| e.to_string())?;
+            notification = notification
+                .id(UPDATE_NOTIFICATION_ID)
+                .action_type_id("component-updates");
+        }
+        notification.show().map_err(|e| e.to_string())?;
+    }
+    Ok(hidden)
+}
+
+const UPDATE_NOTIFICATION_ID: i32 = 27001;
+fn is_update_notification_action(id: Option<i32>, action: &str) -> bool {
+    id == Some(UPDATE_NOTIFICATION_ID) && matches!(action, "tap" | "view-updates")
+}
+fn request_updates_window(app: &tauri::AppHandle) {
+    app.state::<AppState>()
+        .update_open_requested
+        .store(true, Ordering::Release);
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(window) = handle.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+        let _ = handle.emit_to("main", "open-updates", ());
+    });
+}
+
+#[tauri::command]
+fn take_update_open_request(state: State<'_, AppState>) -> bool {
+    state.update_open_requested.swap(false, Ordering::AcqRel)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(windows)]
@@ -4062,6 +4147,8 @@ pub fn run() {
             toggle_item: Mutex::new(None),
             quit_item: Mutex::new(None),
             show_item: Mutex::new(None),
+            updates_item: Mutex::new(None),
+            update_open_requested: AtomicBool::new(false),
             strategies_submenu: Mutex::new(None),
             tray_handle: Mutex::new(None),
             notification_shown: AtomicBool::new(false),
@@ -4071,6 +4158,18 @@ pub fn run() {
             traffic_monitor: Arc::new(TrafficMonitor::default()),
         })
         .setup(|app| {
+            let notification_app = app.handle().clone();
+            app.notification().on_action(move |event| {
+                if is_update_notification_action(
+                    event.notification().map(|n| n.id()),
+                    event.action_id(),
+                ) {
+                    request_updates_window(&notification_app);
+                }
+            })?;
+            if let Err(error) = providers::warp::control::initialize(app.path().app_data_dir()?) {
+                eprintln!("Failed to initialize WARP automation: {}", error.detail);
+            }
             if let Err(error) =
                 providers::warp::applications::initialize(app.path().app_data_dir()?)
             {
@@ -4092,6 +4191,7 @@ pub fn run() {
 
             let quit_i = MenuItemBuilder::with_id("quit", "Exit").build(app)?;
             let show_i = MenuItemBuilder::with_id("show", "Restore window").build(app)?;
+            let updates_i = MenuItemBuilder::with_id("updates", "View updates").build(app)?;
 
             let status_info = MenuItemBuilder::with_id("status_info", "Status: ---")
                 .enabled(false)
@@ -4117,6 +4217,7 @@ pub fn run() {
                 *state.warp_toggle_item.lock_unpoisoned() = Some(warp_toggle_i.clone());
                 *state.quit_item.lock_unpoisoned() = Some(quit_i.clone());
                 *state.show_item.lock_unpoisoned() = Some(show_i.clone());
+                *state.updates_item.lock_unpoisoned() = Some(updates_i.clone());
             }
 
             // Загружаем стратегии
@@ -4137,6 +4238,7 @@ pub fn run() {
                 .item(&strategy_info)
                 .separator()
                 .item(&show_i)
+                .item(&updates_i)
                 .item(&toggle_i)
                 .item(&strategies_submenu)
                 .separator()
@@ -4181,6 +4283,9 @@ pub fn run() {
                         refresh_tray_menu(app);
                     }
                     "warp_toggle" => refresh_warp_tray(app, true),
+                    "updates" => {
+                        request_updates_window(app);
+                    }
                     id if id.starts_with("strat_") => {
                         let strategy = &id[6..];
                         let state = app.state::<AppState>();
@@ -4294,6 +4399,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             telegram::get_telegram_config,
             telegram::save_telegram_config,
+            telegram::set_telegram_autostart,
+            notify_available_updates,
+            take_update_open_request,
             telegram::regenerate_telegram_secret,
             telegram::update::check_telegram_update,
             telegram::update::update_telegram,
@@ -4309,6 +4417,13 @@ pub fn run() {
             telegram::telegram_logs,
             hosts::update_hosts,
             providers::warp::get_warp_status,
+            providers::warp::save_warp_sites,
+            providers::warp::save_warp_applications,
+            providers::warp::set_warp_protocol,
+            providers::warp::set_warp_automation,
+            providers::warp::diagnostics::check_warp_connection,
+            providers::warp::diagnostics::create_warp_diagnostics,
+            providers::warp::diagnostics::reveal_warp_diagnostics,
             providers::warp::set_warp_sites,
             providers::warp::set_warp_applications,
             providers::warp::applications::choose_warp_applications,
