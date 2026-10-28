@@ -34,7 +34,7 @@
   "devDependencies": {
     "@tailwindcss/forms": "^0.5.11",
     "@tailwindcss/vite": "^4.3.3",
-    "@tauri-apps/cli": "^2.12.3",
+    "@tauri-apps/cli": "^2.12.4",
     "autoprefixer": "^10.6.1",
     "playwright-core": "^1.64.1",
     "postcss": "^8.5.31",
