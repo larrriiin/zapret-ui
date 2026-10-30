@@ -284,7 +284,7 @@ fn extract(bytes: &[u8], target: &Path, kind: &str) -> Result<(), String> {
         let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
         // Check the original ZIP name too: platform normalization can strip a
         // drive prefix before enclosed_name() returns its relative path.
-        let name = entry.name();
+        let name = entry.name().map_err(|e| e.to_string())?;
         if name.contains([':', '\0'])
             || name.starts_with(['/', '\\'])
             || name.split(['/', '\\']).any(|part| part == "..")
