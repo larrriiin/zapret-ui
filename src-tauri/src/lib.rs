@@ -29,6 +29,7 @@ use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri_plugin_notification::NotificationExt;
 
+mod automations;
 mod core;
 mod hosts;
 mod ipset;
@@ -4157,6 +4158,7 @@ pub fn run() {
             temp_process_child: Mutex::new(None),
             traffic_monitor: Arc::new(TrafficMonitor::default()),
         })
+        .manage(automations::Store::default())
         .setup(|app| {
             let notification_app = app.handle().clone();
             app.notification().on_action(move |event| {
@@ -4343,6 +4345,8 @@ pub fn run() {
                 refresh_tray_menu(app.handle());
             }
 
+            automations::start(app.handle().clone());
+
             // The Telegram Proxy preference belongs to the application lifecycle,
             // not to a particular Zapret service start. Run it in the background
             // so a slow or failed local proxy launch never delays the UI startup.
@@ -4397,6 +4401,9 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            automations::get_application_rules,
+            automations::save_application_rules,
+            automations::choose_rule_application,
             telegram::get_telegram_config,
             telegram::save_telegram_config,
             telegram::set_telegram_autostart,

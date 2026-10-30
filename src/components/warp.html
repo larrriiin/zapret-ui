@@ -5,41 +5,41 @@
 <article id="warp-card" class="connection-card" hidden aria-labelledby="warp-title">
   <header class="provider-heading">
     <span class="material-symbols-outlined warp-cloud" aria-hidden="true">cloud</span>
-    <div><h3 id="warp-title">CLOUDFLARE WARP<button id="warp-info-btn" type="button" class="provider-info" aria-label="Cloudflare WARP: info"><span class="material-symbols-outlined" aria-hidden="true">info</span></button></h3><p data-i18n="warp_subtitle"></p></div>
+    <div><h3 id="warp-title" class="provider-title-row"><span>CLOUDFLARE WARP</span><button id="warp-info-btn" type="button" class="ui-icon-button" aria-label="Cloudflare WARP: info"><span class="material-symbols-outlined" aria-hidden="true">info</span></button></h3><p data-i18n="warp_subtitle"></p></div>
     <span id="warp-state" class="provider-badge" role="status" aria-live="polite"></span>
   </header>
   <label id="warp-mode-title" class="provider-label" for="warp-mode-trigger" data-i18n="warp_mode"></label>
   <div id="warp-mode-dropdown" class="relative">
-    <button id="warp-mode-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="warp-mode-options" aria-labelledby="warp-mode-title warp-mode-label" class="glass-panel w-full flex items-center justify-between rounded-2xl border border-primary/10 px-4 py-3 font-headline text-sm text-on-surface hover:border-primary/30 transition-colors cursor-pointer"><span id="warp-mode-label" class="truncate text-on-surface"></span><span id="warp-mode-chevron" class="material-symbols-outlined text-primary/60 text-base ml-2 transition-transform" aria-hidden="true">expand_more</span></button>
+    <button id="warp-mode-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="warp-mode-options" aria-labelledby="warp-mode-title warp-mode-label" class="ui-select-trigger"><span id="warp-mode-label" class="truncate text-on-surface"></span><span id="warp-mode-chevron" class="material-symbols-outlined text-primary/60 text-base ml-2 transition-transform" aria-hidden="true">expand_more</span></button>
     <select id="warp-mode" hidden tabindex="-1" aria-hidden="true"></select>
-    <div id="warp-mode-options" class="fixed z-[999] rounded-2xl border border-primary/20 overflow-hidden shadow-2xl" style="background: var(--color-popup);" hidden><div class="px-3 py-2 border-b border-outline-variant/10 flex items-center gap-2"><span class="material-symbols-outlined text-primary/60 text-base" aria-hidden="true">search</span><input id="warp-mode-search" type="text" autocomplete="off" spellcheck="false" class="flex-1 min-w-0 bg-transparent text-sm text-on-surface placeholder-on-surface-variant/50 outline-none border-none ring-0 focus:outline-none focus:ring-0" data-i18n="warp_search_modes" data-i18n-attr="placeholder"></div><div id="warp-mode-options-list" class="max-h-64 overflow-y-auto py-1" role="listbox" aria-labelledby="warp-mode-title"></div></div>
+    <div id="warp-mode-options" class="ui-select-popup" hidden><div class="px-3 py-2 border-b border-outline-variant/10 flex items-center gap-2"><span class="material-symbols-outlined text-primary/60 text-base" aria-hidden="true">search</span><input id="warp-mode-search" type="text" autocomplete="off" spellcheck="false" class="flex-1 min-w-0 bg-transparent text-sm text-on-surface placeholder-on-surface-variant/50 outline-none border-none ring-0 focus:outline-none focus:ring-0" data-i18n="warp_search_modes" data-i18n-attr="placeholder"></div><div id="warp-mode-options-list" class="max-h-64 overflow-y-auto py-1" role="listbox" aria-labelledby="warp-mode-title"></div></div>
   </div>
   <div id="warp-home-rules" class="warp-home-rules" hidden>
     <div class="warp-home-rule">
       <span class="material-symbols-outlined" aria-hidden="true">language</span>
       <span class="warp-home-rule-copy"><strong data-i18n="warp_home_sites">Sites</strong></span>
-      <button id="warp-home-sites-toggle" type="button" class="warp-rule-toggle" aria-pressed="false" data-i18n="warp_home_sites" data-i18n-attr="aria-label"></button>
+      <button id="warp-home-sites-toggle" type="button" class="ui-switch ui-switch-sm" aria-pressed="false" data-i18n="warp_home_sites" data-i18n-attr="aria-label"></button>
     </div>
     <div class="warp-home-rule">
       <span class="material-symbols-outlined" aria-hidden="true">apps</span>
       <span class="warp-home-rule-copy"><strong data-i18n="warp_home_apps">Applications</strong></span>
-      <button id="warp-home-apps-toggle" type="button" class="warp-rule-toggle" aria-pressed="false" data-i18n="warp_home_apps" data-i18n-attr="aria-label"></button>
+      <button id="warp-home-apps-toggle" type="button" class="ui-switch ui-switch-sm" aria-pressed="false" data-i18n="warp_home_apps" data-i18n-attr="aria-label"></button>
     </div>
   </div>
-  <button id="warp-connect" type="button" class="provider-button provider-connect connect-glow">
+  <button id="warp-connect" type="button" class="ui-button ui-button-connect connect-glow">
     <span id="warp-connect-label"></span><span class="material-symbols-outlined" aria-hidden="true">power_settings_new</span>
   </button>
   <div class="warp-secondary-actions">
-    <button id="warp-refresh" type="button" class="provider-button provider-refresh"><span data-i18n="check_status"></span><span class="material-symbols-outlined" aria-hidden="true">query_stats</span></button>
-    <button id="warp-open-settings" type="button" class="provider-button provider-refresh"><span data-i18n="warp_tunnel_settings"></span><span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>
+    <button id="warp-refresh" type="button" class="ui-button ui-button-status"><span data-i18n="check_status"></span><span class="material-symbols-outlined" aria-hidden="true">query_stats</span></button>
+    <button id="warp-open-settings" type="button" class="ui-button ui-button-status"><span data-i18n="warp_tunnel_settings"></span><span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>
   </div>
   <p id="warp-error" class="warp-error" role="status" hidden></p>
 </article>
-<dialog id="warp-status-dialog" class="warp-status-dialog" aria-labelledby="warp-status-title">
+<dialog id="warp-status-dialog" class="ui-dialog" aria-labelledby="warp-status-title">
   <header class="flex items-center justify-between gap-4 mb-5">
     <div class="flex items-center gap-3 min-w-0"><span class="material-symbols-outlined text-secondary text-2xl" aria-hidden="true">query_stats</span><h2 id="warp-status-title" class="font-headline text-lg font-bold" data-i18n="warp_status_title"></h2></div>
-    <button id="warp-status-close" type="button" class="provider-button" data-i18n="warp_close" data-i18n-attr="aria-label"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
+    <button id="warp-status-close" type="button" class="ui-button" data-i18n="warp_close" data-i18n-attr="aria-label"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
   </header>
   <div id="warp-status-report" class="space-y-3" role="status" aria-live="polite"></div>
-  <form method="dialog" class="mt-6 flex justify-end"><button class="provider-button" data-i18n="warp_close"></button></form>
+  <form method="dialog" class="mt-6 flex justify-end"><button class="ui-button" data-i18n="warp_close"></button></form>
 </dialog>

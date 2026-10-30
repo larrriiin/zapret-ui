@@ -1,16 +1,16 @@
 <!-- Status Modal -->
 <div id="status-modal"
-    class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+    class="hidden fixed inset-0 ui-overlay z-50 flex items-center justify-center p-4"
     role="dialog" aria-modal="true" aria-labelledby="status-modal-title">
-    <div class="glass-panel rounded-2xl border border-secondary/30 p-6 max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-[0_24px_80px_rgba(0,0,0,0.55)]"
-        style="background: var(--color-popup);">
+    <div class="ui-dialog-surface p-6 max-w-xl w-full max-h-[90vh] overflow-y-auto"
+       >
         <div class="flex items-center justify-between gap-4 mb-5">
             <div class="flex items-center gap-3 min-w-0">
                 <span class="material-symbols-outlined text-secondary text-2xl">query_stats</span>
                 <h3 id="status-modal-title" class="font-headline text-lg font-bold text-on-surface" data-i18n="system_status">ZAPRET Status</h3>
             </div>
             <button id="status-modal-close" type="button"
-                class="w-9 h-9 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-white/5 transition-colors flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary/70"
+                class="ui-icon-button"
                 data-i18n="close" data-i18n-attr="aria-label" aria-label="Close">
                 <span class="material-symbols-outlined text-xl">close</span>
             </button>
@@ -22,7 +22,7 @@
         </div>
         <div class="mt-6 flex justify-end">
             <button id="status-modal-done" type="button"
-                class="px-6 py-3 bg-secondary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface" data-i18n="close">
+                class="ui-button" data-i18n="close">
                 Close
             </button>
         </div>

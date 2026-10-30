@@ -1,4 +1,5 @@
 import './styles.css';
+import { initAutomations } from './features/automations.js';
 import { initTheme } from './features/theme.js';
 import { mountComponents } from './components/index.js';
 import { $, invoke } from './lib/core.js';
@@ -87,6 +88,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }, 2000);
 
   initNavigation();
+  initAutomations();
   initTelegram();
   initConnectButtons();
   initFilterButtons();

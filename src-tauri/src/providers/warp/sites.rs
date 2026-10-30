@@ -730,6 +730,20 @@ pub fn reconcile_port(port: Option<u16>) -> Result<()> {
 }
 
 pub fn configure(domains: Vec<String>, enabled: bool, port: Option<u16>) -> Result<()> {
+    configure_inner(domains, enabled, port, true)
+}
+pub(super) fn configure_runtime(domains: Vec<String>, port: u16) -> Result<()> {
+    if domains.is_empty() {
+        return disable();
+    }
+    configure_inner(domains, true, Some(port), false)
+}
+fn configure_inner(
+    domains: Vec<String>,
+    enabled: bool,
+    port: Option<u16>,
+    persist: bool,
+) -> Result<()> {
     let domains = normalize_domains(domains)?;
     if enabled && domains.is_empty() {
         return Err(WarpError::new("warp_sites_invalid", ""));
@@ -754,10 +768,12 @@ pub fn configure(domains: Vec<String>, enabled: bool, port: Option<u16>) -> Resu
     } else {
         None
     };
-    persist_json(&runtime.directory.join("warp-sites.json"), &domains)?;
-    persist_json(&runtime.directory.join("warp-sites-state.json"), &enabled)?;
-    runtime.domains = domains;
-    runtime.desired_enabled = enabled;
+    if persist {
+        persist_json(&runtime.directory.join("warp-sites.json"), &domains)?;
+        persist_json(&runtime.directory.join("warp-sites-state.json"), &enabled)?;
+        runtime.domains = domains;
+        runtime.desired_enabled = enabled;
+    }
     runtime.recover()?;
     if let Some(server) = replacement {
         let journal = Journal {

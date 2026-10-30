@@ -1,7 +1,7 @@
 <!-- Update Available Modal -->
 <div id="update-modal"
-    class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
-    <div class="glass-panel rounded-2xl border border-primary/30 p-8 max-w-md mx-4">
+    class="hidden fixed inset-0 ui-overlay z-50 flex items-center justify-center">
+    <div class="ui-dialog-surface p-8 max-w-md mx-4">
         <div class="flex items-center gap-3 mb-4">
             <span class="material-symbols-outlined text-primary text-2xl">system_update</span>
             <h3 class="font-headline text-lg font-bold text-primary" data-i18n="update_available">Update Available</h3>
@@ -15,11 +15,11 @@
         </div>
         <div class="flex gap-3">
             <button id="update-later"
-                class="flex-1 py-3 rounded-xl border border-outline-variant/30 text-on-surface-variant font-bold text-xs uppercase tracking-wider hover:bg-surface-container-high transition-colors" data-i18n="later">
+                class="ui-button flex-1" data-i18n="later">
                 Later
             </button>
             <button id="update-now"
-                class="flex-1 py-3 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors" data-i18n="update_now">
+                class="ui-button ui-button-primary flex-1" data-i18n="update_now">
                 Update Now
             </button>
         </div>

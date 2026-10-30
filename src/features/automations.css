@@ -1,0 +1,37 @@
+.auto-heading, .auto-path-row, .auto-actions { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+.auto-heading > div:first-child { flex:1; min-width:240px; }
+.auto-editor-body { display:grid; gap:20px; padding:0; }
+.auto-field { display:grid; gap:8px; min-width:0; font-size:14px; }
+.auto-path-row .ui-field { flex:1; min-width:180px; }
+.auto-columns { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; }
+.auto-provider { display:grid; gap:16px; min-width:0; }
+.auto-actions { justify-content:flex-end; }
+.auto-options { max-height:280px; overflow-y:auto; }
+.auto-rule { display:grid; grid-template-columns:28px 48px minmax(120px,.8fr) minmax(180px,1.4fr) auto; align-items:center; gap:16px; padding:24px 20px; }
+.auto-rule-copy, .auto-rule-description { min-width:0; overflow-wrap:anywhere; }
+.auto-rule-description { display:grid; gap:6px; }
+.auto-rule-providers { display:flex; align-items:center; flex-wrap:wrap; gap:12px 24px; }
+.auto-rule-provider { display:flex; align-items:center; gap:10px; min-width:0; }
+.auto-rule-provider > .material-symbols-outlined { font-size:24px; flex-shrink:0; }
+.auto-rule-provider-copy { display:grid; gap:3px; min-width:0; }
+.auto-rule-provider-name { font-size:10px; font-weight:700; color:var(--color-on-surface-variant); }
+.auto-rule-provider-value { font-size:13px; color:var(--color-on-surface); overflow-wrap:anywhere; }
+.auto-rule-close { font-size:18px; color:var(--color-on-surface-variant); }
+.auto-rule-actions { display:flex; gap:12px; align-items:center; }
+.auto-drag-handle { cursor:grab; touch-action:none; user-select:none; }
+.auto-rule-dragging { opacity:.65; outline:2px solid var(--color-primary); outline-offset:2px; }
+.auto-rule-dragging .auto-drag-handle { cursor:grabbing; }
+.auto-icon-options { display:flex; flex-wrap:wrap; gap:8px; }
+@media (max-width:1050px) {
+  .auto-rule { grid-template-columns:28px 48px minmax(0,1fr) auto; }
+  .auto-rule-description { grid-column:3 / -1; grid-row:2; }
+  .auto-rule-actions { grid-column:4; grid-row:1; }
+}
+@media (max-width:640px) { .auto-columns { grid-template-columns:1fr; } }
+
+.auto-heading-actions { display:flex; align-items:center; gap:16px; flex-shrink:0; }
+
+.auto-proxy-picker { min-width:0; margin:0; padding:0; border:0; }
+.auto-route-source, .auto-route-list { display:grid; gap:10px; }
+.auto-route-list { max-height:240px; overflow-y:auto; padding:3px; }
+.auto-route-list .ui-list-row { justify-content:flex-start; overflow-wrap:anywhere; }

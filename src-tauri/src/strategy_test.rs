@@ -21,6 +21,10 @@ use crate::{
 static TEST_RUNNING: AtomicBool = AtomicBool::new(false);
 static TEST_CANCELLED: AtomicBool = AtomicBool::new(false);
 
+pub(crate) fn is_running() -> bool {
+    TEST_RUNNING.load(Ordering::Acquire)
+}
+
 const DEFAULT_TARGETS: [(&str, &str); 17] = [
     ("Discord Main", "https://discord.com"),
     ("Discord Gateway", "https://gateway.discord.gg"),

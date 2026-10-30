@@ -10,7 +10,7 @@
         /* Keep the initial layout covered even before the application CSS loads. */
         #startup-loader { display: none; }
         .app-loading #sections-host { visibility: hidden; }
-        .app-loading #startup-loader { position: fixed; inset: 30px 0 0; z-index: 10000; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 20px; background: var(--color-background, #17181b); color: var(--color-on-surface, #eceef1); }
+        .app-loading #startup-loader { position: fixed; inset: 84px 0 0; z-index: 10000; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 20px; background: var(--color-background, #17181b); color: var(--color-on-surface, #eceef1); }
         .material-symbols-outlined {
             font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
             user-select: none;
@@ -19,23 +19,10 @@
             -ms-user-select: none;
         }
 
-        .glass-panel {
-            background: color-mix(in srgb, var(--color-primary) 5%, transparent);
-            backdrop-filter: blur(40px);
-        }
 
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: var(--color-surface-container-highest); border-radius: 10px; }
-
-        /* Titlebar */
-        #titlebar {
-            height: 30px;
-            user-select: none;
-            -webkit-user-select: none;
-        }
-        #titlebar [data-tauri-drag-region] { cursor: move; cursor: grab; }
-        #titlebar [data-tauri-drag-region]:active { cursor: grabbing; }
 
         .restart-banner {
             position: fixed;
@@ -55,19 +42,6 @@
             box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
         }
 
-        .titlebar-btn {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 44px;
-            height: 30px;
-            transition: background 0.15s;
-            cursor: pointer;
-        }
-        .titlebar-btn:hover { background: color-mix(in srgb, var(--color-primary) 12%, transparent); }
-        .titlebar-btn.close:hover { background: color-mix(in srgb, var(--color-error-dim) 70%, transparent); }
-        .titlebar-btn .material-symbols-outlined { font-size: 15px; }
-
         /* Active filter card */
         .card-active {
             border-color: color-mix(in srgb, var(--color-primary) 60%, transparent) !important;
@@ -77,12 +51,6 @@
         /* Disabled filter card */
         .card-disabled { cursor: not-allowed !important; }
 
-        .toggle-btn { transition: background 0.2s; }
-        .toggle-btn.is-on { background: color-mix(in srgb, var(--color-primary) 20%, transparent); }
-        .toggle-btn.is-off { background: color-mix(in srgb, var(--color-outline-variant) 30%, transparent); }
-        .toggle-thumb { transition: transform 0.2s; }
-        .toggle-btn.is-on .toggle-thumb { transform: translateX(24px); }
-        .toggle-btn.is-off .toggle-thumb { transform: translateX(0px); }
 
         .nav-active {
             background: color-mix(in srgb, var(--color-primary) 14%, transparent) !important;
@@ -131,7 +99,7 @@
             margin: 0 auto 20px auto;
             transition: background 0.3s ease, box-shadow 0.3s ease;
         }
-        
+
         .status-lamp.is-off {
             background: color-mix(in srgb, var(--color-on-surface) 8%, transparent) !important;
             box-shadow: 0 0 0px transparent !important;
@@ -210,7 +178,7 @@
                 box-shadow: 0 0 18px color-mix(in srgb, var(--color-primary) 65%, transparent);
                 opacity: 1;
             }
-            
+
             /* 90%: a quick micro-flicker while returning to purple */
             90% {
                 background: linear-gradient(90deg, transparent 0%, var(--color-primary) 30%, var(--color-primary-dim) 70%, transparent 100%);
@@ -226,29 +194,11 @@
     </style>
 </head>
 
-<body class="bg-background text-on-background font-body selection:bg-primary/30 antialiased overflow-hidden">
+<body class="isolate bg-background text-on-background font-body selection:bg-primary/30 antialiased overflow-hidden">
     <div id="startup-loader" role="status" aria-live="polite">
         <span id="startup-spinner" class="startup-spinner" aria-hidden="true"></span>
         <p id="startup-message" data-i18n="startup_loading">Loading…</p>
         <button id="startup-retry" type="button" hidden data-i18n="startup_retry">Retry</button>
-    </div>
-
-    <!-- Custom title bar -->
-    <div id="titlebar" class="fixed top-0 left-0 right-0 flex items-stretch z-[9999]"
-        style="background:var(--color-background);">
-        <div data-tauri-drag-region class="flex-1 flex items-center px-4 gap-2">
-            <span class="material-symbols-outlined text-primary" style="font-size:16px;">blur_on</span>
-            <span class="font-headline text-xs font-bold uppercase tracking-widest text-primary/60">ZAPRET UI</span>
-        </div>
-        <button id="tb-minimize" class="titlebar-btn" data-i18n="minimize" data-i18n-attr="title" title="Minimize">
-            <span class="material-symbols-outlined text-on-surface-variant">remove</span>
-        </button>
-        <button id="tb-maximize" class="titlebar-btn" data-i18n="maximize" data-i18n-attr="title" title="Maximize">
-            <span id="tb-maximize-icon" class="material-symbols-outlined text-on-surface-variant">crop_square</span>
-        </button>
-        <button id="tb-close" class="titlebar-btn close" data-i18n="close" data-i18n-attr="title" title="Close">
-            <span class="material-symbols-outlined text-on-surface-variant">close</span>
-        </button>
     </div>
 
     <!-- Close menu (right-click on close button) -->
@@ -264,14 +214,11 @@
         </button>
     </div>
 
-    <aside
-        class="fixed top-[30px] bottom-3 left-2 w-[72px] flex flex-col py-5 items-center z-50 border border-outline-variant/10 rounded-xl shadow-2xl overflow-hidden"
+    <aside id="app-sidebar"
+        class="app-sidebar fixed bottom-3 left-2 w-[72px] flex flex-col py-5 items-center z-50 border border-outline-variant/10 rounded-xl shadow-2xl overflow-hidden"
         style="background: var(--color-sidebar);">
         <!-- Sliding active indicator bar -->
         <div id="nav-indicator"></div>
-        <div class="text-primary font-black mt-3 mb-5">
-            <span class="material-symbols-outlined" style="font-variation-settings: 'opsz' 40; font-size:28px;">blur_on</span>
-        </div>
         <nav class="flex flex-col gap-4 w-full items-center flex-1">
             <a href="#"
                 class="w-12 h-12 flex items-center justify-center rounded-xl transition-all duration-200 cursor-pointer nav-active"
@@ -284,6 +231,7 @@
                 data-i18n="nav_zapret_settings" data-i18n-attr="title" title="ZAPRET settings">
                 <span class="material-symbols-outlined">tune</span>
             </a>
+            <a href="#" id="nav-automations" class="w-12 h-12 flex items-center justify-center rounded-xl transition-all duration-200 cursor-pointer nav-inactive" data-i18n="auto_title" data-i18n-attr="title" title="Автоматизации"><span class="material-symbols-outlined" aria-hidden="true">bolt</span></a>
             <a href="#" id="nav-warp-settings" hidden class="w-12 h-12 flex items-center justify-center rounded-xl transition-all duration-200 cursor-pointer nav-inactive" data-i18n="warp_page_title" data-i18n-attr="title" title="Настройки WARP"><span class="material-symbols-outlined" aria-hidden="true">cloud</span></a>
             <a href="#" id="nav-telegram" hidden class="w-12 h-12 flex items-center justify-center rounded-xl transition-all duration-200 cursor-pointer nav-inactive" data-i18n="nav_telegram" data-i18n-attr="title" title="Telegram прокси"><span class="telegram-icon text-2xl" aria-hidden="true"></span></a>
             <a href="#" id="nav-traffic"
@@ -310,15 +258,15 @@
         </div>
     </aside>
 
-    <header
-        class="fixed top-[42px] right-3 left-[88px] flex justify-between items-center px-6 h-16 z-40 rounded-3xl" style="background: color-mix(in srgb, var(--color-sidebar) 90%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);">
-        <div class="flex flex-col">
-            <span class="flex items-baseline gap-2"><span class="text-primary font-headline text-lg font-bold uppercase tracking-widest">ZAPRET UI</span><span class="brand-credit">by larrriiin</span></span>
-            <span id="header-status"
-                class="text-[10px] text-error-dim font-bold uppercase tracking-[0.2em] opacity-80"><span data-i18n="status_label">Status</span>:
-                <span data-i18n="status_disconnected">Disconnected</span></span>
+    <header id="app-header"
+        class="app-header" data-tauri-drag-region>
+        <div class="app-header-brand" data-tauri-drag-region>
+            <span class="flex items-baseline gap-2" data-tauri-drag-region><span class="text-primary font-headline text-lg font-bold uppercase tracking-widest" data-tauri-drag-region>ZAPRET UI</span><span class="brand-credit" data-tauri-drag-region>by larrriiin</span></span>
+            <span id="header-status" data-tauri-drag-region
+                class="text-[10px] text-error-dim font-bold uppercase tracking-[0.2em] opacity-80"><span data-i18n="status_label" data-tauri-drag-region>Status</span>:
+                <span data-i18n="status_disconnected" data-tauri-drag-region>Disconnected</span></span>
         </div>
-        <div class="flex items-center gap-4">
+        <div class="app-header-actions">
             <div class="flex flex-col items-end">
                 <span class="text-[9px] text-primary/40 uppercase tracking-widest font-bold" data-i18n="ui_version">UI VERSION</span>
                 <span id="ui-version-display" class="text-[11px] text-primary font-bold"></span>
@@ -332,17 +280,30 @@
                 <span class="material-symbols-outlined text-base">update</span>
             </button>
         </div>
+        <div id="titlebar" class="app-window-controls">
+        <button id="tb-minimize" class="ui-icon-button titlebar-btn" data-i18n="minimize" data-i18n-attr="title" title="Minimize">
+            <span class="material-symbols-outlined">remove</span>
+        </button>
+        <button id="tb-maximize" class="ui-icon-button titlebar-btn" data-i18n="maximize" data-i18n-attr="title" title="Maximize">
+            <span id="tb-maximize-icon" class="material-symbols-outlined">crop_square</span>
+        </button>
+        <button id="tb-close" class="ui-icon-button titlebar-btn close" data-i18n="close" data-i18n-attr="title" title="Close">
+            <span class="material-symbols-outlined">close</span>
+        </button>
+        </div>
     </header>
 
-    <main id="sections-host" class="ml-[80px] pt-20 h-[calc(100vh-30px)] overflow-x-hidden overflow-y-auto bg-surface" style="margin-top:30px;">
+    <main id="sections-host" class="app-content overflow-x-hidden overflow-y-auto">
         <!-- Section fragments are injected here by src/components/index.js -->
     </main>
 
     <!-- Top-level modals and overlays are injected here by src/components/index.js -->
     <div id="modals-host"></div>
 
-    <div class="fixed top-0 right-0 w-[600px] h-[600px] bg-primary/5 rounded-full blur-[120px] pointer-events-none -z-10 opacity-50"></div>
-    <div class="fixed bottom-0 left-20 w-[400px] h-[400px] bg-tertiary/5 rounded-full blur-[100px] pointer-events-none -z-10 opacity-30"></div>
+    <div class="app-backdrop" aria-hidden="true">
+        <div class="absolute top-0 right-0 w-[600px] h-[600px] bg-primary/5 rounded-full blur-[120px] opacity-50"></div>
+        <div class="absolute bottom-0 left-20 w-[400px] h-[400px] bg-tertiary/5 rounded-full blur-[100px] opacity-30"></div>
+    </div>
 
     <script type="module" src="/main.js"></script>
 </body>

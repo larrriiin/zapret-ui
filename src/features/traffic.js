@@ -331,9 +331,7 @@ function setTab(tab) {
   $('traffic-log-panel')?.classList.toggle('hidden', tab !== 'log');
   document.querySelectorAll('.traffic-tab-btn').forEach((button) => {
     const active = button.dataset.tab === tab;
-    button.classList.toggle('bg-primary/10', active);
-    button.classList.toggle('text-primary', active);
-    button.classList.toggle('text-on-surface-variant/45', !active);
+    button.setAttribute('aria-pressed', String(active));
   });
 }
 
@@ -460,9 +458,6 @@ function setMode(mode) {
   document.querySelectorAll('.traffic-mode-btn').forEach((button) => {
     const active = button.dataset.mode === mode;
     button.setAttribute('aria-pressed', String(active));
-    button.classList.toggle('bg-primary/15', active);
-    button.classList.toggle('text-primary', active);
-    button.classList.toggle('text-on-surface-variant/50', !active);
   });
   monitor.history = [];
   if (monitor.snapshot) addHistoryPoint();

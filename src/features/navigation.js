@@ -2,9 +2,11 @@ import { $ } from '../lib/core.js';
 import { state } from '../lib/state.js';
 import { showRestartModal } from '../lib/restart.js';
 import { loadUserLists } from './user-lists.js';
+import { transitionTabContent } from '../lib/tab-transition.js';
 
-const ALL_SECTIONS = ['section-home', 'section-zapret-settings', 'section-traffic', 'section-settings', 'section-telegram', 'section-warp-settings'];
+const ALL_SECTIONS = ['section-automations', 'section-home', 'section-zapret-settings', 'section-traffic', 'section-settings', 'section-telegram', 'section-warp-settings'];
 const ZAPRET_PANES = ['sites', 'ips', 'diagnostics'];
+let selectedZapretPane = null;
 
 function normalizeSectionId(sectionId) {
   return ZAPRET_PANES.includes(sectionId) ? 'zapret-settings' : sectionId;
@@ -63,13 +65,19 @@ export function showSection(sectionId) {
 }
 
 export function showZapretSettingsPane(pane) {
-  if (!ZAPRET_PANES.includes(pane)) return;
+  if (!ZAPRET_PANES.includes(pane) || selectedZapretPane === pane) return;
+  const initial = selectedZapretPane === null;
+  selectedZapretPane = pane;
   ZAPRET_PANES.forEach((name) => {
-    const paneElement = $(`zapret-settings-${name}`);
-    paneElement?.classList.toggle('hidden', name !== pane);
     const tab = document.querySelector(`[data-zapret-pane="${name}"]`);
     if (tab) tab.setAttribute('aria-selected', String(name === pane));
   });
+  const swap = () => ZAPRET_PANES.forEach(name => {
+    $(`zapret-settings-${name}`)?.classList.toggle('hidden', name !== pane);
+  });
+  const content = $('zapret-settings-content');
+  if (initial || !content) swap();
+  else transitionTabContent(content, swap);
 }
 
 function nestZapretSettingsPanes() {
@@ -112,6 +120,7 @@ function updateNavIndicator(activeEl) {
 
 export function initNavigation() {
   nestZapretSettingsPanes();
+  $('nav-automations')?.addEventListener('click', e => { e.preventDefault(); showSection('automations'); });
   $('nav-warp-settings')?.addEventListener('click', e => { e.preventDefault(); showSection('warp-settings'); });
   $('nav-telegram')?.addEventListener('click', e => { e.preventDefault(); if (!$('nav-telegram').hidden) showSection('telegram'); });
   document.querySelector('aside nav a:first-child')?.addEventListener('click', (e) => {

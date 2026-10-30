@@ -19,8 +19,10 @@ function render() {
   const label = connectionLabel(zapret, warpConnected, t('status_connected'));
   const prefix = document.createElement('span');
   prefix.className = 'text-primary';
+  prefix.setAttribute('data-tauri-drag-region', '');
   prefix.textContent = `${t('status_label')}: `;
   const value = document.createElement('span');
+  value.setAttribute('data-tauri-drag-region', '');
   value.className = label ? 'text-secondary' : 'text-error-dim';
   value.textContent = label || t('status_disconnected');
   header.replaceChildren(prefix, value);

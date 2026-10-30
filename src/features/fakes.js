@@ -38,11 +38,7 @@ function renderFakeOptionsList(type) {
     const isSelected = fake.name === activeFake;
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = `w-full text-left px-4 py-2.5 text-xs font-mono transition-colors flex items-center justify-between cursor-pointer ${
-      isSelected
-        ? 'bg-primary/20 text-primary font-bold'
-        : 'text-on-surface/80 hover:bg-primary/10 hover:text-on-surface'
-    }`;
+    btn.className = 'ui-select-option ui-code justify-between' + (isSelected ? ' dropdown-option-selected' : '');
 
     btn.innerHTML = `
       <span class="truncate">${fake.name}</span>
@@ -133,14 +129,14 @@ export function initFakeSelectors() {
         discordPanel.classList.remove('hidden');
         if (discordChevron) discordChevron.style.transform = 'rotate(180deg)';
         renderFakeOptionsList('discord');
-        
+
         // Position relative to viewport since it's on body
         const rect = discordTrigger.getBoundingClientRect();
         discordPanel.style.position = 'fixed';
         discordPanel.style.left = rect.left + 'px';
         discordPanel.style.width = rect.width + 'px';
         discordPanel.style.marginTop = '0';
-        
+
         // Drop-up if not enough space below (assuming max height is ~240px)
         if (rect.bottom + 240 > window.innerHeight && rect.top > 240) {
           discordPanel.style.top = 'auto';
@@ -162,14 +158,14 @@ export function initFakeSelectors() {
         gamePanel.classList.remove('hidden');
         if (gameChevron) gameChevron.style.transform = 'rotate(180deg)';
         renderFakeOptionsList('game');
-        
+
         // Position relative to viewport since it's on body
         const rect = gameTrigger.getBoundingClientRect();
         gamePanel.style.position = 'fixed';
         gamePanel.style.left = rect.left + 'px';
         gamePanel.style.width = rect.width + 'px';
         gamePanel.style.marginTop = '0';
-        
+
         // Drop-up if not enough space below (assuming max height is ~240px)
         if (rect.bottom + 240 > window.innerHeight && rect.top > 240) {
           gamePanel.style.top = 'auto';

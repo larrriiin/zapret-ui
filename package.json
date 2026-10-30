@@ -24,6 +24,7 @@
     "test:strategy-notes": "node --test scripts/strategy-notes.test.mjs",
     "test:traffic": "node --test scripts/traffic-classification.test.mjs",
     "test:warp": "node --test scripts/warp-state.test.mjs",
+    "test:automations": "node --test scripts/automations-ui.test.mjs",
     "test:warp-ui": "node --test scripts/warp-ui.test.mjs",
     "test:update-notifications": "node --test scripts/update-notifications.test.mjs",
     "sign-core-channel": "tauri signer sign core-channel/stable.json",

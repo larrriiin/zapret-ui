@@ -6,12 +6,12 @@
         <h2 class="font-headline text-2xl font-bold text-primary" data-i18n="site_lists">Site Lists</h2>
         <div class="flex gap-2">
             <button id="backup-export-btn"
-                class="px-4 py-2 bg-surface-container-high/40 border border-outline-variant/20 hover:border-primary/50 hover:text-primary rounded-xl text-on-surface-variant font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5">
+                class="ui-button">
                 <span class="material-symbols-outlined text-sm">backup</span>
                 <span data-i18n="backup_export_btn">Create Backup</span>
             </button>
             <button id="backup-import-btn"
-                class="px-4 py-2 bg-surface-container-high/40 border border-outline-variant/20 hover:border-primary/50 hover:text-primary rounded-xl text-on-surface-variant font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5">
+                class="ui-button">
                 <span class="material-symbols-outlined text-sm">settings_backup_restore</span>
                 <span data-i18n="backup_import_btn">Restore Backup</span>
             </button>
@@ -20,19 +20,19 @@
 
     <div class="grid grid-cols-2 gap-6">
         <!-- Include List -->
-        <div class="glass-panel rounded-2xl border border-primary/10 p-6">
+        <div class="ui-panel p-6">
             <div class="flex items-center justify-between mb-4">
                 <div class="flex items-center gap-1.5">
                     <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-secondary" data-i18n="include">Include</h3>
-                    <button id="include-info-btn" class="text-secondary/40 hover:text-secondary transition-colors flex">
+                    <button id="include-info-btn" class="ui-icon-button">
                         <span class="material-symbols-outlined text-sm">info</span>
                     </button>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button id="site-include-search-toggle" class="text-secondary/40 hover:text-secondary transition-colors flex p-1 rounded hover:bg-white/5">
+                    <button id="site-include-search-toggle" class="ui-icon-button">
                         <span class="material-symbols-outlined text-lg">search</span>
                     </button>
-                    <button id="site-include-clear-btn" class="text-error-dim/40 hover:text-error-dim transition-colors flex p-1 rounded hover:bg-white/5">
+                    <button id="site-include-clear-btn" class="ui-icon-button ui-tone-danger">
                         <span class="material-symbols-outlined text-lg">delete</span>
                     </button>
                     <span class="material-symbols-outlined text-secondary ml-1">playlist_add</span>
@@ -40,20 +40,20 @@
             </div>
             <div class="flex gap-2 mb-4">
                 <input type="text" id="site-include-input" placeholder="example.com" data-i18n="placeholder_domain" data-i18n-attr="placeholder" autocomplete="off" spellcheck="false"
-                    class="flex-1 bg-surface-container-highest border border-outline-variant/30 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary/50">
+                    class="ui-field flex-1">
                 <button id="site-include-add"
-                    class="px-4 py-2 bg-primary rounded-xl text-on-primary font-bold text-xs uppercase tracking-wider hover:bg-primary-dim transition-colors" data-i18n="add">
+                    class="ui-button ui-button-primary" data-i18n="add">
                     Add
                 </button>
             </div>
             <div class="flex gap-2 mb-4">
                 <button id="site-include-bulk-btn"
-                    class="flex-1 py-2 bg-surface-container-high/40 border border-outline-variant/10 hover:border-primary/40 hover:text-primary rounded-xl text-on-surface-variant font-bold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5">
+                    class="ui-button flex-1 ui-button-sm">
                     <span class="material-symbols-outlined text-sm">playlist_add</span>
                     <span data-i18n="bulk_add_btn">Bulk Add</span>
                 </button>
                 <button id="site-include-export-btn"
-                    class="flex-1 py-2 bg-surface-container-high/40 border border-outline-variant/10 hover:border-primary/40 hover:text-primary rounded-xl text-on-surface-variant font-bold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5">
+                    class="ui-button flex-1 ui-button-sm">
                     <span class="material-symbols-outlined text-sm">share</span>
                     <span data-i18n="export_btn">Share</span>
                 </button>
@@ -61,7 +61,7 @@
             <!-- Search bar -->
             <div id="site-include-search-container" class="relative mb-3 hidden">
                 <input type="text" id="site-include-search" placeholder="Поиск по списку..." data-i18n="search_placeholder" data-i18n-attr="placeholder" autocomplete="off" spellcheck="false"
-                    class="w-full bg-surface-container-high/40 border border-outline-variant/20 rounded-xl pl-9 pr-4 py-1.5 text-xs outline-none focus:border-primary/50 text-on-surface">
+                    class="ui-field ui-field-search w-full">
                 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50 text-xs">search</span>
             </div>
             <div id="site-include-list" class="space-y-2 max-h-[300px] overflow-y-auto">
@@ -70,19 +70,19 @@
         </div>
 
         <!-- Exclude List -->
-        <div class="glass-panel rounded-2xl border border-primary/10 p-6">
+        <div class="ui-panel p-6">
             <div class="flex items-center justify-between mb-4">
                 <div class="flex items-center gap-1.5">
                     <h3 class="font-headline text-sm font-bold uppercase tracking-widest text-error-dim" data-i18n="exclude">Exclude</h3>
-                    <button id="exclude-info-btn" class="text-error-dim/40 hover:text-error-dim transition-colors flex">
+                    <button id="exclude-info-btn" class="ui-icon-button ui-tone-danger">
                         <span class="material-symbols-outlined text-sm">info</span>
                     </button>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button id="site-exclude-search-toggle" class="text-error-dim/40 hover:text-error-dim transition-colors flex p-1 rounded hover:bg-white/5">
+                    <button id="site-exclude-search-toggle" class="ui-icon-button ui-tone-danger">
                         <span class="material-symbols-outlined text-lg">search</span>
                     </button>
-                    <button id="site-exclude-clear-btn" class="text-error-dim/40 hover:text-error-dim transition-colors flex p-1 rounded hover:bg-white/5">
+                    <button id="site-exclude-clear-btn" class="ui-icon-button ui-tone-danger">
                         <span class="material-symbols-outlined text-lg">delete</span>
                     </button>
                     <span class="material-symbols-outlined text-error-dim ml-1">playlist_remove</span>
@@ -90,20 +90,20 @@
             </div>
             <div class="flex gap-2 mb-4">
                 <input type="text" id="site-exclude-input" placeholder="example.com" data-i18n="placeholder_domain" data-i18n-attr="placeholder" autocomplete="off" spellcheck="false"
-                    class="flex-1 bg-surface-container-highest border border-outline-variant/30 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary/50">
+                    class="ui-field flex-1">
                 <button id="site-exclude-add"
-                    class="px-4 py-2 bg-error-dim rounded-xl text-white font-bold text-xs uppercase tracking-wider hover:opacity-80 transition-colors" data-i18n="add">
+                    class="ui-button ui-button-danger" data-i18n="add">
                     Add
                 </button>
             </div>
             <div class="flex gap-2 mb-4">
                 <button id="site-exclude-bulk-btn"
-                    class="flex-1 py-2 bg-surface-container-high/40 border border-outline-variant/10 hover:border-error-dim/40 hover:text-error-dim rounded-xl text-on-surface-variant font-bold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5">
+                    class="ui-button flex-1 ui-button-sm">
                     <span class="material-symbols-outlined text-sm">playlist_add</span>
                     <span data-i18n="bulk_add_btn">Bulk Add</span>
                 </button>
                 <button id="site-exclude-export-btn"
-                    class="flex-1 py-2 bg-surface-container-high/40 border border-outline-variant/10 hover:border-error-dim/40 hover:text-error-dim rounded-xl text-on-surface-variant font-bold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5">
+                    class="ui-button flex-1 ui-button-sm">
                     <span class="material-symbols-outlined text-sm">share</span>
                     <span data-i18n="export_btn">Share</span>
                 </button>
@@ -111,7 +111,7 @@
             <!-- Search bar -->
             <div id="site-exclude-search-container" class="relative mb-3 hidden">
                 <input type="text" id="site-exclude-search" placeholder="Поиск по списку..." data-i18n="search_placeholder" data-i18n-attr="placeholder" autocomplete="off" spellcheck="false"
-                    class="w-full bg-surface-container-high/40 border border-outline-variant/20 rounded-xl pl-9 pr-4 py-1.5 text-xs outline-none focus:border-primary/50 text-on-surface">
+                    class="ui-field ui-field-search w-full">
                 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50 text-xs">search</span>
             </div>
             <div id="site-exclude-list" class="space-y-2 max-h-[300px] overflow-y-auto">

@@ -163,7 +163,7 @@ function createNoteEditor(name) {
 
   const input = document.createElement('input');
   input.type = 'text';
-  input.className = 'strategy-note-input';
+  input.className = 'ui-field strategy-note-input';
   input.maxLength = MAX_STRATEGY_NOTE_LENGTH;
   input.value = noteEditor.value;
   input.placeholder = t('strategy_note_placeholder');
@@ -216,18 +216,19 @@ function createNoteEditor(name) {
   if (getStrategyNote(name)) {
     const remove = document.createElement('button');
     remove.type = 'button';
-    remove.className = 'strategy-note-delete';
+    remove.className = 'ui-button ui-button-sm ui-tone-danger strategy-note-delete';
     remove.textContent = t('strategy_note_delete');
     remove.addEventListener('click', () => persist(''));
     actions.appendChild(remove);
   }
   const cancel = document.createElement('button');
   cancel.type = 'button';
+  cancel.className = 'ui-button ui-button-sm';
   cancel.textContent = t('cancel');
   cancel.addEventListener('click', finish);
   const save = document.createElement('button');
   save.type = 'submit';
-  save.className = 'strategy-note-save';
+  save.className = 'ui-button ui-button-sm ui-button-primary strategy-note-save';
   save.textContent = t('save');
   actions.append(counter, cancel, save);
   form.append(input, actions, error);
@@ -274,7 +275,7 @@ export function renderStrategyList() {
       const isSelected = name === current;
       const item = document.createElement('div');
       item.dataset.value = name;
-      const baseCls = 'group strategy-option w-full text-left px-4 py-2.5 text-sm font-headline text-on-surface hover:bg-primary/10 transition-colors flex items-center gap-2 cursor-pointer';
+      const baseCls = 'group strategy-option ui-select-option';
       item.className = baseCls + (isBest ? ' border-l-2 border-secondary' : '') + (isSelected ? ' dropdown-option-selected' : '');
 
       const icon = document.createElement('span');
@@ -314,7 +315,7 @@ export function renderStrategyList() {
 
       const noteButton = document.createElement('button');
       noteButton.type = 'button';
-      noteButton.className = 'strategy-note-button';
+      noteButton.className = 'ui-icon-button ui-icon-button-sm strategy-note-button';
       noteButton.dataset.noteStrategy = name;
       noteButton.title = note ? t('strategy_note_edit') : t('strategy_note_add');
       noteButton.setAttribute('aria-label', `${noteButton.title}: ${name}`);
@@ -336,7 +337,7 @@ export function renderStrategyList() {
 
       const star = document.createElement('button');
       star.type = 'button';
-      star.className = 'strategy-note-button';
+      star.className = 'ui-icon-button ui-icon-button-sm strategy-note-button';
       star.setAttribute('title', t('toggle_favorite') || 'Toggle favorite');
       star.setAttribute('aria-label', `${t('toggle_favorite')}: ${name}`);
       star.setAttribute('aria-pressed', String(favs.has(name)));

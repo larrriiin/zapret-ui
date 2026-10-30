@@ -63,12 +63,70 @@ struct Client {
     diag_supported: bool,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize, Serialize)]
+pub struct ProxySelection {
+    pub sites: Vec<String>,
+    pub applications: Vec<String>,
+}
+impl ProxySelection {
+    pub(crate) fn validate(&self) -> Result<()> {
+        if self.sites.len() > 1000 || self.applications.len() > 100 {
+            return Err(WarpError::new(
+                "warp_selection_invalid",
+                "Too many selected routes",
+            ));
+        }
+        Ok(())
+    }
+    fn from_saved(&self, sites: &[String], applications: &[String]) -> Result<Self> {
+        self.validate()?;
+        let selected_sites = self
+            .sites
+            .iter()
+            .map(|s| {
+                sites
+                    .iter()
+                    .find(|saved| saved.eq_ignore_ascii_case(s))
+                    .cloned()
+                    .ok_or_else(|| {
+                        WarpError::new(
+                            "warp_selection_removed",
+                            format!("Site is no longer in WARP settings: {s}"),
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let key = |s: &str| s.replace('/', "\\").to_lowercase();
+        let selected_apps = self
+            .applications
+            .iter()
+            .map(|p| {
+                applications
+                    .iter()
+                    .find(|saved| key(saved) == key(p))
+                    .cloned()
+                    .ok_or_else(|| {
+                        WarpError::new(
+                            "warp_selection_removed",
+                            format!("Application is no longer in WARP settings: {p}"),
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self {
+            sites: selected_sites,
+            applications: selected_apps,
+        })
+    }
+}
+
 #[derive(Default, Debug, Serialize)]
 pub struct WarpStatus {
     pub(crate) installed: bool,
     pub(crate) connected: bool,
     state: String,
-    mode: Option<String>,
+    pub(crate) mode: Option<String>,
+    pub(crate) application_routes: Option<ProxySelection>,
     version: Option<String>,
     protocol: Option<String>,
     protocol_editable: bool,
@@ -333,6 +391,7 @@ fn parse_state(status: &Value) -> &'static str {
 
 enum Action {
     Status,
+    ApplicationConnection(Option<String>, bool, Option<ProxySelection>),
     Connect,
     Disconnect,
     Mode(String, bool),
@@ -361,6 +420,14 @@ async fn execute(action: Action) -> Result<WarpStatus> {
             &action,
             Action::Applications(..) | Action::ApplicationList(..)
         );
+        if !matches!(&action, Action::Status | Action::ApplicationConnection(..))
+            && control.application_routes.take().is_some()
+        {
+            sites::disable()?;
+            applications::disable()?;
+            control.sites_restore_attempted = false;
+            control.applications_restore_attempted = false;
+        }
         let mut local_change_succeeded = false;
         let result = (|| -> Result<WarpStatus> {
             // List editing and disabling are independent of the official client's availability.
@@ -434,6 +501,46 @@ async fn execute(action: Action) -> Result<WarpStatus> {
             let client = guard.as_ref().unwrap();
             match action {
                 Action::Status => {}
+                Action::ApplicationConnection(mode, connected, routes) => {
+                    let saved_sites = sites::status()?;
+                    let saved_apps = applications::status()?;
+                    let routes = routes
+                        .map(|r| r.from_saved(&saved_sites.domains, &saved_apps.paths))
+                        .transpose()?;
+                    if control.application_routes != routes {
+                        sites::disable()?;
+                        applications::disable()?;
+                        control.sites_restore_attempted = false;
+                        control.applications_restore_attempted = false;
+                    }
+                    control.application_routes = routes;
+                    let before = client.status();
+                    if !connected || mode.as_deref().or(before.mode.as_deref()) != Some("proxy") {
+                        // Release runtime resources, retaining the user's enabled selections.
+                        sites::disable()?;
+                        applications::disable()?;
+                    }
+                    control::application_connection(client, mode.as_deref(), connected, |port| {
+                        if let Some(routes) = &control.application_routes {
+                            sites::configure_runtime(routes.sites.clone(), port)?;
+                            applications::configure_runtime(routes.applications.clone(), port)?;
+                            control.sites_restore_attempted = true;
+                            control.applications_restore_attempted = true;
+                            return Ok(());
+                        }
+                        let selected_sites = sites::status()?;
+                        if selected_sites.enabled && !selected_sites.runtime_active {
+                            sites::configure(selected_sites.domains, true, Some(port))?;
+                        }
+                        let selected_apps = applications::status()?;
+                        if selected_apps.enabled && !selected_apps.runtime_active {
+                            applications::configure(selected_apps.paths, true, Some(port))?;
+                        }
+                        control.sites_error = None;
+                        control.applications_error = None;
+                        Ok(())
+                    })?;
+                }
                 Action::Connect => {
                     cli(&client.path, &["connect"])?;
                 }
@@ -586,6 +693,7 @@ async fn execute(action: Action) -> Result<WarpStatus> {
         status
             .connections
             .extend(status.applications.connections.clone());
+        status.application_routes = control.application_routes.clone();
         status.automation = control.automation.clone();
         status.last_errors = control.errors.clone();
         status.sites_error = control.sites_error.clone();
@@ -604,6 +712,14 @@ pub async fn get_warp_status() -> Result<WarpStatus> {
 #[tauri::command]
 pub async fn connect_warp() -> Result<WarpStatus> {
     execute(Action::Connect).await
+}
+
+pub(crate) async fn apply_application_connection(
+    mode: Option<String>,
+    connected: bool,
+    routes: Option<ProxySelection>,
+) -> Result<WarpStatus> {
+    execute(Action::ApplicationConnection(mode, connected, routes)).await
 }
 #[tauri::command]
 pub async fn disconnect_warp() -> Result<WarpStatus> {
@@ -662,6 +778,34 @@ pub async fn set_warp_automation(preferences: control::Automation) -> Result<War
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn selected_routes_are_resolved_only_from_saved_warp_lists() {
+        let sites = vec!["example.org".into(), "video.example".into()];
+        let apps = vec![
+            "C:\\Apps\\Discord.exe".into(),
+            "C:\\Apps\\Browser.exe".into(),
+        ];
+        let selection = ProxySelection {
+            sites: vec!["EXAMPLE.ORG".into()],
+            applications: vec!["c:/apps/discord.exe".into()],
+        };
+        let resolved = selection.from_saved(&sites, &apps).unwrap();
+        assert_eq!(resolved.sites, vec!["example.org"]);
+        assert_eq!(resolved.applications, vec!["C:\\Apps\\Discord.exe"]);
+        assert_eq!(sites.len(), 2);
+        assert_eq!(apps.len(), 2);
+        assert!(selection.from_saved(&[], &apps).is_err());
+        assert!(selection.from_saved(&sites, &[]).is_err());
+        let sites_only = ProxySelection {
+            sites: vec!["example.org".into()],
+            applications: vec![],
+        };
+        assert!(sites_only
+            .from_saved(&sites, &apps)
+            .unwrap()
+            .applications
+            .is_empty());
+    }
     #[test]
     fn saved_lists_and_explicit_selection_survive_restart_without_starting_routes() {
         let directory =

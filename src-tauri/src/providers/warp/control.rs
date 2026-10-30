@@ -13,6 +13,7 @@ pub struct Automation {
 pub(super) struct Control {
     pub directory: PathBuf,
     pub automation: Automation,
+    pub application_routes: Option<ProxySelection>,
     pub errors: Vec<WarpError>,
     pub sites_error: Option<WarpError>,
     pub applications_error: Option<WarpError>,
@@ -151,6 +152,37 @@ pub(super) fn preserve_connection(
     result
 }
 
+// A saved application rule explicitly requests its mode and connection state.
+// Routing is activated only after a compatible local SOCKS proxy is verified.
+pub(super) fn application_connection(
+    client: &impl RoutingClient,
+    mode: Option<&str>,
+    connected: bool,
+    activate_selected: impl FnOnce(u16) -> Result<()>,
+) -> Result<()> {
+    let before = client.read();
+    if let Some(error) = before.error.clone() {
+        return Err(error);
+    }
+    if let Some(mode) = mode {
+        if !before.modes.iter().any(|m| m == mode) {
+            return Err(WarpError::new("warp_unsupported", ""));
+        }
+        set_mode(client, &before, mode)?;
+    }
+    let status = client.read();
+    if let Some(error) = status.error.clone() {
+        return Err(error);
+    }
+    if connected && status.mode.as_deref() == Some("proxy") {
+        let port = ensure_proxy(client, true)?;
+        activate_selected(port)?;
+    } else if status.connected != connected {
+        client.command(&[if connected { "connect" } else { "disconnect" }])?;
+    }
+    Ok(())
+}
+
 pub(super) fn set_mode(client: &impl RoutingClient, before: &WarpStatus, mode: &str) -> Result<()> {
     let set_protocol = mode == "proxy" && before.protocol.as_deref() != Some("MASQUE");
     if set_protocol && !client.can_set_protocol() {
@@ -259,20 +291,31 @@ pub(super) fn reconcile(control: &mut Control, status: &WarpStatus) -> Result<()
     if selected_apps.runtime_active {
         control.applications_restore_attempted = true;
     }
+    if let Some(routes) = &control.application_routes {
+        if let Some(port) = port {
+            if !selected_sites.runtime_active
+                && !control.sites_restore_attempted
+                && !routes.sites.is_empty()
+            {
+                control.sites_restore_attempted = true;
+                sites::configure_runtime(routes.sites.clone(), port)?;
+            }
+            if !selected_apps.runtime_active
+                && !control.applications_restore_attempted
+                && !routes.applications.is_empty()
+            {
+                control.applications_restore_attempted = true;
+                applications::configure_runtime(routes.applications.clone(), port)?;
+            }
+        }
+        return Ok(());
+    }
     if !control.automation.restore_rules {
         return Ok(());
     }
     let Some(port) = port else {
-        if selected_sites.enabled || selected_apps.enabled {
-            let error = WarpError::new("warp_restore_waiting", "");
-            remember_error(control, error.clone());
-            if selected_sites.enabled {
-                control.sites_error = Some(error.clone());
-            }
-            if selected_apps.enabled {
-                control.applications_error = Some(error);
-            }
-        }
+        // Waiting for a compatible proxy is idle, not a routing failure.
+        // Keep saved selections so they can be restored when the proxy is ready.
         return Ok(());
     };
     if selected_sites.enabled && !selected_sites.runtime_active && !control.sites_restore_attempted
@@ -393,6 +436,69 @@ mod tests {
         fn readiness_timeout(&self) -> Duration {
             Duration::ZERO
         }
+    }
+    #[test]
+    fn application_proxy_connects_and_activates_saved_routes() {
+        let fake = Fake::new("warp", "MASQUE");
+        let activated = RefCell::new(Vec::new());
+        application_connection(&fake, Some("proxy"), true, |port| {
+            activated.borrow_mut().push(port);
+            Ok(())
+        })
+        .unwrap();
+        assert!(fake.read().connected);
+        assert_eq!(fake.read().mode.as_deref(), Some("proxy"));
+        assert_eq!(*activated.borrow(), vec![40000]);
+    }
+    #[test]
+    fn application_proxy_activates_routes_even_when_already_connected() {
+        let fake = Fake::new("proxy", "MASQUE");
+        *fake.connected.borrow_mut() = true;
+        let activated = RefCell::new(false);
+        application_connection(&fake, None, true, |_| {
+            *activated.borrow_mut() = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(*activated.borrow());
+        assert!(fake.commands.borrow().is_empty());
+    }
+    #[test]
+    fn application_disconnect_and_other_modes_do_not_activate_proxy_routes() {
+        let fake = Fake::new("proxy", "MASQUE");
+        *fake.connected.borrow_mut() = true;
+        application_connection(&fake, None, false, |_| {
+            panic!("disconnected proxy must not route")
+        })
+        .unwrap();
+        assert!(!fake.read().connected);
+        application_connection(&fake, Some("warp"), true, |_| {
+            panic!("full tunnel must not activate proxy routes")
+        })
+        .unwrap();
+        assert!(fake.read().connected);
+        assert_eq!(fake.read().mode.as_deref(), Some("warp"));
+    }
+    #[test]
+    fn application_routes_require_ready_proxy_and_report_activation_errors() {
+        let mut fake = Fake::new("proxy", "MASQUE");
+        fake.ready = false;
+        assert_eq!(
+            application_connection(&fake, None, true, |_| panic!("unverified proxy"))
+                .unwrap_err()
+                .code,
+            "warp_proxy_unavailable"
+        );
+        fake.ready = true;
+        assert_eq!(
+            application_connection(&fake, None, true, |_| Err(WarpError::new(
+                "routing_failed",
+                "test"
+            )))
+            .unwrap_err()
+            .code,
+            "routing_failed"
+        );
     }
     #[test]
     fn manual_mode_changes_preserve_disconnection_despite_cli_autoconnect() {
