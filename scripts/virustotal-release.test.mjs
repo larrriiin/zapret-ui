@@ -53,7 +53,7 @@ test('upload waits for completion and checks SHA-256; pending and mismatched res
     calls++;
     if (options?.method === 'POST') {
       assert.equal(await options.body.get('file').text(), 'installer');
-      return { data: { id: 'analysis/id' } };
+      return { data: { type: 'analysis', id: 'analysis/id' } };
     }
     assert.ok(url.endsWith('/analyses/analysis%2Fid'));
     return calls === 2 ? { data: { attributes: { status: 'queued' } } } : completed(hash('installer'));
@@ -61,8 +61,8 @@ test('upload waits for completion and checks SHA-256; pending and mismatched res
   const report = await scanInstaller(file, request, { wait: async () => {} });
   assert.equal(report.sha256, hash('installer'));
   assert.equal(calls, 3);
-  await assert.rejects(scanInstaller(file, async (_, options) => options ? { data: { id: 'id' } } : completed(hash('wrong')), { wait: async () => {} }), /does not match/);
-  await assert.rejects(scanInstaller(file, async (_, options) => options ? { data: { id: 'id' } } : { data: { attributes: { status: 'queued' } } }, { wait: async () => {}, maxPolls: 2 }), /pending/);
+  await assert.rejects(scanInstaller(file, async (_, options) => options ? { data: { type: 'analysis', id: 'id' } } : completed(hash('wrong')), { wait: async () => {} }), /does not match/);
+  await assert.rejects(scanInstaller(file, async (_, options) => options ? { data: { type: 'analysis', id: 'id' } } : { data: { attributes: { status: 'queued' } } }, { wait: async () => {}, maxPolls: 2 }), /pending/);
 });
 
 test('large installers use the dedicated upload URL', async t => {
@@ -73,11 +73,62 @@ test('large installers use the dedicated upload URL', async t => {
   await scanInstaller(file, async (url, options) => {
     calls.push(url);
     if (url.endsWith('upload_url')) return { data: 'https://www.virustotal.com/upload/one-use' };
-    if (options?.method === 'POST') return { data: { id: 'large' } };
+    if (options?.method === 'POST') return { data: { type: 'analysis', id: 'large' } };
     return completed(hash(bytes));
   }, { wait: async () => {} });
   assert.ok(calls[0].endsWith('/files/upload_url'));
   assert.equal(calls[1], 'https://www.virustotal.com/upload/one-use');
+});
+
+test('uses the returned analysis self link and preserves Base64 padding in the fallback URL', async t => {
+  const file = path.join(await temporary(t), 'setup.exe');
+  await writeFile(file, 'installer');
+  // A padded analysis ID from the VirusTotal API documentation, not a file hash.
+  const id = 'NjY0MjRlOTFjMDIyYTkyNWM0NjU2NWQzYWNlMzFmZmI6MTQ3NTA0ODI3Nw==';
+  const rawUrl = `https://www.virustotal.com/api/v3/analyses/${id}`;
+  const encodedUrl = `https://www.virustotal.com/api/v3/analyses/${encodeURIComponent(id)}`;
+  for (const self of [undefined, rawUrl, encodedUrl]) {
+    const messages = [];
+    const calls = [];
+    const request = async (url, options) => {
+      calls.push(url);
+      if (options?.method === 'POST') return { data: { type: 'analysis', id,
+        ...(self ? { links: { self } } : {}) } };
+      assert.equal(url, self || rawUrl);
+      return completed(hash('installer'));
+    };
+    await scanInstaller(file, request, { wait: async () => {}, onProgress: message => messages.push(message) });
+    assert.equal(calls.length, 2);
+    assert.ok(messages[0].includes(self || rawUrl));
+    assert.ok(messages[0].includes(hash('installer')));
+  }
+});
+
+test('rejects wrong response types, invalid IDs, and analysis links outside the exact returned resource', async t => {
+  const file = path.join(await temporary(t), 'setup.exe');
+  await writeFile(file, 'installer');
+  const invalid = [
+    { type: 'file', id: hash('installer') }, { id: 'id' },
+    ...['', '../files', 'id?query=secret', 'id\n'].map(id => ({ type: 'analysis', id })),
+    ...['https://evil.test/api/v3/analyses/id',
+      'http://www.virustotal.com/api/v3/analyses/id',
+      'https://www.virustotal.com/api/v3/files/id',
+      'https://www.virustotal.com/api/v3/analyses/different',
+      'https://www.virustotal.com/api/v3/analyses/id?key=secret',
+      'https://secret@www.virustotal.com/api/v3/analyses/id',
+      'https://www.virustotal.com/api/v3/analyses/%zz',
+      '/api/v3/analyses/id'].map(self => ({ type: 'analysis', id: 'id', links: { self } })),
+  ];
+  for (const data of invalid) {
+    let calls = 0;
+    const messages = [];
+    await assert.rejects(scanInstaller(file, async () => {
+      calls++;
+      return { data };
+    }, { wait: async () => {}, onProgress: message => messages.push(message) }), /analysis/);
+    assert.equal(calls, 1);
+    assert.equal(messages.length, 0);
+  }
 });
 
 test('new analysis can be temporarily unavailable without uploading the installer again', async t => {
@@ -92,7 +143,7 @@ test('new analysis can be temporarily unavailable without uploading the installe
   const client = createClient('secret', { wait: async () => {}, fetchImpl: async (_, options) => {
     if (options.method === 'POST') {
       uploads++;
-      return json({ data: { id: 'new-analysis' } });
+      return json({ data: { type: 'analysis', id: 'new-analysis' } });
     }
     return statuses[polls++];
   } });
@@ -111,7 +162,7 @@ test('persistent missing analyses fail within the polling budget with an accurat
   const client = createClient('secret', { wait: async () => {}, fetchImpl: async (_, options) => {
     if (options.method === 'POST') {
       uploads++;
-      return json({ data: { id: 'missing' } });
+      return json({ data: { type: 'analysis', id: 'missing' } });
     }
     polls++;
     return json({ error: { code: 'NotFoundError' } }, 404);
@@ -131,7 +182,7 @@ test('upload errors and permanent analysis errors fail immediately without expos
     let calls = 0;
     const client = createClient('secret', { wait: async () => {}, fetchImpl: async (_, options) => {
       calls++;
-      if (stage === 'analysis' && options.method === 'POST') return json({ data: { id: 'id' } });
+      if (stage === 'analysis' && options.method === 'POST') return json({ data: { type: 'analysis', id: 'id' } });
       return json({ error: { code, message: 'secret-response https://www.virustotal.com/upload/private-token' } }, status);
     } });
     await assert.rejects(scanInstaller(file, client, { wait: async () => {} }), error => {
@@ -161,7 +212,7 @@ test('release integration scans exact bundles, checks published digests, then ed
     clientOptions: { wait: async () => {}, fetchImpl: async (_, options) => {
       if (options.method === 'POST') {
         lastHash = hash(await options.body.get('file').text());
-        return json({ data: { id: 'id' } });
+        return json({ data: { type: 'analysis', id: 'id' } });
       }
       return json(completed(lastHash));
     } }, scanOptions: { wait: async () => {} },
@@ -182,7 +233,7 @@ test('release integration scans exact bundles, checks published digests, then ed
   // A permanently missing analysis must never publish a successful scan section.
   options.scanOptions.maxPolls = 2;
   options.clientOptions.fetchImpl = async (_, options) => options.method === 'POST'
-    ? json({ data: { id: 'missing' } }) : json({ error: { code: 'NotFoundError' } }, 404);
+    ? json({ data: { type: 'analysis', id: 'missing' } }) : json({ error: { code: 'NotFoundError' } }, 404);
   await assert.rejects(scanRelease(options), /analysis remained unavailable/);
   assert.equal(edits.length, 0);
 });
