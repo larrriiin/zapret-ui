@@ -6,6 +6,19 @@ const API = 'https://www.virustotal.com/api/v3';
 const START = '<!-- zapret-virustotal:start -->';
 const END = '<!-- zapret-virustotal:end -->';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const ERROR_CODES = new Set(['BadRequestError', 'InvalidArgumentError', 'NotAvailableYet',
+  'AuthenticationRequiredError', 'UserNotActiveError', 'WrongCredentialsError',
+  'ForbiddenError', 'NotFoundError']);
+
+class VirusTotalRequestError extends Error {
+  constructor(status, code, operation) {
+    const hint = status === 401 || status === 403 ? 'Check the API key and account permissions.'
+      : status === 404 ? 'The requested resource was not found.' : 'The API rejected the request.';
+    super(`VirusTotal ${operation} failed (HTTP ${status}${code ? `, ${code}` : ''}). ${hint}`);
+    this.status = status;
+    this.code = code;
+  }
+}
 
 export function createClient(apiKey, { fetchImpl = fetch, wait = sleep, now = Date.now } = {}) {
   if (!apiKey?.trim()) throw new Error('Add the VIRUSTOTAL_API_KEY repository secret before publishing.');
@@ -15,6 +28,10 @@ export function createClient(apiKey, { fetchImpl = fetch, wait = sleep, now = Da
     if (target.protocol !== 'https:' || target.hostname !== 'www.virustotal.com' || target.port || target.username || target.password) {
       throw new Error('VirusTotal returned an unexpected upload URL.');
     }
+    const method = options.method || 'GET';
+    const operation = target.pathname === '/api/v3/files/upload_url' ? 'upload URL lookup'
+      : method === 'GET' && target.pathname.startsWith('/api/v3/analyses/') ? 'analysis lookup'
+      : method === 'POST' ? 'installer upload' : 'request';
     for (let attempt = 0; attempt < 3; attempt++) {
       await wait(Math.max(0, nextRequest - now()));
       nextRequest = now() + 16_000;
@@ -32,7 +49,12 @@ export function createClient(apiKey, { fetchImpl = fetch, wait = sleep, now = Da
         nextRequest = now() + Math.max(60_000, Math.min(300_000, Number.isFinite(retry) ? retry * 1000 : 60_000));
         continue;
       }
-      if (!response.ok) throw new Error(`VirusTotal request failed (HTTP ${response.status}). Check the API key and quota.`);
+      if (!response.ok) {
+        // Only log known API error codes; messages can contain keys or temporary URLs.
+        const body = await response.json().catch(() => null);
+        const code = ERROR_CODES.has(body?.error?.code) ? body.error.code : undefined;
+        throw new VirusTotalRequestError(response.status, code, operation);
+      }
       try { return await response.json(); }
       catch { throw new Error('VirusTotal returned invalid JSON.'); }
     }
@@ -54,15 +76,32 @@ export async function scanInstaller(file, request, { wait = sleep, maxPolls = 20
   const uploaded = await request(uploadUrl, { method: 'POST', body: form });
   const id = uploaded.data?.id;
   if (typeof id !== 'string' || !id) throw new Error('VirusTotal did not return an analysis ID.');
+  let unavailableError;
   for (let poll = 0; poll < maxPolls; poll++) {
     await wait(30_000);
-    const analysis = await request(`${API}/analyses/${encodeURIComponent(id)}`);
+    let analysis;
+    try {
+      analysis = await request(`${API}/analyses/${encodeURIComponent(id)}`);
+    } catch (error) {
+      // A newly accepted upload may not be visible to the analysis API yet.
+      // Retry only this read, within the existing polling budget; never re-upload.
+      if (error instanceof VirusTotalRequestError
+          && (error.status === 404 || (error.status === 400 && error.code === 'NotAvailableYet'))) {
+        unavailableError = error;
+        continue;
+      }
+      throw error;
+    }
+    unavailableError = undefined;
     const status = analysis.data?.attributes?.status;
     if (status === 'completed') {
       if (analysis.meta?.file_info?.sha256 !== sha256) throw new Error('VirusTotal analysis hash does not match the installer.');
       return { name: path.basename(file), sha256, url: `https://www.virustotal.com/gui/file/${sha256}` };
     }
     if (!['queued', 'in-progress'].includes(status)) throw new Error('VirusTotal returned an unexpected analysis status.');
+  }
+  if (unavailableError) {
+    throw new Error(`VirusTotal accepted the installer upload, but its analysis remained unavailable within the polling limit (HTTP ${unavailableError.status}${unavailableError.code ? `, ${unavailableError.code}` : ''}). The release was not marked as scanned. Rerun later.`);
   }
   throw new Error('VirusTotal analysis is still pending after 10 minutes. Rerun the workflow later.');
 }

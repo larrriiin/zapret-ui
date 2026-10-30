@@ -80,6 +80,72 @@ test('large installers use the dedicated upload URL', async t => {
   assert.equal(calls[1], 'https://www.virustotal.com/upload/one-use');
 });
 
+test('new analysis can be temporarily unavailable without uploading the installer again', async t => {
+  const file = path.join(await temporary(t), 'setup.exe');
+  await writeFile(file, 'installer');
+  const statuses = [json({ error: { code: 'NotFoundError' } }, 404),
+    json({ error: { code: 'NotAvailableYet' } }, 400),
+    json({ data: { attributes: { status: 'queued' } } }), json(completed(hash('installer')))];
+  let uploads = 0;
+  let polls = 0;
+  const waits = [];
+  const client = createClient('secret', { wait: async () => {}, fetchImpl: async (_, options) => {
+    if (options.method === 'POST') {
+      uploads++;
+      return json({ data: { id: 'new-analysis' } });
+    }
+    return statuses[polls++];
+  } });
+  const report = await scanInstaller(file, client, { wait: async ms => waits.push(ms), maxPolls: 4 });
+  assert.equal(report.sha256, hash('installer'));
+  assert.equal(uploads, 1);
+  assert.equal(polls, 4);
+  assert.deepEqual(waits, [30000, 30000, 30000, 30000]);
+});
+
+test('persistent missing analyses fail within the polling budget with an accurate diagnostic', async t => {
+  const file = path.join(await temporary(t), 'setup.exe');
+  await writeFile(file, 'installer');
+  let uploads = 0;
+  let polls = 0;
+  const client = createClient('secret', { wait: async () => {}, fetchImpl: async (_, options) => {
+    if (options.method === 'POST') {
+      uploads++;
+      return json({ data: { id: 'missing' } });
+    }
+    polls++;
+    return json({ error: { code: 'NotFoundError' } }, 404);
+  } });
+  await assert.rejects(scanInstaller(file, client, { wait: async () => {}, maxPolls: 3 }),
+    /accepted.*analysis remained unavailable.*HTTP 404, NotFoundError/);
+  assert.equal(uploads, 1);
+  assert.equal(polls, 3);
+});
+
+test('upload errors and permanent analysis errors fail immediately without exposing API response details', async t => {
+  const file = path.join(await temporary(t), 'setup.exe');
+  await writeFile(file, 'installer');
+  for (const [stage, status, code] of [['upload', 404, 'NotFoundError'],
+    ['analysis', 401, 'WrongCredentialsError'], ['analysis', 403, 'ForbiddenError'],
+    ['analysis', 400, 'InvalidArgumentError'], ['analysis', 400, 'secret-response']]) {
+    let calls = 0;
+    const client = createClient('secret', { wait: async () => {}, fetchImpl: async (_, options) => {
+      calls++;
+      if (stage === 'analysis' && options.method === 'POST') return json({ data: { id: 'id' } });
+      return json({ error: { code, message: 'secret-response https://www.virustotal.com/upload/private-token' } }, status);
+    } });
+    await assert.rejects(scanInstaller(file, client, { wait: async () => {} }), error => {
+      assert.equal(error.status, status);
+      assert.match(error.message, new RegExp(`${stage === 'upload' ? 'installer upload' : 'analysis lookup'} failed`));
+      assert.ok(!error.message.includes('secret'));
+      assert.ok(!error.message.includes('private-token'));
+      if (status === 404) assert.ok(!error.message.includes('API key'));
+      return true;
+    });
+    assert.equal(calls, stage === 'upload' ? 1 : 2);
+  }
+});
+
 test('release integration scans exact bundles, checks published digests, then edits notes once', async t => {
   const dir = await temporary(t);
   const assets = [];
@@ -112,6 +178,12 @@ test('release integration scans exact bundles, checks published digests, then ed
   edits = [];
   assets[0].digest = `sha256:${hash('different release asset')}`;
   await assert.rejects(scanRelease(options), /does not match/);
+  assert.equal(edits.length, 0);
+  // A permanently missing analysis must never publish a successful scan section.
+  options.scanOptions.maxPolls = 2;
+  options.clientOptions.fetchImpl = async (_, options) => options.method === 'POST'
+    ? json({ data: { id: 'missing' } }) : json({ error: { code: 'NotFoundError' } }, 404);
+  await assert.rejects(scanRelease(options), /analysis remained unavailable/);
   assert.equal(edits.length, 0);
 });
 
