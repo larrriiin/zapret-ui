@@ -184,7 +184,7 @@ function render() {
       const icon = document.createElement('span'); icon.className = 'material-symbols-outlined'; icon.setAttribute('aria-hidden', 'true'); icon.textContent = 'language';
       const name = document.createElement('span'); name.className = 'warp-rule-name'; name.textContent = domain;
       const actions = document.createElement('div'); actions.className = 'warp-card-actions';
-      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'warp-icon-button'; remove.title = t('warp_sites_remove'); remove.setAttribute('aria-label', `${t('warp_sites_remove')}: ${domain}`);
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'ui-icon-button'; remove.title = t('warp_sites_remove'); remove.setAttribute('aria-label', `${t('warp_sites_remove')}: ${domain}`);
       remove.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">close</span>'; remove.disabled = locked;
       remove.addEventListener('click', () => act('save_warp_sites', { domains: siteDomains().filter(item => item !== domain) }));
       actions.append(remove); row.append(icon, name, actions); return row;
@@ -208,9 +208,9 @@ function render() {
       const icon = document.createElement('span'); icon.className = 'material-symbols-outlined'; icon.setAttribute('aria-hidden', 'true'); icon.textContent = 'description';
       const name = document.createElement('span'); name.className = 'warp-rule-name'; name.textContent = path.split(/[\\/]/).pop();
       const actions = document.createElement('div'); actions.className = 'warp-card-actions';
-      const details = document.createElement('button'); details.type = 'button'; details.className = 'warp-icon-button'; details.title = t('warp_apps_path'); details.setAttribute('aria-label', `${t('warp_apps_path')}: ${name.textContent}`);
+      const details = document.createElement('button'); details.type = 'button'; details.className = 'ui-icon-button'; details.title = t('warp_apps_path'); details.setAttribute('aria-label', `${t('warp_apps_path')}: ${name.textContent}`);
       details.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">info</span>'; details.addEventListener('click', () => openWarpInfo('path', path));
-      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'warp-icon-button'; remove.title = t('warp_apps_remove'); remove.setAttribute('aria-label', `${t('warp_apps_remove')}: ${name.textContent}`);
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'ui-icon-button'; remove.title = t('warp_apps_remove'); remove.setAttribute('aria-label', `${t('warp_apps_remove')}: ${name.textContent}`);
       remove.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">close</span>'; remove.disabled = locked;
       remove.addEventListener('click', () => act('save_warp_applications', { paths: apps.paths.filter(item => item !== path) }));
       actions.append(details, remove); row.append(icon, name, actions); return row;
@@ -225,8 +225,6 @@ function render() {
     node.dataset.state = state;
     const detail = error ? errorText(error) : rule?.error;
     node.textContent = `${t('warp_rule_count', { count })} · ${t(`warp_rule_${state}`)}${detail ? ` — ${detail}` : ''}`;
-    $(`warp-${kind}-clear`).hidden = !rule?.enabled || (rulesVerified && Boolean(rule?.runtime_active)) || routingOperation === kind;
-    $(`warp-${kind}-clear`).disabled = locked;
     $(`warp-${kind}`).dataset.state = state;
   }
   const preferences = s?.automation || {};
@@ -425,7 +423,7 @@ export function initWarp() {
   zapretHeader = document.createElement('header');
   zapretHeader.className = 'provider-heading';
   zapretHeader.hidden = true;
-  zapretHeader.innerHTML = '<span class="material-symbols-outlined zapret-provider-icon" aria-hidden="true">tune</span><div><h3>ZAPRET</h3><p data-i18n="warp_zapret_subtitle"></p></div>';
+  zapretHeader.innerHTML = '<span class="material-symbols-outlined zapret-provider-icon" aria-hidden="true">tune</span><div><h3 class="provider-title-row"><span>ZAPRET</span></h3><p data-i18n="warp_zapret_subtitle"></p></div>';
   zapret.prepend(zapretHeader);
   const fragment = document.createElement('template');
   fragment.innerHTML = markup;
@@ -515,8 +513,6 @@ export function initWarp() {
     if (confirmed && !await showConfirm(t(leavingTunnel ? 'warp_confirm_mode_change' : 'warp_mode_rules_confirm'), t('warp_mode'))) { render(); return; }
     act('set_warp_mode', { mode, confirmed });
   });
-  $('warp-sites-clear').addEventListener('click', () => act('set_warp_sites', { domains: snapshot.sites.domains, enabled: false }));
-  $('warp-apps-clear').addEventListener('click', () => act('set_warp_applications', { paths: snapshot.applications.paths, enabled: false }));
   $('warp-view-traffic').addEventListener('click', openWarpTraffic);
   $('warp-auto-restore').addEventListener('click', () => act('set_warp_automation', { preferences: {
     restore_rules: !snapshot?.automation?.restore_rules,

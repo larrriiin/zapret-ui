@@ -35,7 +35,7 @@ pub struct ApplicationStatus {
     #[serde(skip)]
     pub(crate) connections: Vec<super::WarpConnection>,
 }
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 struct Preferences {
     paths: Vec<String>,
     #[serde(default)]
@@ -220,6 +220,21 @@ pub(super) fn save_list(paths: Vec<String>) -> Result<()> {
     Ok(())
 }
 pub fn configure(paths: Vec<String>, enabled: bool, port: Option<u16>) -> Result<()> {
+    configure_inner(paths, enabled, port, true)
+}
+pub(super) fn configure_runtime(paths: Vec<String>, port: u16) -> Result<()> {
+    disable()?;
+    if paths.is_empty() {
+        return Ok(());
+    }
+    configure_inner(paths, true, Some(port), false)
+}
+fn configure_inner(
+    paths: Vec<String>,
+    enabled: bool,
+    port: Option<u16>,
+    persist: bool,
+) -> Result<()> {
     let mut guard = APPLICATIONS.lock().map_err(error)?;
     let runtime = guard
         .as_mut()
@@ -250,26 +265,26 @@ pub fn configure(paths: Vec<String>, enabled: bool, port: Option<u16>) -> Result
         return Err(WarpError::new("warp_apps_stop_first", ""));
     }
     let preferences = Preferences { paths, enabled };
-    super::sites::persist_json(
-        &runtime.directory.join("warp-applications.json"),
-        &preferences,
-    )?;
-    runtime.preferences = preferences;
+    if persist {
+        super::sites::persist_json(
+            &runtime.directory.join("warp-applications.json"),
+            &preferences,
+        )?;
+        runtime.preferences = preferences.clone();
+    }
     runtime.error = None;
     #[cfg(windows)]
     if enabled {
         let dll = crate::find_binaries_dir().join("bin/WinDivert.dll");
         runtime.engine = Some(
-            tcp::Engine::start(runtime.preferences.paths.clone(), port.unwrap(), &dll).map_err(
-                |e| {
-                    runtime.error = Some(e.to_string());
-                    if e.raw_os_error() == Some(5) {
-                        WarpError::new("warp_apps_admin", "")
-                    } else {
-                        error(e)
-                    }
-                },
-            )?,
+            tcp::Engine::start(preferences.paths.clone(), port.unwrap(), &dll).map_err(|e| {
+                runtime.error = Some(e.to_string());
+                if e.raw_os_error() == Some(5) {
+                    WarpError::new("warp_apps_admin", "")
+                } else {
+                    error(e)
+                }
+            })?,
         );
     }
     #[cfg(not(windows))]

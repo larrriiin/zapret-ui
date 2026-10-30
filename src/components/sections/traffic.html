@@ -1,4 +1,4 @@
-<section id="section-traffic" class="hidden h-full overflow-y-auto px-6 py-8 pb-24">
+<section id="section-traffic" class="hidden h-full overflow-y-auto px-6 pb-24">
     <div class="max-w-6xl mx-auto space-y-5">
         <div class="flex items-start justify-between gap-6">
             <div>
@@ -10,7 +10,7 @@
                 <p class="text-xs text-on-surface-variant/70 max-w-2xl leading-relaxed" data-i18n="traffic_desc">Real-time network activity without storing packet contents.</p>
             </div>
             <button id="traffic-toggle-btn" type="button"
-                class="shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl border border-secondary/25 bg-secondary/10 text-secondary hover:bg-secondary/15 transition-all text-[10px] font-black uppercase tracking-widest">
+                class="ui-button shrink-0 ui-button-sm">
                 <span id="traffic-toggle-icon" class="material-symbols-outlined text-base">play_arrow</span>
                 <span id="traffic-toggle-text" data-i18n="traffic_start">Start monitoring</span>
             </button>
@@ -23,35 +23,35 @@
         </div>
 
         <div class="flex items-center justify-between gap-4 flex-wrap">
-            <div class="traffic-mode-controls inline-flex flex-wrap rounded-xl border border-outline-variant/20 bg-surface-container-high/30 p-1">
-                <button id="traffic-mode-zapret" type="button" data-mode="zapret"
-                    class="traffic-mode-btn px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all text-on-surface-variant/50 hover:text-on-surface">
-                    <span data-i18n="traffic_mode_zapret">Zapret rules</span>
-                </button>
+            <div class="traffic-mode-controls inline-flex flex-wrap gap-1">
                 <button id="traffic-mode-all" type="button" data-mode="all"
-                    class="traffic-mode-btn px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all bg-primary/15 text-primary">
+                    class="ui-tab traffic-mode-btn">
                     <span data-i18n="traffic_mode_all">All traffic</span>
                 </button>
-                <button type="button" data-mode="warp" class="traffic-mode-btn" data-i18n="traffic_route_warp">WARP</button>
-                <button type="button" data-mode="tg_proxy" class="traffic-mode-btn" data-i18n="traffic_route_tg">TG Proxy</button>
-                <button type="button" data-mode="direct" class="traffic-mode-btn" data-i18n="traffic_route_direct">Direct</button>
-                <button type="button" data-mode="unknown" class="traffic-mode-btn" data-i18n="traffic_route_unknown">Unknown</button>
+                <button id="traffic-mode-zapret" type="button" data-mode="zapret"
+                    class="ui-tab traffic-mode-btn">
+                    <span data-i18n="traffic_mode_zapret">Zapret rules</span>
+                </button>
+                <button type="button" data-mode="warp" class="ui-tab traffic-mode-btn" data-i18n="traffic_route_warp">WARP</button>
+                <button type="button" data-mode="tg_proxy" class="ui-tab traffic-mode-btn" data-i18n="traffic_route_tg">TG Proxy</button>
+                <button type="button" data-mode="direct" class="ui-tab traffic-mode-btn" data-i18n="traffic_route_direct">Direct</button>
+                <button type="button" data-mode="unknown" class="ui-tab traffic-mode-btn" data-i18n="traffic_route_unknown">Unknown</button>
             </div>
             <div class="traffic-visibility-controls flex items-center gap-3 ml-auto">
                 <label class="flex items-center gap-2 cursor-pointer text-[10px] font-bold text-on-surface-variant/60 whitespace-nowrap">
                     <input id="traffic-hide-system" type="checkbox" checked
-                        class="rounded border-outline-variant/30 bg-surface-container-high text-primary focus:ring-primary/30">
+                        class="ui-check">
                     <span data-i18n="traffic_hide_system">Hide system processes</span>
                 </label>
                 <label class="flex items-center gap-2 cursor-pointer text-[10px] font-bold text-on-surface-variant whitespace-nowrap">
-                    <input id="traffic-hide-local" type="checkbox" checked class="rounded border-outline-variant/30 bg-surface-container-high text-primary focus:ring-primary/30">
+                    <input id="traffic-hide-local" type="checkbox" checked class="ui-check">
                     <span data-i18n="traffic_hide_local">Hide local traffic</span>
                 </label>
                 <label class="relative w-72 max-w-[36vw]">
                     <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-sm text-on-surface-variant/40">search</span>
                     <input id="traffic-search" type="search" autocomplete="off" spellcheck="false"
                         data-i18n="traffic_search" placeholder="Process, IP or port"
-                        class="w-full rounded-xl border border-outline-variant/20 bg-surface-container-high/30 pl-9 pr-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/35 focus:border-primary/40 focus:ring-0">
+                        class="ui-field ui-field-search w-full">
                 </label>
             </div>
         </div>
@@ -101,10 +101,10 @@
         <div class="rounded-2xl border border-outline-variant/15 bg-surface-container-high/20 overflow-hidden">
             <div class="flex items-center gap-1 px-3 py-2 border-b border-outline-variant/10">
                 <button id="traffic-tab-connections" type="button" data-tab="connections"
-                    class="traffic-tab-btn px-3 py-2 rounded-lg bg-primary/10 text-primary text-[9px] font-black uppercase tracking-widest transition-colors"
+                    class="ui-tab traffic-tab-btn"
                     data-i18n="traffic_connections">Connections</button>
                 <button id="traffic-tab-log" type="button" data-tab="log"
-                    class="traffic-tab-btn px-3 py-2 rounded-lg text-on-surface-variant/45 hover:text-on-surface text-[9px] font-black uppercase tracking-widest transition-colors"
+                    class="ui-tab traffic-tab-btn"
                     data-i18n="traffic_log">Connection log</button>
                 <span class="ml-auto text-[9px] text-on-surface-variant/35" data-i18n="traffic_focus_hint">Click a process or IP to track it</span>
             </div>

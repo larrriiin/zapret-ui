@@ -1,5 +1,5 @@
 <!-- Settings Section -->
-<div id="section-settings" class="hidden p-8 max-w-[1000px] mx-auto pb-24">
+<div id="section-settings" class="hidden px-8 max-w-[1000px] mx-auto pb-24">
 
     <!-- Header -->
     <div class="flex flex-wrap items-center justify-between gap-3">
@@ -16,28 +16,28 @@
         <h3 class="font-headline text-[11px] font-bold uppercase tracking-[0.2em] text-primary/70" data-i18n="settings_section_interface">Interface</h3>
 
         <!-- Оформление -->
-        <fieldset class="theme-settings glass-panel rounded-2xl border border-outline-variant/10 p-6">
+        <fieldset class="ui-panel theme-settings p-6">
             <legend class="sr-only" data-i18n="theme_title">Appearance</legend>
             <h4 class="text-sm text-on-surface font-headline font-bold" aria-hidden="true" data-i18n="theme_title">Appearance</h4>
             <p class="theme-description" data-i18n="theme_description">Changes apply immediately and are saved automatically</p>
             <div class="theme-options">
                 <label class="theme-choice">
-                    <input type="radio" name="theme-pref" value="zapret">
+                    <input type="radio" name="theme-pref" value="zapret" class="ui-check">
                     <span class="theme-preview" data-preview="zapret" aria-hidden="true"><span class="preview-sidebar"></span><span class="preview-content"><span class="preview-line"></span><span class="preview-button"></span><span class="preview-line short"></span></span></span>
                     <span class="theme-choice-label" data-i18n="theme_zapret">Zapret</span>
                 </label>
                 <label class="theme-choice">
-                    <input type="radio" name="theme-pref" value="graphite">
+                    <input type="radio" name="theme-pref" value="graphite" class="ui-check">
                     <span class="theme-preview" data-preview="graphite" aria-hidden="true"><span class="preview-sidebar"></span><span class="preview-content"><span class="preview-line"></span><span class="preview-button"></span><span class="preview-line short"></span></span></span>
                     <span class="theme-choice-label" data-i18n="theme_graphite">Graphite</span>
                 </label>
                 <label class="theme-choice">
-                    <input type="radio" name="theme-pref" value="light">
+                    <input type="radio" name="theme-pref" value="light" class="ui-check">
                     <span class="theme-preview" data-preview="light" aria-hidden="true"><span class="preview-sidebar"></span><span class="preview-content"><span class="preview-line"></span><span class="preview-button"></span><span class="preview-line short"></span></span></span>
                     <span class="theme-choice-label" data-i18n="theme_light">Light</span>
                 </label>
                 <label class="theme-choice">
-                    <input type="radio" name="theme-pref" value="system">
+                    <input type="radio" name="theme-pref" value="system" class="ui-check">
                     <span class="theme-preview" data-preview="system" aria-hidden="true"><span class="preview-sidebar"></span><span class="preview-content"><span class="preview-line"></span><span class="preview-button"></span><span class="preview-line short"></span></span></span>
                     <span class="theme-choice-label" data-i18n="theme_system">System</span>
                 </label>
@@ -51,15 +51,15 @@
         </fieldset>
 
         <!-- Язык интерфейса -->
-        <div class="glass-panel rounded-2xl border border-outline-variant/10 p-6 space-y-3">
+        <div class="ui-panel p-6 space-y-3">
             <div class="text-sm text-on-surface font-headline font-bold" data-i18n="language_label">Language</div>
             <div class="flex flex-wrap items-center gap-6">
                 <label class="flex items-center gap-2.5 text-xs text-on-surface cursor-pointer px-3 py-2 rounded-xl border border-outline-variant/10 hover:border-primary/30 hover:bg-primary/5 transition-all">
-                    <input type="radio" name="lang-pref" value="ru" class="border-outline-variant/30 bg-surface-container-highest text-primary h-4 w-4">
+                    <input type="radio" name="lang-pref" value="ru" class="ui-check">
                     <span class="font-medium">Русский (RU)</span>
                 </label>
                 <label class="flex items-center gap-2.5 text-xs text-on-surface cursor-pointer px-3 py-2 rounded-xl border border-outline-variant/10 hover:border-primary/30 hover:bg-primary/5 transition-all">
-                    <input type="radio" name="lang-pref" value="en" class="border-outline-variant/30 bg-surface-container-highest text-primary h-4 w-4">
+                    <input type="radio" name="lang-pref" value="en" class="ui-check">
                     <span class="font-medium">English (EN)</span>
                 </label>
             </div>
@@ -71,32 +71,32 @@
         <h3 class="font-headline text-[11px] font-bold uppercase tracking-[0.2em] text-primary/70" data-i18n="settings_section_behavior">Application behavior</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <!-- Autostart -->
-            <div class="glass-panel rounded-2xl border border-outline-variant/10 p-6 flex flex-col justify-between">
+            <div class="ui-panel p-6 flex flex-col justify-between">
                 <label class="flex items-start justify-between gap-3 cursor-pointer">
                     <div class="flex-1">
                         <div class="text-sm text-on-surface font-headline font-bold" data-i18n="autostart_label">Launch on Windows startup</div>
                         <div class="text-xs text-on-surface-variant mt-1" data-i18n="autostart_hint">Start minimized to tray</div>
                     </div>
-                    <button id="autostart-toggle" type="button" class="toggle-btn is-off flex-shrink-0 relative w-12 h-6 rounded-full transition-colors" aria-label="Autostart">
-                        <span class="toggle-thumb absolute top-0.5 left-0.5 w-5 h-5 bg-primary rounded-full shadow"></span>
+                    <button id="autostart-toggle" type="button" class="ui-switch toggle-btn is-off flex-shrink-0" aria-label="Autostart">
+
                     </button>
                 </label>
             </div>
 
             <!-- Close button behavior -->
-            <div class="glass-panel rounded-2xl border border-outline-variant/10 p-6 space-y-3">
+            <div class="ui-panel p-6 space-y-3">
                 <div class="text-sm text-on-surface font-headline font-bold" data-i18n="close_pref_label">When the close button is clicked</div>
                 <div class="flex flex-col gap-1.5">
                     <label class="flex items-center gap-2.5 text-xs text-on-surface cursor-pointer px-2 py-1.5 rounded-lg hover:bg-primary/10 transition-colors">
-                        <input type="radio" name="close-pref" value="ask" class="border-outline-variant/30 bg-surface-container-highest text-primary h-4 w-4">
+                        <input type="radio" name="close-pref" value="ask" class="ui-check">
                         <span data-i18n="close_pref_ask">Ask every time</span>
                     </label>
                     <label class="flex items-center gap-2.5 text-xs text-on-surface cursor-pointer px-2 py-1.5 rounded-lg hover:bg-primary/10 transition-colors">
-                        <input type="radio" name="close-pref" value="tray" class="border-outline-variant/30 bg-surface-container-highest text-primary h-4 w-4">
+                        <input type="radio" name="close-pref" value="tray" class="ui-check">
                         <span data-i18n="close_pref_tray">Minimize to tray</span>
                     </label>
                     <label class="flex items-center gap-2.5 text-xs text-on-surface cursor-pointer px-2 py-1.5 rounded-lg hover:bg-primary/10 transition-colors">
-                        <input type="radio" name="close-pref" value="exit" class="border-outline-variant/30 bg-surface-container-highest text-primary h-4 w-4">
+                        <input type="radio" name="close-pref" value="exit" class="ui-check">
                         <span data-i18n="close_pref_exit">Exit application</span>
                     </label>
                 </div>
@@ -109,7 +109,7 @@
         <h3 id="settings-modules-title" class="font-headline text-[11px] font-bold uppercase tracking-[0.2em] text-primary/70" data-i18n="settings_modules">Modules</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <!-- Cloudflare WARP -->
-            <section id="warp-settings-panel" class="glass-panel rounded-2xl border border-outline-variant/10 p-6 flex flex-col justify-between min-h-[180px]" aria-labelledby="warp-settings-title">
+            <section id="warp-settings-panel" class="ui-panel p-6 flex flex-col justify-between min-h-[180px]" aria-labelledby="warp-settings-title">
                 <div>
                     <div class="flex items-start gap-4">
                         <span class="material-symbols-outlined warp-cloud text-3xl shrink-0" aria-hidden="true">cloud</span>
@@ -123,16 +123,16 @@
                 </div>
                 <div class="mt-auto pt-6">
                     <div class="module-actions flex flex-wrap items-center gap-2">
-                        <button id="warp-install" type="button" class="provider-button" disabled data-i18n="warp_install"></button>
-                        <button id="warp-settings-refresh" type="button" class="provider-button" data-i18n="check_status">Check status</button>
-                        <button id="warp-settings-remove" type="button" class="provider-button" data-i18n="warp_remove_module" hidden>Remove module</button>
+                        <button id="warp-install" type="button" class="ui-button" disabled data-i18n="warp_install"></button>
+                        <button id="warp-settings-refresh" type="button" class="ui-button" data-i18n="check_status">Check status</button>
+                        <button id="warp-settings-remove" type="button" class="ui-button" data-i18n="warp_remove_module" hidden>Remove module</button>
                     </div>
                     <p id="warp-install-result" class="module-message" role="status"></p>
                 </div>
             </section>
 
             <!-- TG WS Proxy -->
-            <section class="glass-panel rounded-2xl border border-outline-variant/10 p-6 flex flex-col justify-between min-h-[180px]" aria-labelledby="telegram-settings-title">
+            <section class="ui-panel p-6 flex flex-col justify-between min-h-[180px]" aria-labelledby="telegram-settings-title">
                 <div>
                     <div class="flex items-start gap-4">
                         <span class="telegram-icon text-primary text-3xl shrink-0" aria-hidden="true"></span>
@@ -145,11 +145,11 @@
                 </div>
                 <div class="mt-auto pt-6">
                     <div class="module-actions flex flex-wrap items-center gap-2">
-                        <button id="telegram-install" class="provider-button" type="button" data-i18n="tg_install" disabled></button>
-                        <button id="telegram-settings-status-btn" class="provider-button" type="button" data-i18n="check_status" hidden>Check status</button>
-                        <button id="telegram-remove" class="provider-button" type="button" data-i18n="tg_remove" hidden></button>
+                        <button id="telegram-install" class="ui-button" type="button" data-i18n="tg_install" disabled></button>
+                        <button id="telegram-settings-status-btn" class="ui-button" type="button" data-i18n="check_status" hidden>Check status</button>
+                        <button id="telegram-remove" class="ui-button" type="button" data-i18n="tg_remove" hidden></button>
                     </div>
-                    <progress id="telegram-download-progress" class="module-progress" max="100" value="0" hidden aria-label="Telegram"></progress>
+                    <progress id="telegram-download-progress" class="ui-progress module-progress" max="100" value="0" hidden aria-label="Telegram"></progress>
                     <p id="telegram-settings-message" class="module-message" role="status"></p>
                 </div>
             </section>
@@ -161,18 +161,18 @@
         <h3 class="font-headline text-[11px] font-bold uppercase tracking-[0.2em] text-primary/70" data-i18n="settings_section_recovery">Recovery</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <!-- Setup restart -->
-            <div class="glass-panel rounded-2xl border border-outline-variant/10 p-6 flex flex-col justify-between min-h-[180px]">
+            <div class="ui-panel p-6 flex flex-col justify-between min-h-[180px]">
                 <div>
                     <h4 class="text-sm text-on-surface font-headline font-bold" data-i18n="setup_restart">Set up again</h4>
                     <p class="text-xs text-on-surface-variant mt-1" data-i18n="setup_restart_hint">Run the initial setup wizard again</p>
                 </div>
                 <div class="mt-auto pt-6">
-                    <button id="setup-restart-btn" class="provider-button" type="button" data-i18n="setup_open">Open wizard</button>
+                    <button id="setup-restart-btn" class="ui-button" type="button" data-i18n="setup_open">Open wizard</button>
                 </div>
             </div>
 
             <!-- Core rollback -->
-            <div id="core-rollback-panel" class="glass-panel rounded-2xl border border-outline-variant/10 p-6 flex flex-col justify-between min-h-[180px]">
+            <div id="core-rollback-panel" class="ui-panel p-6 flex flex-col justify-between min-h-[180px]">
                 <div>
                     <h4 class="text-sm text-on-surface font-headline font-bold" data-i18n="core_rollback_title">Откат ядра ZAPRET</h4>
                     <p class="text-xs text-on-surface-variant mt-1" data-i18n="core_rollback_desc">Return to the previous version of the application</p>
@@ -183,7 +183,7 @@
                 </div>
                 <div class="mt-auto pt-6">
                     <button id="core-rollback-btn" type="button" disabled
-                        class="provider-button disabled:opacity-40">
+                        class="ui-button disabled:opacity-40">
                         <span data-i18n="core_rollback_unavailable">Rollback unavailable</span>
                     </button>
                 </div>
@@ -192,14 +192,14 @@
     </section>
 
     <!-- Modal Dialogs for WARP Remove and TG WS Proxy Status -->
-    <dialog id="warp-remove-dialog" class="warp-status-dialog" aria-labelledby="warp-remove-modal-title">
+    <dialog id="warp-remove-dialog" class="ui-dialog" aria-labelledby="warp-remove-modal-title">
         <header class="flex items-center justify-between gap-4 mb-4">
             <div class="flex items-center gap-3 min-w-0">
                 <span class="material-symbols-outlined text-primary text-2xl" aria-hidden="true">delete</span>
                 <h2 id="warp-remove-modal-title" class="font-headline text-lg font-bold text-on-surface" data-i18n="warp_remove_modal_title">Uninstall Cloudflare WARP</h2>
             </div>
             <button id="warp-remove-close" type="button"
-                class="w-9 h-9 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-white/5 transition-colors flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70"
+                class="ui-icon-button"
                 data-i18n="close" data-i18n-attr="aria-label" aria-label="Close">
                 <span class="material-symbols-outlined text-xl" aria-hidden="true">close</span>
             </button>
@@ -223,25 +223,25 @@
             </ol>
         </div>
         <div class="mt-6 flex justify-end">
-            <button id="warp-remove-done" type="button" class="provider-button" data-i18n="close">Close</button>
+            <button id="warp-remove-done" type="button" class="ui-button" data-i18n="close">Close</button>
         </div>
     </dialog>
 
-    <dialog id="telegram-status-dialog" class="warp-status-dialog" aria-labelledby="telegram-status-modal-title">
+    <dialog id="telegram-status-dialog" class="ui-dialog" aria-labelledby="telegram-status-modal-title">
         <header class="flex items-center justify-between gap-4 mb-5">
             <div class="flex items-center gap-3 min-w-0">
                 <span class="material-symbols-outlined text-secondary text-2xl" aria-hidden="true">query_stats</span>
                 <h2 id="telegram-status-modal-title" class="font-headline text-lg font-bold text-on-surface" data-i18n="tg_status_title">TG WS Proxy Status</h2>
             </div>
             <button id="telegram-status-close" type="button"
-                class="w-9 h-9 rounded-xl text-on-surface-variant hover:text-on-surface hover:bg-white/5 transition-colors flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary/70"
+                class="ui-icon-button"
                 data-i18n="close" data-i18n-attr="aria-label" aria-label="Close">
                 <span class="material-symbols-outlined text-xl" aria-hidden="true">close</span>
             </button>
         </header>
         <div id="telegram-status-report" class="space-y-3" role="status" aria-live="polite"></div>
         <form method="dialog" class="mt-6 flex justify-end">
-            <button class="provider-button" data-i18n="close">Close</button>
+            <button class="ui-button" data-i18n="close">Close</button>
         </form>
     </dialog>
 

@@ -29,6 +29,7 @@ use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri_plugin_notification::NotificationExt;
 
+mod automations;
 mod core;
 mod hosts;
 mod ipset;
@@ -72,6 +73,7 @@ struct AppState {
     warp_status_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
     warp_toggle_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
     warp_tray_busy: AtomicBool,
+    warp_tray_connected: AtomicBool,
     active_strategy: Mutex<Option<String>>,
     test_process_pid: Mutex<Option<u32>>,
     status_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
@@ -3792,41 +3794,163 @@ async fn run_tests(
 }
 
 #[tauri::command]
-fn update_tray_translations(
+async fn update_tray_translations(
     translations: TrayTranslations,
-    state: State<'_, AppState>,
     app: tauri::AppHandle,
-) {
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || apply_tray_translations(&app, translations))
+        .await.map_err(|error| error.to_string())
+}
+
+fn apply_tray_translations(app: &tauri::AppHandle, translations: TrayTranslations) {
+    let state = app.state::<AppState>();
     {
         let mut lock = state.translations.lock_unpoisoned();
         *lock = Some(translations.clone());
     }
 
     // Update labels that don't depend on status
-    if let Some(mi) = state.quit_item.lock_unpoisoned().as_ref() {
+    let quit_item = state.quit_item.lock_unpoisoned().clone();
+    if let Some(mi) = quit_item {
         let _ = mi.set_text(&translations.exit);
     }
-    if let Some(mi) = state.show_item.lock_unpoisoned().as_ref() {
+    let show_item = state.show_item.lock_unpoisoned().clone();
+    if let Some(mi) = show_item {
         let _ = mi.set_text(&translations.show);
     }
-    if let Some(mi) = state.updates_item.lock_unpoisoned().as_ref() {
+    let updates_item = state.updates_item.lock_unpoisoned().clone();
+    if let Some(mi) = updates_item {
         let _ = mi.set_text(&translations.updates);
     }
-    if let Some(mi) = state.strategies_submenu.lock_unpoisoned().as_ref() {
+    let strategies_submenu = state.strategies_submenu.lock_unpoisoned().clone();
+    if let Some(mi) = strategies_submenu {
         let _ = mi.set_text(&translations.change_strategy);
     }
 
-    refresh_tray_menu(&app);
+    refresh_tray_menu(app);
+}
+
+
+fn run_tray_action(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
+    match id {
+        "quit" => {
+            graceful_exit(app);
+        }
+        "show" => {
+            if let Some(window) = app
+                .get_webview_window("setup")
+                .or_else(|| app.get_webview_window("main"))
+            {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }
+        "toggle" => {
+            let state = app.state::<AppState>();
+            let status = get_zapret_status(state.clone());
+            if status.running {
+                stop_zapret(state)?;
+            } else {
+                let last = state.last_strategy.lock_unpoisoned().clone();
+                let available = get_strategies().unwrap_or_default();
+                let strategy = last
+                    .or(status.strategy)
+                    .or_else(|| available.first().cloned());
+                if let Some(s) = strategy {
+                    start_zapret(app.clone(), s, "service".to_string(), state)?;
+                }
+            }
+            refresh_tray_menu(app);
+        }
+        "warp_toggle" => refresh_warp_tray(app, true),
+        "updates" => {
+            request_updates_window(app);
+        }
+        id if id.starts_with("strat_") => {
+            let strategy = &id[6..];
+            let state = app.state::<AppState>();
+            start_zapret(
+                app.clone(),
+                strategy.to_string(),
+                "service".to_string(),
+                state,
+            )?;
+            refresh_tray_menu(app);
+        }
+        _ => return Err(format!("Unknown tray action: {id}")),
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn tray_action(app: tauri::AppHandle, action: String) -> Result<(), String> {
+    // Service/UAC waits and native menu dispatch must not occupy an async worker.
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = run_tray_action(&app, &action);
+        if result.is_ok() {
+            if let Some(window) = app.get_webview_window("tray-menu") { let _ = window.hide(); }
+        }
+        result
+    }).await.map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn tray_snapshot(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || tray_snapshot_blocking(&app))
+        .await.map_err(|error| error.to_string())
+}
+
+fn tray_snapshot_blocking(app: &tauri::AppHandle) -> serde_json::Value {
+    let state = app.state::<AppState>();
+    let item = |slot: &Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>| {
+        // Never hold a state lock while menu getters dispatch to the UI thread.
+        let native_item = slot.lock_unpoisoned().clone();
+        native_item.map(|i| serde_json::json!({
+            "text": i.text().unwrap_or_default(), "enabled": i.is_enabled().unwrap_or(false)
+        })).unwrap_or(serde_json::Value::Null)
+    };
+    let status = get_zapret_status(state.clone());
+    let strategy_name = status.strategy.clone().or_else(|| state.last_strategy.lock_unpoisoned().clone());
+    serde_json::json!({
+        "status": item(&state.status_item), "strategy": item(&state.strategy_item),
+        "toggle": item(&state.toggle_item), "warp_status": item(&state.warp_status_item),
+        "warp_toggle": item(&state.warp_toggle_item),
+        "zapret_active": status.running,
+        "strategy_name": strategy_name,
+        "warp_active": state.warp_tray_connected.load(Ordering::Acquire),
+        "warp_busy": state.warp_tray_busy.load(Ordering::Acquire),
+        "strategies": get_strategies().unwrap_or_default()
+    })
+}
+
+fn show_tray_popup(app: &tauri::AppHandle, point: tauri::PhysicalPosition<f64>) -> tauri::Result<()> {
+    let Some(window) = app.get_webview_window("tray-menu") else { return Ok(()) };
+    if window.is_visible()? { window.hide()?; return Ok(()) }
+    if let Some(monitor) = window.monitor_from_point(point.x, point.y)? {
+        let area = monitor.work_area();
+        let scale = monitor.scale_factor();
+        let width = (272.0 * scale) as u32;
+        let height = (264.0 * scale) as u32;
+        let width = width.min(area.size.width);
+        let height = height.min(area.size.height);
+        window.set_size(tauri::PhysicalSize::new(width, height))?;
+        let gap = (8.0 * scale) as i32;
+        let x = (point.x as i32 - width as i32).clamp(area.position.x, area.position.x + area.size.width as i32 - width as i32);
+        let y = (point.y as i32 - height as i32 - gap).clamp(area.position.y, area.position.y + area.size.height as i32 - height as i32);
+        window.set_position(tauri::PhysicalPosition::new(x, y))?;
+    }
+    window.emit("tray-opening", ())?;
+    // The frontend shows only after refreshing theme and labels, avoiding a stale frame.
+    Ok(())
 }
 
 fn refresh_tray_menu(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
     let status = get_zapret_status(state.clone());
-    let trans_lock = state.translations.lock_unpoisoned();
-    let trans = match trans_lock.as_ref() {
-        Some(t) => t,
-        None => return, // Wait until translations are loaded
-    };
+    // Native menu setters synchronously dispatch to the UI thread. Release the
+    // translations mutex first: UI callbacks also read/update translations.
+    let translations = state.translations.lock_unpoisoned().clone();
+    let Some(trans) = translations else { return };
     refresh_warp_tray(app, false);
 
     let status_mi = state.status_item.lock_unpoisoned().clone();
@@ -3908,6 +4032,10 @@ fn refresh_warp_tray(app: &tauri::AppHandle, toggle: bool) {
                 }
             }
         }
+        state.warp_tray_connected.store(
+            matches!(&result, Ok(status) if status.installed && status.connected && status.error.is_none()),
+            Ordering::Release,
+        );
         let (label, action, enabled) = match (&result, &trans) {
             (Ok(s), Some(t)) if s.error.is_none() => (
                 format!(
@@ -3942,7 +4070,8 @@ fn refresh_warp_tray(app: &tauri::AppHandle, toggle: bool) {
             }
             _ => ("WARP: ---".into(), "Connect WARP".into(), false),
         };
-        if let Some(mi) = state.warp_status_item.lock_unpoisoned().as_ref() {
+        let warp_status_item = state.warp_status_item.lock_unpoisoned().clone();
+    if let Some(mi) = warp_status_item {
             let _ = mi.set_text(label);
         }
         if let Some(mi) = item {
@@ -4140,6 +4269,7 @@ pub fn run() {
             warp_status_item: Mutex::new(None),
             warp_toggle_item: Mutex::new(None),
             warp_tray_busy: AtomicBool::new(false),
+            warp_tray_connected: AtomicBool::new(false),
             active_strategy: Mutex::new(None),
             test_process_pid: Mutex::new(None),
             status_item: Mutex::new(None),
@@ -4157,6 +4287,7 @@ pub fn run() {
             temp_process_child: Mutex::new(None),
             traffic_monitor: Arc::new(TrafficMonitor::default()),
         })
+        .manage(automations::Store::default())
         .setup(|app| {
             let notification_app = app.handle().clone();
             app.notification().on_action(move |event| {
@@ -4233,7 +4364,7 @@ pub fn run() {
                 *state.strategies_submenu.lock_unpoisoned() = Some(strategies_submenu.clone());
             }
 
-            let menu = MenuBuilder::new(app)
+            let _menu = MenuBuilder::new(app)
                 .item(&status_info)
                 .item(&strategy_info)
                 .separator()
@@ -4251,57 +4382,20 @@ pub fn run() {
             let tray = TrayIconBuilder::with_id("main-tray")
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip(app.config().product_name.as_deref().unwrap_or("ZAPRET UI"))
-                .menu(&menu)
-                .on_menu_event(move |app, event| match event.id.as_ref() {
-                    "quit" => {
-                        graceful_exit(app);
-                    }
-                    "show" => {
-                        if let Some(window) = app
-                            .get_webview_window("setup")
-                            .or_else(|| app.get_webview_window("main"))
-                        {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| {
+                    let app = app.clone();
+                    let action = event.id.as_ref().to_string();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        if let Err(error) = run_tray_action(&app, &action) {
+                            eprintln!("Tray action {action}: {error}");
                         }
-                    }
-                    "toggle" => {
-                        let state = app.state::<AppState>();
-                        let status = get_zapret_status(state.clone());
-                        if status.running {
-                            let _ = stop_zapret(state);
-                        } else {
-                            let last = state.last_strategy.lock_unpoisoned().clone();
-                            let available = get_strategies().unwrap_or_default();
-                            let strategy = last
-                                .or(status.strategy)
-                                .or_else(|| available.first().cloned());
-                            if let Some(s) = strategy {
-                                let _ = start_zapret(app.clone(), s, "service".to_string(), state);
-                            }
-                        }
-                        refresh_tray_menu(app);
-                    }
-                    "warp_toggle" => refresh_warp_tray(app, true),
-                    "updates" => {
-                        request_updates_window(app);
-                    }
-                    id if id.starts_with("strat_") => {
-                        let strategy = &id[6..];
-                        let state = app.state::<AppState>();
-                        let _ = start_zapret(
-                            app.clone(),
-                            strategy.to_string(),
-                            "service".to_string(),
-                            state,
-                        );
-                        refresh_tray_menu(app);
-                    }
-                    _ => {}
+                    });
                 })
                 .on_tray_icon_event(|tray, event| match event {
                     TrayIconEvent::Click {
                         button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
                         ..
                     } => {
                         let app = tray.app_handle();
@@ -4315,9 +4409,15 @@ pub fn run() {
                     }
                     TrayIconEvent::Click {
                         button: tauri::tray::MouseButton::Right,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        position,
                         ..
                     } => {
-                        refresh_tray_menu(tray.app_handle());
+                        let app = tray.app_handle().clone();
+                        tauri::async_runtime::spawn_blocking(move || refresh_tray_menu(&app));
+                        if let Err(error) = show_tray_popup(tray.app_handle(), position) {
+                            eprintln!("Tray popup: {error}");
+                        }
                     }
                     _ => {}
                 })
@@ -4343,6 +4443,14 @@ pub fn run() {
                 refresh_tray_menu(app.handle());
             }
 
+            tauri::WebviewWindowBuilder::new(app, "tray-menu", tauri::WebviewUrl::App("tray.html".into()))
+                .title("ZAPRET UI").inner_size(272.0, 264.0)
+                .visible(false).focused(false).decorations(false).resizable(false)
+                .maximizable(false).minimizable(false).skip_taskbar(true)
+                .always_on_top(true).shadow(true).build()?;
+
+            automations::start(app.handle().clone());
+
             // The Telegram Proxy preference belongs to the application lifecycle,
             // not to a particular Zapret service start. Run it in the background
             // so a slow or failed local proxy launch never delays the UI startup.
@@ -4356,6 +4464,14 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == "tray-menu" {
+                match event {
+                    tauri::WindowEvent::Focused(false) => { let _ = window.hide(); }
+                    tauri::WindowEvent::CloseRequested { api, .. } => { api.prevent_close(); let _ = window.hide(); }
+                    _ => {}
+                }
+                return;
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "setup" {
                     api.prevent_close();
@@ -4374,8 +4490,8 @@ pub fn run() {
 
                 // Показываем уведомление (один раз за сессию)
                 if !state.notification_shown.swap(true, Ordering::SeqCst) {
-                    let trans_lock = state.translations.lock_unpoisoned();
-                    let (title, body) = match trans_lock.as_ref() {
+                    let translations = state.translations.lock_unpoisoned().clone();
+                    let (title, body) = match translations.as_ref() {
                         Some(t) => (&t.minimized_title, &t.minimized_body),
                         None => (
                             &"Zapret minimized".to_string(),
@@ -4397,6 +4513,11 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            tray_action,
+            tray_snapshot,
+            automations::get_application_rules,
+            automations::save_application_rules,
+            automations::choose_rule_application,
             telegram::get_telegram_config,
             telegram::save_telegram_config,
             telegram::set_telegram_autostart,

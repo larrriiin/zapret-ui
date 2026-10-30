@@ -3,6 +3,7 @@
 // extra HTTP requests at runtime — and mount them synchronously before the
 // rest of `main.js` initialises the app.
 
+import sectionAutomations from './sections/automations.html?raw';
 import sectionHome from './sections/home.html?raw';
 import sectionZapretSettings from './sections/zapret-settings.html?raw';
 import sectionSites from './sections/sites.html?raw';
@@ -42,6 +43,7 @@ function mount(hostId, html) {
 export function mountComponents() {
   // Sections go inside <main> so sidebar/header layout stays intact.
   mount('sections-host', sectionHome);
+  mount('sections-host', sectionAutomations);
   mount('sections-host', sectionZapretSettings);
   mount('sections-host', sectionSites);
   mount('sections-host', sectionIps);

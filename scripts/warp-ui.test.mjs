@@ -38,6 +38,8 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
       const results = await page.locator('#test-results').textContent();
       assert.equal(results.split('\n').filter(line => line.startsWith('FAIL')).join('\n'), '', results);
       assert.deepEqual(errors, []);
+
+
       assert.equal(await page.locator('vite-error-overlay').count(), 0);
       assert.ok(await page.title());
       await page.locator('#warp-advanced').evaluate(element => { element.open = true; });
@@ -116,6 +118,14 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
         await page.screenshot({ path: join(process.env.QA_SCREENSHOTS_DIR, `warp-advanced-${variant.lang}-${variant.width}.png`) });
       }
       await page.locator('aside nav a').first().click();
+      await page.waitForSelector('#section-home:not(.hidden)'); await page.waitForTimeout(200);
+      for (const selector of ['#warp-title', '.zapret-connection .provider-heading .provider-title-row']) {
+        const row = page.locator(selector);
+        const metrics = await row.evaluate(e => { const text = e.querySelector(':scope > span').getBoundingClientRect(), button = e.querySelector('button').getBoundingClientRect(); return {text: text.y + text.height / 2, button: button.y + button.height / 2}; });
+        assert.ok(Math.abs(metrics.text - metrics.button) <= 1, `${selector}: info icon aligns with title`);
+      }
+      await mkdir('artifacts/title-alignment', { recursive: true });
+      await page.screenshot({ path: `artifacts/title-alignment/home-${variant.lang}-${variant.width}.png` });
       await page.locator('#warp-refresh').click();
       await page.waitForFunction(() => document.getElementById('warp-status-report').getAttribute('aria-busy') === 'false');
       assert.equal(await page.locator('#warp-status-dialog').isVisible(), true);

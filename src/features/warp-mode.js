@@ -32,7 +32,7 @@ export function createWarpDropdown(prefix, { searchable = false, placeholder = '
       button.role = 'option';
       button.dataset.value = value;
       button.setAttribute('aria-selected', String(value === selected));
-      button.className = 'group w-full text-left px-4 py-2.5 text-sm font-headline text-on-surface hover:bg-primary/10 transition-colors flex items-center gap-2 cursor-pointer' + (value === selected ? ' dropdown-option-selected' : '');
+      button.className = 'group ui-select-option' + (value === selected ? ' dropdown-option-selected' : '');
       button.disabled = !value;
       const icon = document.createElement('span');
       icon.className = 'material-symbols-outlined text-sm';
@@ -58,11 +58,11 @@ export function createWarpDropdown(prefix, { searchable = false, placeholder = '
     }
   }
 
-  function init() {
+  function init(popupHost = document.body) {
     const trigger = node('trigger');
     const list = node('options');
-    // Escape the card's stacking context so the popup stays above the app header.
-    document.body.append(list);
+    // Escape card stacking contexts; native dialogs keep their popups inside the modal top layer.
+    popupHost.append(list);
     function show(last = false, focusOption = false) {
       if (trigger.disabled) return;
       if (searchable) node('search').value = '';

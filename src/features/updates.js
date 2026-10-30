@@ -164,34 +164,34 @@ function showProxyFallbackModal(errStr, onTryProxy, onCustomProxy, onRetryNoProx
 
   const modal = document.createElement('div');
   modal.id = 'proxy-fallback-modal';
-  modal.className = 'fixed inset-0 z-[2000] flex items-center justify-center p-6 bg-background/80 backdrop-blur-md animate-fade-in';
+  modal.className = 'fixed inset-0 z-[2000] flex items-center justify-center p-6 ui-overlay animate-fade-in';
   
   let content = '';
   if (!isCustomProxyStage) {
     const errorTitle = operation === 'check' ? t('update_check_error_title') : t('download_error_title');
     const errorDescription = operation === 'check' ? t('update_check_error_desc') : t('download_error_desc');
     content = `
-      <div class="bg-surface-container-high border border-outline-variant/30 rounded-3xl p-8 max-w-md w-full shadow-2xl animate-scale-in">
+      <div class="ui-dialog-surface max-w-md w-full animate-scale-in">
         <h3 class="font-headline text-xl font-black text-error mb-4">${errorTitle}</h3>
         <p class="text-on-surface-variant text-sm mb-6">${errorDescription}</p>
         <p data-proxy-error class="text-[10px] text-error-dim font-mono bg-error/10 p-2 rounded mb-6 break-words max-h-32 overflow-y-auto"></p>
         <div class="flex flex-col gap-3">
-          <button id="proxy-btn-vpn" class="w-full px-4 py-3 bg-white/5 hover:bg-white/10 text-on-surface rounded-xl font-bold transition-all uppercase text-xs tracking-wider">${t('vpn_enabled')}</button>
-          <button id="proxy-btn-proxy" class="w-full px-4 py-3 bg-secondary/20 hover:bg-secondary/30 text-secondary border border-secondary/20 rounded-xl font-black transition-all uppercase text-xs tracking-wider shadow-lg shadow-secondary/5">${t('via_project_proxy')}</button>
-          <button id="proxy-btn-close" class="w-full px-4 py-3 mt-2 text-on-surface-variant rounded-xl font-bold hover:bg-white/5 transition-all uppercase text-xs tracking-widest">${t('close')}</button>
+          <button id="proxy-btn-vpn" class="ui-button w-full">${t('vpn_enabled')}</button>
+          <button id="proxy-btn-proxy" class="ui-button ui-button-accent w-full">${t('via_project_proxy')}</button>
+          <button id="proxy-btn-close" class="ui-button w-full mt-2">${t('close')}</button>
         </div>
       </div>
     `;
   } else {
     const proxyErrorDescription = operation === 'check' ? t('update_check_proxy_failed_desc') : t('proxy_failed_desc');
     content = `
-      <div class="bg-surface-container-high border border-outline-variant/30 rounded-3xl p-8 max-w-md w-full shadow-2xl animate-scale-in">
+      <div class="ui-dialog-surface max-w-md w-full animate-scale-in">
         <h3 class="font-headline text-xl font-black text-error mb-4">${t('proxy_failed_title')}</h3>
         <p class="text-on-surface-variant text-sm mb-4">${proxyErrorDescription}</p>
-        <input type="text" id="custom-proxy-input" placeholder="socks5://user:pass@ip:port" class="w-full bg-background border border-outline-variant/30 rounded-xl px-4 py-3 text-sm text-on-surface mb-6 focus:outline-none focus:border-primary transition-colors">
+        <input type="text" id="custom-proxy-input" placeholder="socks5://user:pass@ip:port" class="ui-field w-full mb-6">
         <div class="flex flex-col gap-3">
-          <button id="proxy-btn-custom" class="w-full px-4 py-3 bg-secondary/20 hover:bg-secondary/30 text-secondary border border-secondary/20 rounded-xl font-black transition-all uppercase text-xs tracking-wider shadow-lg shadow-secondary/5">${t('download')}</button>
-          <button id="proxy-btn-close" class="w-full px-4 py-3 mt-2 text-on-surface-variant rounded-xl font-bold hover:bg-white/5 transition-all uppercase text-xs tracking-widest">${t('close')}</button>
+          <button id="proxy-btn-custom" class="ui-button ui-button-accent w-full">${t('download')}</button>
+          <button id="proxy-btn-close" class="ui-button w-full mt-2">${t('close')}</button>
         </div>
       </div>
     `;
@@ -246,7 +246,7 @@ function showDualUpdateModal(data, manual = false) {
 
   const modal = document.createElement('div');
   modal.id = 'update-modal';
-  modal.className = 'fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-background/80 backdrop-blur-md animate-fade-in';
+  modal.className = 'fixed inset-0 z-[1000] flex items-center justify-center p-6 ui-overlay animate-fade-in';
 
   const uiStatus = data.ui.available
     ? `<span class="px-2 py-0.5 bg-primary/20 text-primary text-[10px] font-bold rounded-full uppercase">${t('update_available_short')}</span>`
@@ -262,7 +262,7 @@ function showDualUpdateModal(data, manual = false) {
   const coreCurrentVersion = coreCurrentVersionLabel(data.core);
 
   modal.innerHTML = `
-    <div class="bg-surface-container-high border border-outline-variant/30 rounded-3xl p-8 max-w-lg w-full shadow-2xl animate-scale-in max-h-[90vh] overflow-y-auto">
+    <div class="ui-dialog-surface max-w-lg w-full animate-scale-in">
       <div class="flex flex-col items-center">
         <div class="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mb-6">
           <span class="material-symbols-outlined text-3xl text-primary">system_update_alt</span>
@@ -281,7 +281,7 @@ function showDualUpdateModal(data, manual = false) {
             </div>
             <div class="flex flex-col items-end gap-3">
               ${uiStatus}
-              ${data.ui.available ? `<button id="modal-update-ui-btn" class="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-primary/20 hover:bg-primary/30 border border-primary/20 rounded-xl text-[10px] font-black text-primary uppercase transition-all active:scale-95 shadow-lg shadow-primary/5">${t('update_now')}</button>` : ''}
+              ${data.ui.available ? `<button id="modal-update-ui-btn" class="ui-button ui-button-primary ui-button-sm">${t('update_now')}</button>` : ''}
             </div>
           </div>
 
@@ -295,12 +295,12 @@ function showDualUpdateModal(data, manual = false) {
             </div>
             <div class="flex flex-col items-end gap-3">
               ${coreStatus}
-              ${(data.core.status === 'update_available' || data.core.status === 'not_installed') ? `<button id="modal-update-core-btn" class="px-4 py-2 bg-secondary/20 hover:bg-secondary/30 border border-secondary/20 rounded-xl text-[10px] font-black text-secondary uppercase transition-all active:scale-95 shadow-lg shadow-secondary/5">${t('update_now')}</button>` : ''}
+              ${(data.core.status === 'update_available' || data.core.status === 'not_installed') ? `<button id="modal-update-core-btn" class="ui-button ui-button-accent ui-button-sm">${t('update_now')}</button>` : ''}
             </div>
           </div>
         </div>
 
-        <button id="modal-close-btn" class="w-full px-4 py-3 bg-white/5 text-on-surface-variant rounded-xl font-bold hover:bg-white/10 transition-all uppercase text-xs tracking-widest">
+        <button id="modal-close-btn" class="ui-button w-full">
           ${t('close')}
         </button>
       </div>

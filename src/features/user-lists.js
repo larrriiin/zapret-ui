@@ -51,10 +51,10 @@ function renderList(containerId, items, filename) {
 
   items.forEach((item) => {
     const row = document.createElement('div');
-    row.className = 'flex items-center justify-between bg-surface-container-highest/50 rounded-xl px-4 py-2';
+    row.className = 'ui-list-row';
     row.innerHTML = `
       <span class="text-sm text-on-surface truncate">${escapeHtml(item)}</span>
-      <button class="delete-btn text-error-dim hover:text-error-dim/70 transition-colors" data-item="${escapeHtml(item)}">
+      <button class="delete-btn ui-icon-button ui-tone-danger" data-item="${escapeHtml(item)}">
         <span class="material-symbols-outlined text-lg">delete</span>
       </button>
     `;
@@ -131,7 +131,7 @@ async function handleExport(filename, btnId) {
       <span class="material-symbols-outlined text-sm">check</span>
       <span data-i18n="done">${t('done')}</span>
     `;
-    
+
     // Add success styling temporarily
     const isInclude = filename.includes('general');
     const accentClass = isInclude ? 'text-secondary' : 'text-error-dim';
@@ -154,7 +154,7 @@ function openImportModal(filename, title) {
   const textarea = $('list-import-textarea');
   const pasteLabel = $('list-import-paste-label');
   const isIPList = filename.includes('ipset');
-  
+
   if (titleEl) titleEl.textContent = title;
   if (pasteLabel) pasteLabel.textContent = t(isIPList ? 'import_paste_ips' : 'import_paste_domains');
   if (textarea) {
@@ -163,7 +163,7 @@ function openImportModal(filename, title) {
       ? '192.168.1.1\n10.0.0.0/24'
       : 'example.com\ngoogle.com\nyoutube.com';
   }
-  
+
   modal?.classList.remove('hidden');
 }
 
@@ -259,7 +259,7 @@ export function initUserLists() {
     for (let line of rawLines) {
       line = line.trim();
       if (!line) continue;
-      
+
       let validatedValue;
       if (currentImportFilename.includes('ipset')) {
         validatedValue = validateIP(line);
