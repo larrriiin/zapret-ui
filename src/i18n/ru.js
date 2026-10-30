@@ -793,6 +793,7 @@ export default {
     "site_checker_dns_failed": "Не удалось определить IP-адрес домена",
     "site_checker_dns_resolved": "Найдено IP-адресов: {count}",
     "timeout": "Нет ответа",
+    "tray_show_actions": "Назад",
     "tray_exit": "Выход",
     "tray_show": "Развернуть",
     "tray_status_prefix": "Статус: ",

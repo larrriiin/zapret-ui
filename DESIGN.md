@@ -96,3 +96,12 @@ The soft background accents live in a single fixed `.app-backdrop` under the iso
 An active automation uses `ui-panel ui-panel-active`: the normal panel border becomes the semantic `--color-success` green, without changing its width, background or adding a glow. The active status remains screen-reader text, not a visible label. Disabled rules and disabled observation use the ordinary border.
 
 Automation creation/editing uses the native `#auto-editor` dialog, with `ui-dialog ui-dialog-wide` (760px maximum width), not a disclosure in the page. Put validation errors inside the dialog. Pass the dialog as `createWarpDropdown().init(dialog)`'s popup host so options remain interactive in the native modal top layer; the default host for other consumers is body. Closing cancels the draft, preserves saved rules and restores focus to the initiating action.
+
+
+## Tray context menu
+
+Reference: `src/tray.html` and `src/tray.js`. The right-click tray menu is a separate, frameless `tray-menu` window; left click restores the application. Reuse `ui-select-popup` and `ui-select-option` with menu/menuitem roles, local Material Symbols and the shared theme module (including saved accents and system preference). Layout belongs in `src/features/tray.css`. Arrow keys, Home/End and Tab move focus; Escape and losing native focus dismiss the menu. The strategy list scrolls within the same window. Native placement clamps the window to the clicked monitor work area at its DPI scale.
+
+Tray density uses the shared `ui-select-option-sm` variant (32px rows, 12px labels). The `ui-select-popup-window` variant removes the web border, radius and shadow because the native window owns its outer edge; never nest a rounded CSS frame inside an opaque native popup. Provider labels use `ui-status-dot` with `data-active="true"` for the semantic success green, otherwise semantic error red; show the dot in the provider action row, with status text only in its accessible name. Runtime booleans drive these indicators, never translated label parsing.
+
+The tray menu initially focuses its menu container, without selecting a row. Arrow keys and Tab enter the action list. The strategy row displays the current/last strategy name with a trailing chevron and opens the strategy list; do not duplicate strategy or connection statuses in separate summary rows.

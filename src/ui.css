@@ -67,8 +67,16 @@ input.ui-check[type="checkbox"] { border-radius: 4px; }
 .ui-code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
 .ui-select-popup { position: fixed; z-index: 999; border: 1px solid color-mix(in srgb, var(--color-primary) 20%, transparent); border-radius: var(--ui-radius-panel); overflow: hidden; background: var(--color-popup); box-shadow: 0 20px 40px rgb(0 0 0 / .3); }
 .ui-select-option { min-height: 42px; display: flex; width: 100%; align-items: center; gap: 8px; padding: 10px 16px; border: 0; background: transparent; color: var(--color-on-surface); font-family: var(--font-headline); font-size: 14px; text-align: left; cursor: pointer; transition: background-color var(--ui-duration); }
-.ui-select-option:hover, .ui-select-option:focus-visible { background: color-mix(in srgb, var(--color-primary) 10%, transparent); }
+.ui-select-option:hover:not(:disabled), .ui-select-option:focus-visible { background: color-mix(in srgb, var(--color-primary) 10%, transparent); }
 .ui-select-option:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+/* Compact native popup: the OS owns the outer window edge. */
+.ui-select-popup-window { border: 0; border-radius: 0; box-shadow: none; }
+/* Focus belongs to individual menu items, not the programmatically focused host. */
+.ui-select-popup-window [role="menu"]:focus { outline: none !important; }
+.ui-select-option-sm { min-height: 32px; padding: 6px 12px; font-size: 12px; line-height: 20px; }
+.ui-status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: var(--color-error-dim); }
+.ui-status-dot[data-active="true"] { background: var(--color-success); }
+.ui-select-option:disabled { opacity: .45; cursor: not-allowed; }
 .ui-select-option.dropdown-option-selected { color: var(--color-secondary); background: color-mix(in srgb, var(--color-secondary) 8%, transparent); }
 
 .ui-dialog, .ui-dialog-surface { padding: 24px; border: 1px solid var(--ui-border); border-radius: var(--ui-radius-panel); background: var(--color-popup); color: var(--color-on-surface); max-height: 90vh; overflow-y: auto; box-shadow: 0 24px 80px rgb(0 0 0 / .45); }

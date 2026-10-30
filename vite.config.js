@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
@@ -16,6 +17,7 @@ export default defineConfig({
     outDir: '../dist',
     emptyOutDir: true,
     target: 'esnext',
+    rolldownOptions: { input: { main: fileURLToPath(new URL('./src/index.html', import.meta.url)), tray: fileURLToPath(new URL('./src/tray.html', import.meta.url)) } },
   },
   server: {
     host: '127.0.0.1',

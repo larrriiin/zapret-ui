@@ -793,6 +793,7 @@ export default {
     "site_checker_dns_failed": "The domain IP address could not be resolved",
     "site_checker_dns_resolved": "IP addresses resolved: {count}",
     "timeout": "Timeout",
+    "tray_show_actions": "Back",
     "tray_exit": "Exit",
     "tray_show": "Restore window",
     "tray_status_prefix": "Status: ",
