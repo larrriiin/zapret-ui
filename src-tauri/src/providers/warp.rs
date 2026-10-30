@@ -78,7 +78,7 @@ impl ProxySelection {
         }
         Ok(())
     }
-    fn from_saved(&self, sites: &[String], applications: &[String]) -> Result<Self> {
+    fn resolve_from_saved(&self, sites: &[String], applications: &[String]) -> Result<Self> {
         self.validate()?;
         let selected_sites = self
             .sites
@@ -505,7 +505,7 @@ async fn execute(action: Action) -> Result<WarpStatus> {
                     let saved_sites = sites::status()?;
                     let saved_apps = applications::status()?;
                     let routes = routes
-                        .map(|r| r.from_saved(&saved_sites.domains, &saved_apps.paths))
+                        .map(|r| r.resolve_from_saved(&saved_sites.domains, &saved_apps.paths))
                         .transpose()?;
                     if control.application_routes != routes {
                         sites::disable()?;
@@ -789,19 +789,19 @@ mod tests {
             sites: vec!["EXAMPLE.ORG".into()],
             applications: vec!["c:/apps/discord.exe".into()],
         };
-        let resolved = selection.from_saved(&sites, &apps).unwrap();
+        let resolved = selection.resolve_from_saved(&sites, &apps).unwrap();
         assert_eq!(resolved.sites, vec!["example.org"]);
         assert_eq!(resolved.applications, vec!["C:\\Apps\\Discord.exe"]);
         assert_eq!(sites.len(), 2);
         assert_eq!(apps.len(), 2);
-        assert!(selection.from_saved(&[], &apps).is_err());
-        assert!(selection.from_saved(&sites, &[]).is_err());
+        assert!(selection.resolve_from_saved(&[], &apps).is_err());
+        assert!(selection.resolve_from_saved(&sites, &[]).is_err());
         let sites_only = ProxySelection {
             sites: vec!["example.org".into()],
             applications: vec![],
         };
         assert!(sites_only
-            .from_saved(&sites, &apps)
+            .resolve_from_saved(&sites, &apps)
             .unwrap()
             .applications
             .is_empty());
