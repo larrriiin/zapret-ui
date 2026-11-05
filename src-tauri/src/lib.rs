@@ -523,13 +523,70 @@ fn core_manager() -> CoreManager {
 }
 
 fn is_admin() -> bool {
-    // net session — самый быстрый и надежный способ проверки прав администратора на Windows
-    Command::new(system32_tool("net.exe"))
-        .arg("session")
-        .creation_flags(CREATE_NO_WINDOW)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY},
+        System::Threading::{GetCurrentProcess, OpenProcessToken},
+    };
+
+    // Check this process's actual elevation, independently of Windows services
+    // and of the account's membership in the Administrators group under UAC.
+    unsafe {
+        let mut token = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return false;
+        }
+
+        let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+        let mut returned_length = 0;
+        let success = GetTokenInformation(
+            token,
+            TokenElevation,
+            (&mut elevation as *mut TOKEN_ELEVATION).cast(),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut returned_length,
+        );
+        CloseHandle(token);
+
+        success != 0 && elevation.TokenIsElevated != 0
+    }
+}
+
+#[cfg(all(test, windows))]
+mod admin_tests {
+    #[test]
+    fn elevation_matches_enabled_administrator_membership() {
+        use windows_sys::Win32::Security::{
+            CheckTokenMembership, CreateWellKnownSid, WinBuiltinAdministratorsSid,
+            SECURITY_MAX_SID_SIZE,
+        };
+
+        // Check enabled group membership independently of TokenElevation. This
+        // works for both elevated and UAC-filtered test runners without services.
+        unsafe {
+            let mut sid = [0u32; SECURITY_MAX_SID_SIZE as usize / 4];
+            let mut sid_size = std::mem::size_of_val(&sid) as u32;
+            assert_ne!(
+                CreateWellKnownSid(
+                    WinBuiltinAdministratorsSid,
+                    std::ptr::null_mut(),
+                    sid.as_mut_ptr().cast(),
+                    &mut sid_size,
+                ),
+                0
+            );
+            let mut is_member = 0;
+            assert_ne!(
+                CheckTokenMembership(
+                    std::ptr::null_mut(),
+                    sid.as_mut_ptr().cast(),
+                    &mut is_member
+                ),
+                0
+            );
+            assert_eq!(super::is_admin(), is_member != 0);
+        }
+    }
 }
 
 fn elevate_if_needed() {
