@@ -5736,7 +5736,7 @@ dependencies = [
 
 [[package]]
 name = "zapret-ui"
-version = "26.10.6"
+version = "26.11.1"
 dependencies = [
  "base64 0.23.1",
  "futures-util",
@@ -5891,9 +5891,9 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "9.1.3"
+version = "9.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1156b39d142a34b999c2310a50455e0cb3760bf7efad0122f796d813bee26ccb"
+checksum = "848dad21639597378c3be94c59fd4de683f0f6d8a5387575896e1245737d4f37"
 dependencies = [
  "bzip2",
  "crc32fast",

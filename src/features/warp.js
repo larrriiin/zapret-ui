@@ -8,6 +8,7 @@ import { showSection } from './navigation.js';
 import { showConfirm } from '../lib/dom.js';
 import { openWarpTraffic } from './traffic.js';
 import { routingState, needsProxyConfirmation, orderedWarpModes } from './warp-state.js';
+import { adminReason } from '../lib/privilege-errors.js';
 
 export const WARP_MODE_KEYS = {
   doh: 'warp_mode_doh', dot: 'warp_mode_dot', warp: 'warp_mode_warp',
@@ -35,6 +36,7 @@ let auxiliaryCommand = '';
 let hero, zapret, heading, zapretHeader, statusHeading;
 
 function errorText(error) {
+  if (adminReason(error)) return t('elevation_reason_warp_apps');
   const code = error?.code || 'warp_process';
   const translated = t(code);
   return `${translated === code ? t('warp_process') : translated}${error?.detail ? ` — ${error.detail}` : ''}`;

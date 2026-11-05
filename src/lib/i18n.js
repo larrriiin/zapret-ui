@@ -92,6 +92,8 @@ export async function syncTrayLocalization() {
         change_strategy: t('tray_change_strategy'),
         minimized_title: t('tray_minimized_title'),
         minimized_body: t('tray_minimized_body'),
+        admin_required_title: t('elevation_required'),
+        admin_required_body: t('elevation_background'),
         status_on: t('connected'),
         status_off: t('disconnected'),
       },

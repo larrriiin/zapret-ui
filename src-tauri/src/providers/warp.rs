@@ -124,7 +124,7 @@ impl ProxySelection {
 pub struct WarpStatus {
     pub(crate) installed: bool,
     pub(crate) connected: bool,
-    state: String,
+    pub(crate) state: String,
     pub(crate) mode: Option<String>,
     pub(crate) application_routes: Option<ProxySelection>,
     version: Option<String>,
@@ -347,12 +347,7 @@ impl Client {
                     .pointer("/settings/operation_mode")
                     .and_then(Value::as_str)
                     .map(str::to_owned);
-                if result.state == "error" || result.mode.is_none() {
-                    result.error = Some(WarpError::new(
-                        "warp_status_error",
-                        status.get("status").unwrap_or(&Value::Null),
-                    ));
-                }
+                result.error = status_error(&status, result.mode.is_some());
                 if result.mode.as_deref() == Some("proxy") {
                     result.proxy = Some(ProxyStatus {
                         address: "127.0.0.1".into(),
@@ -389,7 +384,64 @@ fn parse_state(status: &Value) -> &'static str {
     }
 }
 
+fn status_error(status: &Value, has_mode: bool) -> Option<WarpError> {
+    if status
+        .get("status")
+        .and_then(Value::as_str)
+        .is_some_and(|s| s.eq_ignore_ascii_case("Unable"))
+    {
+        return Some(WarpError::new(
+            "warp_connection_failed",
+            status.get("reason").unwrap_or(&Value::Null),
+        ));
+    }
+    (parse_state(status) == "error" || !has_mode).then(|| {
+        WarpError::new(
+            "warp_status_error",
+            status.get("status").unwrap_or(&Value::Null),
+        )
+    })
+}
+
+#[derive(Clone, Default, serde::Deserialize, Serialize)]
+pub(crate) struct RoutingHandoff {
+    sites_active: bool,
+    applications_active: bool,
+    application_routes: Option<ProxySelection>,
+}
+
+pub(crate) fn capture_handoff() -> Result<RoutingHandoff> {
+    let _client = CLIENT
+        .try_lock()
+        .map_err(|_| WarpError::new("warp_busy", ""))?;
+    let controls = control::CONTROL
+        .lock()
+        .map_err(|e| WarpError::new("warp_process", e))?;
+    Ok(RoutingHandoff {
+        sites_active: sites::status()?.runtime_active,
+        applications_active: applications::status()?.runtime_active,
+        application_routes: controls.as_ref().and_then(|c| c.application_routes.clone()),
+    })
+}
+
+pub(crate) async fn resume_handoff(routing: RoutingHandoff) -> Result<()> {
+    if !routing.sites_active && !routing.applications_active && routing.application_routes.is_none()
+    {
+        return Ok(());
+    }
+    for attempt in 0..20 {
+        match execute(Action::Resume(routing.clone())).await {
+            Err(e) if e.code == "warp_busy" && attempt < 19 => {
+                tokio::time::sleep(Duration::from_millis(100)).await
+            }
+            result => return result.map(|_| ()),
+        }
+    }
+    unreachable!()
+}
+
 enum Action {
+    Resume(RoutingHandoff),
     Status,
     ApplicationConnection(Option<String>, bool, Option<ProxySelection>),
     Connect,
@@ -404,6 +456,10 @@ enum Action {
     Automation(control::Automation),
 }
 async fn execute(action: Action) -> Result<WarpStatus> {
+    if matches!(&action, Action::Applications(_, true, _)) {
+        crate::privileges::require("warp_apps")
+            .map_err(|_| WarpError::new("admin_required", "warp_apps"))?;
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let mut guard = CLIENT
             .try_lock()
@@ -500,6 +556,41 @@ async fn execute(action: Action) -> Result<WarpStatus> {
             }
             let client = guard.as_ref().unwrap();
             match action {
+                Action::Resume(routing) => {
+                    let before = client.status();
+                    // Do not reconnect if the official client was changed during restart.
+                    if before.connected
+                        && before.error.is_none()
+                        && before.mode.as_deref() == Some("proxy")
+                    {
+                        if let Some(port) = before
+                            .proxy
+                            .as_ref()
+                            .filter(|p| p.active)
+                            .and_then(|p| p.port)
+                        {
+                            let selected_sites = sites::status()?;
+                            let selected_apps = applications::status()?;
+                            let domains = routing
+                                .application_routes
+                                .as_ref()
+                                .map_or(selected_sites.domains, |r| r.sites.clone());
+                            let paths = routing
+                                .application_routes
+                                .as_ref()
+                                .map_or(selected_apps.paths, |r| r.applications.clone());
+                            if routing.sites_active {
+                                sites::configure_runtime(domains, port)?;
+                            }
+                            if routing.applications_active {
+                                applications::configure_runtime(paths, port)?;
+                            }
+                            control.application_routes = routing.application_routes;
+                            control.sites_restore_attempted = routing.sites_active;
+                            control.applications_restore_attempted = routing.applications_active;
+                        }
+                    }
+                }
                 Action::Status => {}
                 Action::ApplicationConnection(mode, connected, routes) => {
                     let saved_sites = sites::status()?;
@@ -507,6 +598,18 @@ async fn execute(action: Action) -> Result<WarpStatus> {
                     let routes = routes
                         .map(|r| r.resolve_from_saved(&saved_sites.domains, &saved_apps.paths))
                         .transpose()?;
+                    let before = client.status();
+                    if connected
+                        && mode.as_deref().or(before.mode.as_deref()) == Some("proxy")
+                        && routes
+                            .as_ref()
+                            .map_or(saved_apps.enabled && !saved_apps.paths.is_empty(), |r| {
+                                !r.applications.is_empty()
+                            })
+                    {
+                        crate::privileges::require("warp_apps")
+                            .map_err(|_| WarpError::new("admin_required", "warp_apps"))?;
+                    }
                     if control.application_routes != routes {
                         sites::disable()?;
                         applications::disable()?;
@@ -514,7 +617,6 @@ async fn execute(action: Action) -> Result<WarpStatus> {
                         control.applications_restore_attempted = false;
                     }
                     control.application_routes = routes;
-                    let before = client.status();
                     if !connected || mode.as_deref().or(before.mode.as_deref()) != Some("proxy") {
                         // Release runtime resources, retaining the user's enabled selections.
                         sites::disable()?;
@@ -871,6 +973,7 @@ mod tests {
             ("Disconnected", "disconnected"),
             ("Connecting", "connecting"),
             ("Disconnecting", "disconnecting"),
+            ("Unable", "error"),
             ("Paused", "error"),
         ] {
             assert_eq!(
@@ -878,6 +981,33 @@ mod tests {
                 expected
             );
         }
+    }
+    #[test]
+    fn unable_is_a_connection_failure_with_its_reason_not_an_unknown_state() {
+        let error = status_error(
+            &serde_json::json!({
+                "status": "Unable",
+                "reason": {"code": "CF_CONNECTIVITY_FAILURE", "description": "Network unavailable"}
+            }),
+            true,
+        )
+        .unwrap();
+        assert_eq!(error.code, "warp_connection_failed");
+        assert!(error.detail.contains("CF_CONNECTIVITY_FAILURE"));
+        assert!(error.detail.contains("Network unavailable"));
+        assert!(status_error(&serde_json::json!({"status":"Connected"}), true).is_none());
+        assert_eq!(
+            status_error(&serde_json::json!({"status":"NewUnknownState"}), true)
+                .unwrap()
+                .code,
+            "warp_status_error"
+        );
+        assert_eq!(
+            status_error(&serde_json::json!({"status":"Connected"}), false)
+                .unwrap()
+                .code,
+            "warp_status_error"
+        );
     }
     #[tokio::test]
     #[ignore = "Read-only integration test requires an installed official Windows WARP client"]

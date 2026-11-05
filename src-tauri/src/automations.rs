@@ -46,7 +46,25 @@ pub struct Status {
     paused: bool,
 }
 #[derive(Default)]
-pub struct Store(Mutex<Status>);
+pub struct Store(Mutex<Status>, Mutex<HandoffState>);
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+pub(crate) struct HandoffState {
+    zapret: Slot,
+    warp: Slot,
+}
+
+pub(crate) fn capture_handoff(store: State<'_, Store>) -> HandoffState {
+    let mut state = store.1.lock_unpoisoned().clone();
+    // A denied action has changed nothing. Explicit elevation lets it be retried.
+    if state.zapret.permission_denied {
+        state.zapret = Slot::default();
+    }
+    if state.warp.permission_denied {
+        state.warp = Slot::default();
+    }
+    state
+}
 
 fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app
@@ -201,7 +219,7 @@ fn running_paths() -> Result<HashSet<String>, String> {
     Ok(HashSet::new())
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 struct Snapshot {
     on: bool,
     choice: Option<String>,
@@ -217,6 +235,9 @@ fn read(app: &tauri::AppHandle, warp: bool) -> Result<Snapshot, String> {
         }
         if !s.installed {
             return Err("WARP is not installed".into());
+        }
+        if !matches!(s.state.as_str(), "connected" | "disconnected") {
+            return Err("WARP is still changing connection state".into());
         }
         Ok(Snapshot {
             on: s.connected,
@@ -252,19 +273,23 @@ fn write(app: &tauri::AppHandle, warp: bool, target: &Snapshot) -> Result<(), St
             target.routes.clone(),
         ))
         .map_err(warp_error)?;
-        if let Some(error) = status.error {
-            return Err(warp_error(error));
-        }
         let until = Instant::now() + Duration::from_secs(20);
+        let mut last_error = status.error.map(warp_error);
         loop {
-            let observed = read(app, true)?;
-            if observed.on == target.on
-                && (target.choice.is_none() || observed.choice == target.choice)
-            {
-                break;
+            match read(app, true) {
+                Ok(observed)
+                    if observed.on == target.on
+                        && (target.choice.is_none() || observed.choice == target.choice) =>
+                {
+                    break
+                }
+                Ok(_) => {}
+                Err(error) => last_error = Some(error),
             }
             if Instant::now() >= until {
-                return Err("WARP did not reach the requested state".into());
+                return Err(
+                    last_error.unwrap_or_else(|| "WARP did not reach the requested state".into())
+                );
             }
             std::thread::sleep(Duration::from_millis(500));
         }
@@ -283,14 +308,28 @@ fn write(app: &tauri::AppHandle, warp: bool, target: &Snapshot) -> Result<(), St
     Ok(())
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Deserialize, Serialize)]
 struct Slot {
     baseline: Option<Snapshot>,
     applied: Option<Snapshot>,
     rule: Option<Rule>,
     paused: bool,
+    failed: bool,
+    permission_denied: bool,
 }
 impl Slot {
+    fn close_target(&self, current: &Snapshot) -> Option<Snapshot> {
+        let previous = self.rule.as_ref()?;
+        if previous.close_off {
+            let mut target = current.clone();
+            target.on = false;
+            Some(target)
+        } else if previous.restore {
+            self.baseline.clone()
+        } else {
+            None
+        }
+    }
     fn reconcile(
         &mut self,
         app: &tauri::AppHandle,
@@ -315,14 +354,62 @@ impl Slot {
             self.paused = false;
             return Ok(());
         }
-        let current = read_state()?;
-        if self.applied.as_ref().is_some_and(|s| *s != current) {
-            self.paused = true;
-        }
-        if self.paused {
+        // A manual override is final. A failed enable is not retried while the
+        // application is open, but must still be eligible for cleanup on close.
+        if self.paused && (!self.failed || rule.is_some()) {
             if rule.is_none() {
                 *self = Self::default();
             }
+            return Ok(());
+        }
+        let current = match read_state() {
+            Ok(current) => current,
+            Err(error) => {
+                // Loss of status is not a user override. An owned WARP connection
+                // can still be disconnected; never reconnect from an unknown state.
+                if warp && rule.is_none() {
+                    if let Some(last) = self.applied.as_ref() {
+                        let target = self.close_target(last);
+                        if target
+                            .as_ref()
+                            .is_none_or(|target| self.failed && target.on)
+                        {
+                            *self = Self::default();
+                            return Ok(());
+                        }
+                        if let Some(target) = target.filter(|target| !target.on) {
+                            self.paused = true;
+                            self.failed = true;
+                            write_state(&target)?;
+                            *self = Self::default();
+                            return Ok(());
+                        }
+                    }
+                }
+                return Err(error);
+            }
+        };
+        if self.applied.as_ref().is_some_and(|s| {
+            if self.failed {
+                s.choice != current.choice
+                    || s.launch != current.launch
+                    || s.routes != current.routes
+            } else {
+                *s != current
+            }
+        }) {
+            self.paused = true;
+            self.failed = false;
+            if rule.is_none() {
+                *self = Self::default();
+            }
+            return Ok(());
+        }
+        if self.failed
+            && rule.is_none()
+            && (!warp || self.close_target(&current).is_none_or(|target| target.on))
+        {
+            *self = Self::default();
             return Ok(());
         }
         let unchanged = self.rule.as_ref().zip(rule).is_some_and(|(a, b)| {
@@ -378,14 +465,25 @@ impl Slot {
             self.paused = true;
             return Err("Zapret is stopped. Choose Enable to apply a strategy".into());
         }
-        // Set the guard before mutating: failures never cause an endless reconnect loop.
-        self.rule = rule.cloned();
+        // Keep the closing rule until cleanup succeeds, so transient errors cannot
+        // discard its baseline. Only disconnect/cleanup may be retried after failure.
+        if rule.is_some() {
+            self.rule = rule.cloned();
+            self.applied = Some(target.clone());
+        }
         self.paused = true;
+        self.failed = true;
         if target != current || (warp && rule.is_some()) {
-            write_state(&target)?;
+            if let Err(error) = write_state(&target) {
+                self.permission_denied = error.contains(privileges::ADMIN_REQUIRED);
+                return Err(error);
+            }
         }
         self.applied = Some(read_state()?);
         self.paused = false;
+        self.failed = false;
+        self.permission_denied = false;
+        self.rule = rule.cloned();
         if rule.is_none() {
             *self = Self::default();
         }
@@ -414,7 +512,13 @@ pub fn start(app: tauri::AppHandle) {
     }
     std::thread::spawn(move || {
         let mut seen = HashMap::<String, Instant>::new();
-        let (mut zapret, mut warp) = (Slot::default(), Slot::default());
+        let restored = privileges::automation_handoff();
+        let (mut zapret, mut warp) = (restored.zapret, restored.warp);
+        *app.state::<Store>().1.lock_unpoisoned() = HandoffState {
+            zapret: zapret.clone(),
+            warp: warp.clone(),
+        };
+        let mut permission_notified = false;
         loop {
             std::thread::sleep(Duration::from_secs(2));
             if EXIT_IN_PROGRESS.load(Ordering::Acquire) {
@@ -469,6 +573,32 @@ pub fn start(app: tauri::AppHandle) {
             if let Err(e) = warp.reconcile(&app, true, w) {
                 errors.push(format!("WARP: {e}"));
             }
+            *app.state::<Store>().1.lock_unpoisoned() = HandoffState {
+                zapret: zapret.clone(),
+                warp: warp.clone(),
+            };
+            if let Some(error) = errors
+                .iter()
+                .find(|e| e.contains(privileges::ADMIN_REQUIRED))
+            {
+                let _ = app.emit("admin-required-background", error);
+                if !permission_notified {
+                    let state = app.state::<AppState>();
+                    let translations = state.translations.lock_unpoisoned();
+                    if let Some(t) = translations
+                        .as_ref()
+                        .filter(|t| !t.admin_required_body.is_empty())
+                    {
+                        let _ = app
+                            .notification()
+                            .builder()
+                            .title(&t.admin_required_title)
+                            .body(&t.admin_required_body)
+                            .show();
+                        permission_notified = true;
+                    }
+                }
+            }
             let store = app.state::<Store>();
             let mut s = store.0.lock_unpoisoned();
             s.active = active.iter().map(|r| r.id.clone()).collect();
@@ -486,6 +616,30 @@ pub fn start(app: tauri::AppHandle) {
 mod tests {
     use super::*;
     use std::cell::RefCell;
+    #[test]
+    fn elevation_handoff_keeps_the_original_baseline_until_the_game_closes() {
+        let state = RefCell::new(snapshot(false, "warp"));
+        let original = state.borrow().clone();
+        let mut slot = Slot::default();
+        let rule = Rule {
+            id: "game".into(),
+            warp: Action::On,
+            warp_mode: Some("proxy".into()),
+            restore: true,
+            ..Default::default()
+        };
+        step(&mut slot, &state, Some(&rule));
+        let saved = HandoffState {
+            warp: slot,
+            ..Default::default()
+        };
+        let mut restored: HandoffState =
+            serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+        step(&mut restored.warp, &state, Some(&rule));
+        assert!(state.borrow().on);
+        step(&mut restored.warp, &state, None);
+        assert_eq!(*state.borrow(), original);
+    }
     #[test]
     fn proxy_subsets_switch_between_rules_and_restore_original_routing() {
         let state = RefCell::new(snapshot(true, "proxy"));
@@ -712,7 +866,7 @@ mod tests {
         assert!(state.borrow().on);
     }
     #[test]
-    fn failed_action_is_not_retried_or_restored_over_partial_changes() {
+    fn failed_enable_is_not_retried_but_is_disconnected_when_the_game_closes() {
         let state = RefCell::new(snapshot(false, "warp"));
         let mut slot = Slot::default();
         let rule = Rule {
@@ -740,7 +894,138 @@ mod tests {
         )
         .unwrap();
         step(&mut slot, &state, None);
-        assert!(state.borrow().on);
+        assert!(!state.borrow().on);
+        assert!(slot.rule.is_none());
+    }
+    #[test]
+    fn closing_game_disconnects_even_if_warp_status_is_unavailable() {
+        let state = RefCell::new(snapshot(false, "warp"));
+        let mut slot = Slot::default();
+        let rule = Rule {
+            warp: Action::On,
+            warp_mode: Some("proxy".into()),
+            restore: true,
+            ..Default::default()
+        };
+        step(&mut slot, &state, Some(&rule));
+        slot.transition(
+            true,
+            None,
+            || Err("warp_connection_failed: Unable".into()),
+            |target| {
+                assert!(!target.on);
+                *state.borrow_mut() = target.clone();
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(!state.borrow().on);
+        assert!(slot.rule.is_none());
+    }
+    #[test]
+    fn transient_status_error_does_not_pause_an_active_rule_or_lose_cleanup() {
+        let state = RefCell::new(snapshot(false, "warp"));
+        let mut slot = Slot::default();
+        let rule = Rule {
+            warp: Action::On,
+            restore: true,
+            ..Default::default()
+        };
+        step(&mut slot, &state, Some(&rule));
+        assert!(slot
+            .transition(
+                true,
+                Some(&rule),
+                || Err("warp_busy".into()),
+                |_| panic!("must not write")
+            )
+            .is_err());
+        assert!(!slot.paused);
+        step(&mut slot, &state, None);
+        assert!(!state.borrow().on);
+    }
+    #[test]
+    fn failed_cleanup_retains_ownership_until_disconnect_succeeds() {
+        let state = RefCell::new(snapshot(false, "warp"));
+        let mut slot = Slot::default();
+        let rule = Rule {
+            warp: Action::On,
+            restore: true,
+            ..Default::default()
+        };
+        step(&mut slot, &state, Some(&rule));
+        assert!(slot
+            .transition(
+                true,
+                None,
+                || Ok(state.borrow().clone()),
+                |_| Err("warp_busy".into())
+            )
+            .is_err());
+        assert!(slot.rule.is_some());
+        assert!(slot.failed);
+        step(&mut slot, &state, None);
+        assert!(!state.borrow().on);
+        assert!(slot.rule.is_none());
+    }
+    #[test]
+    fn failed_rule_never_restores_a_connected_baseline_or_overrides_a_manual_mode() {
+        for baseline_on in [false, true] {
+            let state = RefCell::new(snapshot(baseline_on, "warp"));
+            let mut slot = Slot::default();
+            let rule = Rule {
+                warp: Action::On,
+                warp_mode: Some("proxy".into()),
+                restore: true,
+                ..Default::default()
+            };
+            assert!(slot
+                .transition(
+                    true,
+                    Some(&rule),
+                    || Ok(state.borrow().clone()),
+                    |target| {
+                        *state.borrow_mut() = target.clone();
+                        Err("failed".into())
+                    }
+                )
+                .is_err());
+            *state.borrow_mut() = snapshot(true, "doh");
+            slot.transition(
+                true,
+                None,
+                || Ok(state.borrow().clone()),
+                |_| panic!("manual mode must survive"),
+            )
+            .unwrap();
+            assert_eq!(*state.borrow(), snapshot(true, "doh"));
+        }
+        let state = RefCell::new(snapshot(true, "warp"));
+        let mut slot = Slot::default();
+        let rule = Rule {
+            warp: Action::Off,
+            restore: true,
+            ..Default::default()
+        };
+        assert!(slot
+            .transition(
+                true,
+                Some(&rule),
+                || Ok(state.borrow().clone()),
+                |target| {
+                    *state.borrow_mut() = target.clone();
+                    Err("failed".into())
+                }
+            )
+            .is_err());
+        slot.transition(
+            true,
+            None,
+            || Ok(state.borrow().clone()),
+            |_| panic!("failed action must not reconnect"),
+        )
+        .unwrap();
+        assert!(!state.borrow().on);
     }
     #[test]
     fn matches_full_paths_case_insensitively() {

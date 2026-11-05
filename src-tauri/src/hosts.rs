@@ -140,9 +140,7 @@ fn update_file(path: &Path, source: &str) -> Result<UpdateResult, String> {
 
 #[tauri::command]
 pub async fn update_hosts() -> Result<UpdateResult, String> {
-    if !crate::is_admin() {
-        return Err("admin_required".into());
-    }
+    crate::privileges::require("hosts")?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()

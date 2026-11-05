@@ -1,5 +1,8 @@
 // Mock Tauri IPC surface and demo state for automated screenshot generation.
 // This file runs exclusively during screenshot generation and does not affect production.
+import appPackage from '../package.json';
+import stableCore from '../core-channel/stable.json';
+import telegramModule from '../src-tauri/telegram-module.json';
 
 localStorage.setItem('zapret_lang', 'ru');
 localStorage.setItem('zapret_theme', 'zapret');
@@ -44,6 +47,9 @@ style.textContent = `
     pointer-events: none !important;
     z-index: 99999 !important;
   }
+  /* The capture viewport cannot scroll. Absolute positioning avoids Chromium
+     dropping the transparent fixed header when capturing a clipped body. */
+  .app-header { position: absolute !important; }
   :root[data-setup-window] body {
     background: transparent !important;
   }
@@ -84,10 +90,12 @@ const mockConfig = {
   cfproxy_domains: [],
   worker: false,
   worker_domains: [],
+  start_with_zapret: true,
 };
 
 const mockTrafficSnapshot = {
   running: true,
+  filter_active: true,
   error: null,
   upload_bps: 1420000,
   download_bps: 12850000,
@@ -101,6 +109,10 @@ const mockTrafficSnapshot = {
     {
       pid: 1284,
       process_name: 'Discord.exe',
+      hostname: 'discord.com',
+      state: 'established',
+      route: 'warp',
+      zapret: { state: 'unknown', reason: 'proxy' },
       local_address: '192.168.1.105',
       local_port: 54122,
       remote_address: '162.159.130.233',
@@ -120,6 +132,10 @@ const mockTrafficSnapshot = {
     {
       pid: 4592,
       process_name: 'chrome.exe',
+      hostname: 'youtube.com',
+      state: 'established',
+      route: 'direct',
+      zapret: { state: 'expected', reason: 'hostlist', profile: 1 },
       local_address: '192.168.1.105',
       local_port: 58490,
       remote_address: '142.250.74.206',
@@ -139,6 +155,10 @@ const mockTrafficSnapshot = {
     {
       pid: 8912,
       process_name: 'Telegram.exe',
+      hostname: 'telegram.org',
+      state: 'established',
+      route: 'tg_proxy',
+      zapret: { state: 'unknown', reason: 'proxy' },
       local_address: '127.0.0.1',
       local_port: 1443,
       remote_address: '149.154.167.220',
@@ -158,6 +178,10 @@ const mockTrafficSnapshot = {
     {
       pid: 6120,
       process_name: 'steam.exe',
+      hostname: 'steamcommunity.com',
+      state: 'established',
+      route: 'direct',
+      zapret: { state: 'excluded', reason: 'excluded' },
       local_address: '192.168.1.105',
       local_port: 51230,
       remote_address: '23.48.201.88',
@@ -197,17 +221,22 @@ const mockTrafficSnapshot = {
 
 const mockDiagnostics = [
   { name: 'Base Filtering Engine', passed: true, message: 'Service is running' },
-  { name: 'System Proxy', passed: true, message: 'Proxy check passed' },
+  { name: 'System Proxy', passed: true, message: 'No system proxy detected' },
   { name: 'TCP Timestamps', passed: true, message: 'TCP timestamps are enabled' },
-  { name: 'Adguard', passed: true, message: 'Adguard check passed' },
-  { name: 'Killer Network Service', passed: true, message: 'Killer check passed' },
-  { name: 'Intel Connectivity Network Service', passed: true, message: 'Intel Connectivity check passed' },
-  { name: 'Check Point', passed: true, message: 'Check Point check passed' },
-  { name: 'SmartByte', passed: true, message: 'SmartByte check passed' },
-  { name: 'VPN Services', passed: true, message: 'VPN check passed' },
+  { name: 'Adguard', passed: true, message: 'Adguard not detected' },
+  { name: 'Killer Network Service', passed: true, message: 'Killer services not detected' },
+  { name: 'Intel Connectivity Network Service', passed: true, message: 'Intel Connectivity service not detected' },
+  { name: 'Check Point', passed: true, message: 'Check Point services not detected' },
+  { name: 'SmartByte', passed: true, message: 'SmartByte services not detected' },
+  { name: 'VPN Services', passed: true, message: 'No VPN services detected' },
   { name: 'Secure DNS', passed: true, message: 'Secure DNS is configured' },
   { name: 'Hosts File', passed: true, message: 'No YouTube entries in hosts file' },
   { name: 'WinDivert', passed: true, message: 'WinDivert driver is running' },
+];
+
+const mockRules = [
+  { id: 'game', name: 'Игры', icon: 'sports_esports', path: 'C:\\Games\\Game\\game.exe', enabled: true, zapret: 'keep', strategy: null, warp: 'on', warp_mode: 'proxy', warp_routes: null, restore: true, close_off: false },
+  { id: 'discord', name: 'Discord', icon: 'forum', path: 'C:\\Apps\\Discord\\Discord.exe', enabled: true, zapret: 'on', strategy: 'general (ALT12)', warp: 'keep', warp_mode: null, warp_routes: null, restore: true, close_off: false },
 ];
 
 window.__TAURI__ = {
@@ -232,30 +261,29 @@ window.__TAURI__ = {
             mode: 'service',
           };
         case 'get_filters_status':
-          return { game_filter: 'disabled', ipset_filter: 'any' };
+          return { game_filter: 'disabled', ipset: 'any', game_tcp_range: '1024-65535', game_udp_range: '1024-65535' };
         case 'get_fakes_info':
           return {
-            active_tls: 'google',
-            active_http: 'default',
-            active_udp: 'default',
+            current_discord_fake: 'quic_initial_steamcommunity_com',
+            current_game_fake: 'quic_initial_dbankcloud_ru',
             available_fakes: [
-              { name: 'google', type: 'tls' },
-              { name: 'default', type: 'http' },
-              { name: 'cloudflare', type: 'tls' },
+              { name: 'quic_initial_steamcommunity_com', filename: 'quic_initial_steamcommunity_com.bin' },
+              { name: 'quic_initial_dbankcloud_ru', filename: 'quic_initial_dbankcloud_ru.bin' },
+              { name: 'quic_initial_www_google_com', filename: 'quic_initial_www_google_com.bin' },
             ],
           };
         case 'get_ui_version_cmd':
-          return '26.9.13';
+          return appPackage.version;
         case 'get_local_version_cmd':
         case 'get_core_version_cmd':
-          return '1.8.6';
+          return stableCore.version;
         case 'get_core_update_info':
         case 'check_core_update':
-          return { status: 'up_to_date', currentVersion: '1.8.6', stableVersion: '1.8.6' };
+          return { status: 'up_to_date', currentVersion: stableCore.version, stableVersion: stableCore.version };
         case 'get_core_installation_state':
           return {
-            currentVersion: '1.8.6',
-            previousVersion: '1.8.5',
+            currentVersion: stableCore.version,
+            previousVersion: '1.10.3',
             rollbackAvailable: true,
           };
         case 'get_warp_status':
@@ -263,17 +291,23 @@ window.__TAURI__ = {
             installed: true,
             connected: true,
             state: 'connected',
-            mode: 'warp',
-            modes: ['warp', 'doh', 'dot', 'proxy'],
+            mode: 'proxy',
+            modes: ['doh', 'dot', 'warp', 'warp+dot', 'warp+doh', 'proxy', 'tunnel_only'],
             version: '2026.7.1343.0',
-            proxy: null,
+            protocol: 'MASQUE', protocol_editable: true, diag_supported: true,
+            proxy: { address: '127.0.0.1', port: 40000, kind: 'SOCKS5', active: true, port_editable: true },
+            sites: { domains: ['discord.com', 'youtube.com', 'googlevideo.com'], enabled: true, runtime_active: true, connections: [] },
+            applications: { paths: ['C:\\Apps\\Discord\\Discord.exe', 'C:\\Games\\Game\\game.exe'], enabled: true, runtime_active: true, active_connections: 2, total_connections: 8, failed_connections: 0, connections: [] },
+            automation: { restore_rules: true }, last_errors: [], connections: [], error: null,
           };
+        case 'get_application_rules':
+          return { config: { enabled: true, rules: structuredClone(mockRules) }, active: ['game'], error: null, paused: false };
         case 'get_telegram_status':
           return {
             installed: true,
             running: true,
             busy: false,
-            version: '1.10.2',
+            version: telegramModule.version,
             download_bytes: 16923850,
             port: 1443,
             host: '127.0.0.1',
@@ -281,7 +315,7 @@ window.__TAURI__ = {
         case 'get_telegram_config':
           return structuredClone(mockConfig);
         case 'read_user_list':
-          if (args?.filename === 'list-general.txt') {
+          if (args?.filename === 'list-general-user.txt') {
             return [
               'discord.com',
               'discordapp.com',
@@ -296,13 +330,13 @@ window.__TAURI__ = {
               'medium.com',
             ];
           }
-          if (args?.filename === 'list-exclude.txt') {
+          if (args?.filename === 'list-exclude-user.txt') {
             return ['gosuslugi.ru', 'mos.ru', 'sberbank.ru', 'tbank.ru', 'yandex.ru', 'vk.com'];
           }
           if (args?.filename === 'list-ip.txt') {
             return ['162.158.0.0/15', '104.16.0.0/12', '149.154.167.220', '91.108.56.0/22'];
           }
-          if (args?.filename === 'list-ip-exclude.txt') {
+          if (args?.filename === 'ipset-exclude-user.txt') {
             return ['192.168.0.0/16', '10.0.0.0/8', '127.0.0.1'];
           }
           return [];
@@ -313,14 +347,14 @@ window.__TAURI__ = {
         case 'stop_traffic_monitor':
           return { ...mockTrafficSnapshot, running: false };
         case 'run_diagnostics':
-          return structuredClone(mockDiagnostics);
+          return { checks: mockDiagnostics.map(({ passed, ...check }) => ({ ...check, status: passed ? 'passed' : 'warning', link: null })), vpn_services: null };
         case 'get_setup_state':
         case 'precheck_tests':
           return { strategies_count: 5, is_admin: true };
         case 'ensure_binaries_present':
           return true;
         case 'telegram_logs':
-          return 'INFO: TG WS Bridge Proxy 1.10.2 active on 127.0.0.1:1443\\nINFO: Secret: [secret]\\nINFO: Connection handled';
+          return `INFO: TG WS Proxy ${telegramModule.version} active on 127.0.0.1:1443\nINFO: Connection handled`;
         default:
           return null;
       }
@@ -341,6 +375,7 @@ window.__TAURI__ = {
       maximize: async () => {},
       close: async () => {},
       isMaximized: async () => false,
+      onResized: async () => () => {},
       startDragging: async () => {},
     }),
   },

@@ -47,6 +47,10 @@ pub trait CoreProvider: Send + Sync {
     fn local_version(&self) -> String;
     fn is_installed(&self) -> bool;
     fn strategies(&self) -> Result<Vec<String>, String>;
+    /// Lists strategies without importing or rewriting an installed package.
+    fn strategies_readonly(&self) -> Result<Vec<String>, String> {
+        self.strategies()
+    }
     fn parse_strategy(
         &self,
         strategy: &str,

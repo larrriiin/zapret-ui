@@ -144,7 +144,7 @@ fn validate_config(cfg: &Config) -> Result<(), String> {
 #[derive(Serialize)]
 pub struct Status {
     installed: bool,
-    running: bool,
+    pub(crate) running: bool,
     busy: bool,
     version: String,
     download_bytes: u64,
@@ -444,7 +444,7 @@ pub async fn restart_telegram(app: tauri::AppHandle) -> Result<(), String> {
 }
 pub fn start_on_app_launch_if_configured(app: &tauri::AppHandle) -> Result<(), String> {
     let path = root(app)?;
-    if !installed(&path) || !config(&path)?.start_with_zapret {
+    if !installed(&path) || (!config(&path)?.start_with_zapret && !crate::privileges::resume_telegram()) {
         return Ok(());
     }
     let _operation = Operation::acquire()?;

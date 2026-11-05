@@ -15,6 +15,7 @@ import sectionWarpSettings from './sections/warp-settings.html?raw';
 import sectionSettings from './sections/settings.html?raw';
 
 import modalCloseConfirm from './modals/close-confirm.html?raw';
+import modalElevation from './modals/elevation.html?raw';
 import modalRestart from './modals/restart.html?raw';
 import modalUpdate from './modals/update.html?raw';
 import modalLatestVersion from './modals/latest-version.html?raw';
@@ -55,6 +56,7 @@ export function mountComponents() {
 
   // Modals and the restart banner are top-level, mounted into <body>.
   mount('modals-host', modalCloseConfirm);
+  mount('modals-host', modalElevation);
   mount('modals-host', modalRestart);
   mount('modals-host', modalUpdate);
   mount('modals-host', modalLatestVersion);

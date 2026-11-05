@@ -99,8 +99,15 @@ check(!$('info-modal').classList.contains('hidden') && $('info-content').textCon
 $('info-modal-close').click();
 async function manualCheck(id) {
   $(id).click();
-  await wait(200);
+  await finishCheck();
   $('warp-status-dialog').close();
+}
+async function finishCheck() {
+  const deadline = performance.now() + 3000;
+  while ($('warp-status-report').getAttribute('aria-busy') === 'true') {
+    if (performance.now() > deadline) throw new Error('WARP status check did not finish');
+    await wait(20);
+  }
 }
 check(before === JSON.stringify(rects()), 'WARP absent: all original hero element bounds unchanged');
 check($('warp-card').hidden, 'WARP absent: no visible WARP card');
@@ -207,7 +214,7 @@ $('warp-apps-list').querySelector('[aria-label^="Убрать"]').click(); await
 check(!applications.paths.length && !$('warp-apps-empty').hidden, 'Removing the last application shows the empty state');
 showSection('home'); await wait(220);
 check(!$('section-home').classList.contains('hidden') && $('section-warp-settings').classList.contains('hidden'), 'Connection controls return to the home page');
-$('warp-refresh').click(); await wait(200);
+$('warp-refresh').click(); await finishCheck();
 check($('warp-status-dialog').open && $('warp-status-report').textContent.includes('127.0.0.1:40001'), 'Home status check reports proxy endpoint');
 $('warp-status-dialog').close();
 failed = true; $('warp-connect').click(); await wait(200);
@@ -257,9 +264,9 @@ check(!$('warp-auto-connect') && !$('warp-check') && !$('warp-page-connect') && 
 $('warp-refresh').click(); await wait(200);
 check($('warp-status-dialog').open && $('warp-status-report').textContent.includes('Тестовый маршрут через WARP') && $('warp-status-report').textContent.includes('Работает') && $('warp-status-report').textContent.includes('MASQUE'), 'WARP status dialog includes protocol, SOCKS5 probe and route result');
 $('warp-status-dialog').close();
-probeFailure = true; $('warp-refresh').click(); await wait(200);
+probeFailure = true; $('warp-refresh').click(); await finishCheck();
 check($('warp-status-report').textContent.includes('Mock route failed') && $('warp-status-report').textContent.includes('Не работает'), 'Failed route is explained inside the status dialog');
-$('warp-status-dialog').close(); probeFailure = 'throw'; $('warp-refresh').click(); await wait(200);
+$('warp-status-dialog').close(); probeFailure = 'throw'; $('warp-refresh').click(); await finishCheck();
 check($('warp-status-report').textContent.includes('Mock health probe unavailable') && $('warp-status-report').textContent.includes('Не проверен'), 'A failed health command leaves the route explicitly unverified');
 $('warp-status-dialog').close(); probeFailure = false;
 protocol = null; await manualCheck('warp-settings-refresh');

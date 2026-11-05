@@ -44,6 +44,8 @@
 | <img alt="Главный экран: управление стратегией" src="https://raw.githubusercontent.com/larrriiin/zapret-ui/main/docs/screenshots/home.png"> | <img alt="Настройки Cloudflare WARP" src="https://raw.githubusercontent.com/larrriiin/zapret-ui/main/docs/screenshots/warp.png"> |
 | **Traffic Monitor** | **Diagnostics** |
 | <img alt="Монитор сетевого трафика" src="https://raw.githubusercontent.com/larrriiin/zapret-ui/main/docs/screenshots/traffic.png"> | <img alt="Встроенная диагностика" src="https://raw.githubusercontent.com/larrriiin/zapret-ui/main/docs/screenshots/diagnostics.png"> |
+| **Automations** | **First-time Setup** |
+| <img alt="Автоматические правила для приложений и игр" src="https://raw.githubusercontent.com/larrriiin/zapret-ui/main/docs/screenshots/automations.png"> | <img alt="Первая настройка ZAPRET UI" src="https://raw.githubusercontent.com/larrriiin/zapret-ui/main/docs/screenshots/setup.png"> |
 
 <p align="center"><sub>Нажмите на изображение в репозитории, чтобы открыть его в полном размере.</sub></p>
 

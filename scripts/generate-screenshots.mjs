@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdir, copyFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { createServer } from 'vite';
@@ -9,6 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const rootDir = resolve(__dirname, '..');
 const screenshotsDir = join(rootDir, 'screenshots');
+const websiteScreenshotsDir = join(rootDir, 'docs', 'screenshots');
 const indexPath = join(rootDir, 'src', 'index.html');
 
 await mkdir(screenshotsDir, { recursive: true });
@@ -27,7 +28,7 @@ const server = await createServer({
         server.middlewares.use(async (req, res, next) => {
           if (!req.url?.startsWith('/screenshot.html')) return next();
           try {
-            const rawHtml = await readFile(indexPath, 'utf8');
+            const rawHtml = (await readFile(indexPath, 'utf8')).replace('<head>', '<head><link rel="icon" href="data:,">');
             const transformed = rawHtml.replace(
               '<script type="module" src="/main.js"></script>',
               `<script type="module" src="/@fs/${mockPath}"></script>\n    <script type="module" src="/main.js"></script>`
@@ -43,12 +44,14 @@ const server = await createServer({
   ],
 });
 
+// Browser plugin not available; use the repository's Playwright/Edge workflow.
+let browser;
+try {
 await server.listen();
 const baseUrl = `http://127.0.0.1:${server.config.server.port}`;
 console.log(`Vite server ready at ${baseUrl}`);
 
 console.log('Launching browser via playwright-core...');
-let browser;
 try {
   browser = await chromium.launch({
     channel: 'msedge',
@@ -68,10 +71,14 @@ const context = await browser.newContext({
 });
 
 const page = await context.newPage();
-page.on('console', (msg) => {
-  if (msg.type() === 'error') console.log(`[Page Error]: ${msg.text()}`);
+const pageErrors = [];
+page.on('response', response => {
+  if (response.status() >= 400) pageErrors.push(`${response.status()} ${response.url()}`);
 });
-page.on('pageerror', (err) => console.error('[Page Exception]:', err));
+page.on('console', (msg) => {
+  if (msg.type() === 'error') pageErrors.push(msg.text());
+});
+page.on('pageerror', (err) => pageErrors.push(String(err)));
 
 async function waitForAppReady() {
   await page.waitForFunction(() => !document.documentElement.classList.contains('app-loading'));
@@ -157,7 +164,9 @@ const screens = [
         document.getElementById('section-zapret-settings')?.scrollTo(0, 0);
       });
       await page.waitForSelector('#zapret-settings-diagnostics:not(.hidden)');
-      await page.waitForTimeout(250);
+      await page.locator('#run-diagnostics-btn').click();
+      await page.locator('#diagnostics-show-all-btn').waitFor({ state: 'visible' });
+      await page.locator('#diagnostics-show-all-btn').click();
     },
   },
   {
@@ -167,10 +176,10 @@ const screens = [
       await page.evaluate(async () => {
         const { showSection } = await import('/features/navigation.js');
         showSection('traffic');
-        const toggleBtn = document.getElementById('traffic-toggle-btn');
-        if (toggleBtn) toggleBtn.click();
       });
       await page.waitForSelector('#section-traffic:not(.hidden)');
+      await page.locator('#traffic-toggle-btn').click();
+      await page.waitForFunction(() => Number(document.getElementById('traffic-connection-count').textContent) > 0);
       await page.waitForTimeout(1100);
     },
   },
@@ -183,6 +192,18 @@ const screens = [
         showSection('settings');
       });
       await page.waitForSelector('#section-settings:not(.hidden)');
+      await page.waitForTimeout(250);
+    },
+  },
+  {
+    name: 'automations',
+    title: 'Автоматизации (Application Rules)',
+    action: async () => {
+      await page.evaluate(async () => {
+        const { showSection } = await import('/features/navigation.js');
+        showSection('automations');
+      });
+      await page.waitForSelector('#section-automations:not(.hidden)');
       await page.waitForTimeout(250);
     },
   },
@@ -222,12 +243,31 @@ const results = [];
 for (const screen of screens) {
   process.stdout.write(`Capturing [${screen.name}.png] - ${screen.title}... `);
   await screen.action();
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    document.getElementById('sections-host')?.scrollTo(0, 0);
+  });
+  if (screen.name !== 'setup') {
+    await page.locator('#app-header').scrollIntoViewIfNeeded();
+  }
+  await page.mouse.move(1095, 975);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  if (pageErrors.length) throw new Error(`Screenshot ${screen.name} has runtime errors: ${pageErrors.join('\n')}`);
+  if (await page.locator('vite-error-overlay').count()) throw new Error(`Vite error overlay in ${screen.name}`);
 
   const filePath = join(screenshotsDir, `${screen.name}.png`);
-  await page.screenshot({
-    path: filePath,
+  const screenshot = await page.screenshot({
     omitBackground: true,
+    animations: 'disabled',
   });
+  const existing = await readFile(filePath).catch(error => {
+    if (error.code !== 'ENOENT') throw error;
+    return null;
+  });
+  // Keep unchanged images untouched, including files open in a preview window.
+  if (!existing?.equals(screenshot)) await writeFile(filePath, screenshot);
 
   if (screen.cleanup) {
     await screen.cleanup();
@@ -255,6 +295,11 @@ for (const res of results) {
         const w = img.width;
         const h = img.height;
         const getAlpha = (x, y) => ctx.getImageData(x, y, 1, 1).data[3];
+        const header = ctx.getImageData(40, 20, 660, 120).data;
+        let headerPixels = 0;
+        for (let i = 0; i < header.length; i += 4) {
+          if (header[i + 3] > 200 && Math.max(header[i], header[i + 1], header[i + 2]) > 125) headerPixels++;
+        }
 
         resolve({
           width: w,
@@ -264,6 +309,7 @@ for (const res of results) {
           bl: getAlpha(0, h - 1),
           br: getAlpha(w - 1, h - 1),
           center: getAlpha(Math.floor(w / 2), Math.floor(h / 2)),
+          headerPixels,
         });
       };
       img.src = src;
@@ -282,9 +328,18 @@ for (const res of results) {
   if (!correctSize) {
     throw new Error(`Unexpected dimensions for ${res.name}: expected 2200x1960, got ${check.width}x${check.height}`);
   }
+  if (!insideOpaque) throw new Error(`Screenshot center is transparent in ${res.name}`);
+  if (check.headerPixels < 100) throw new Error(`Window header is missing from ${res.name}`);
 }
 
-await browser.close();
-await server.close();
+await mkdir(websiteScreenshotsDir, { recursive: true });
+for (const result of results) {
+  await copyFile(result.path, join(websiteScreenshotsDir, result.name));
+}
+await copyFile(join(screenshotsDir, 'home.png'), join(rootDir, 'docs', 'assets', 'app-screenshot.png'));
 
-console.log(`\nAll ${results.length} screenshots successfully generated in ${screenshotsDir}/`);
+console.log(`\nAll ${results.length} screenshots generated and synchronized with docs/screenshots/.`);
+} finally {
+  await browser?.close();
+  await server.close();
+}

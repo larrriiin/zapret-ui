@@ -126,7 +126,7 @@ const fields = ['zapret', 'strategy', 'warp', 'mode', 'close'];
 
 const dropdowns = Object.fromEntries(fields.map(name => [name, createWarpDropdown(`auto-${name}`)]));
 
-const errorText = error => typeof error === 'string' ? error : error?.detail || error?.message || String(error);
+const errorText = error => String(error?.detail || error?.message || error).replace(/admin_required:\s*(service|traffic|tests|hosts|core|files|warp_apps)\b/g, () => t('elevation_background'));
 
 function showError(error) {
   const modal = $('auto-editor').open;

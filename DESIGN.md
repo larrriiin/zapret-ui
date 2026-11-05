@@ -98,6 +98,13 @@ An active automation uses `ui-panel ui-panel-active`: the normal panel border be
 Automation creation/editing uses the native `#auto-editor` dialog, with `ui-dialog ui-dialog-wide` (760px maximum width), not a disclosure in the page. Put validation errors inside the dialog. Pass the dialog as `createWarpDropdown().init(dialog)`'s popup host so options remain interactive in the native modal top layer; the default host for other consumers is body. Closing cancels the draft, preserves saved rules and restores focus to the initiating action.
 
 
+## Optional administrator access
+
+Reference: `src/components/modals/elevation.html` and `src/features/admin-check.js`.
+Use a native `ui-dialog` with a reason, a cancel action and an explicit restart action. Focus starts on Cancel; Escape cancels unless a restart is in progress. Permission errors from user actions open the dialog; background rules use the non-modal `ui-panel` notice and never open UAC themselves. Restart returns to the current section; the user repeats the action after elevation.
+
+The background notice has an accessible `ui-icon-button ui-icon-button-sm` close action. Dismissing it suppresses the notice until the next application launch, including repeated background polls and events. Explicit user actions still show their permission dialog.
+
 ## Tray context menu
 
 Reference: `src/tray.html` and `src/tray.js`. The right-click tray menu is a separate, frameless `tray-menu` window; left click restores the application. Reuse `ui-select-popup` and `ui-select-option` with menu/menuitem roles, local Material Symbols and the shared theme module (including saved accents and system preference). Layout belongs in `src/features/tray.css`. Arrow keys, Home/End and Tab move focus; Escape and losing native focus dismiss the menu. The strategy list scrolls within the same window. Native placement clamps the window to the clicked monitor work area at its DPI scale.

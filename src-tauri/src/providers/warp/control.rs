@@ -160,6 +160,11 @@ pub(super) fn application_connection(
     connected: bool,
     activate_selected: impl FnOnce(u16) -> Result<()>,
 ) -> Result<()> {
+    // Disconnect is also a recovery action: an Unable/error status must not
+    // prevent cancellation of the daemon's pending connection/reconnect intent.
+    if !connected {
+        client.command(&["disconnect"])?;
+    }
     let before = client.read();
     if let Some(error) = before.error.clone() {
         return Err(error);
@@ -360,6 +365,7 @@ mod tests {
         fail_disconnect: bool,
         ready: bool,
         supported: bool,
+        status_error: Option<&'static str>,
     }
     impl Fake {
         fn new(mode: &str, protocol: &str) -> Self {
@@ -374,6 +380,7 @@ mod tests {
                 fail_disconnect: false,
                 ready: true,
                 supported: true,
+                status_error: None,
             }
         }
     }
@@ -385,6 +392,9 @@ mod tests {
                 mode: Some(self.mode.borrow().clone()),
                 protocol: Some(self.protocol.borrow().clone()),
                 modes: vec!["proxy".into(), "warp".into()],
+                error: self
+                    .status_error
+                    .map(|code| WarpError::new(code, "test status failure")),
                 proxy: (self.mode.borrow().as_str() == "proxy").then(|| ProxyStatus {
                     address: "127.0.0.1".into(),
                     port: Some(40000),
@@ -478,6 +488,27 @@ mod tests {
         .unwrap();
         assert!(fake.read().connected);
         assert_eq!(fake.read().mode.as_deref(), Some("warp"));
+    }
+    #[test]
+    fn application_disconnect_is_sent_even_when_unable_or_status_read_fails() {
+        for code in [
+            "warp_connection_failed",
+            "warp_status_error",
+            "warp_cli_error",
+        ] {
+            let mut fake = Fake::new("proxy", "MASQUE");
+            fake.status_error = Some(code);
+            assert!(
+                application_connection(&fake, None, false, |_| panic!("must not route")).is_err()
+            );
+            assert_eq!(*fake.commands.borrow(), vec![vec!["disconnect"]]);
+        }
+    }
+    #[test]
+    fn disconnected_snapshot_still_cancels_the_daemons_connection_intent() {
+        let fake = Fake::new("proxy", "MASQUE");
+        application_connection(&fake, None, false, |_| panic!("must not route")).unwrap();
+        assert_eq!(*fake.commands.borrow(), vec![vec!["disconnect"]]);
     }
     #[test]
     fn application_routes_require_ready_proxy_and_report_activation_errors() {

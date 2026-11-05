@@ -4,6 +4,7 @@ import { escapeHtml } from '../lib/dom.js';
 import { state } from '../lib/state.js';
 import { setStrategyValue, loadStrategies } from './strategies.js';
 import { pollStatus } from './status.js';
+import { requestAdmin } from './admin-check.js';
 
 const WizardState = { Hidden: 'hidden', Preflight: 'preflight', Progress: 'progress', Results: 'results' };
 const logColors = {
@@ -211,7 +212,11 @@ export async function runWizard(testType) {
   }
 
   const blockers = [];
-  if (!pre.is_admin) blockers.push({ severity: 'error', icon: 'shield', text: t('wizard_need_admin') });
+  if (!pre.is_admin) {
+    showWizardStep(WizardState.Hidden);
+    requestAdmin('tests');
+    return;
+  }
   if (pre.service_installed || pre.service_running) {
     blockers.push({ severity: 'warn', icon: 'build', text: t('wizard_service_blocker'), action: 'stop' });
   } else if (pre.winws_running) {
