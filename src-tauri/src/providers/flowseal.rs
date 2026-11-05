@@ -375,13 +375,16 @@ impl FlowsealProvider {
     }
 
     fn read_catalog_file(&self) -> Result<StrategyCatalog, String> {
-        let path = self.catalog_path();
+        self.read_catalog_from(&self.catalog_path())
+    }
+
+    fn read_catalog_from(&self, path: &Path) -> Result<StrategyCatalog, String> {
         let metadata =
-            fs::metadata(&path).map_err(|e| format!("Cannot inspect strategy catalog: {e}"))?;
+            fs::metadata(path).map_err(|e| format!("Cannot inspect strategy catalog: {e}"))?;
         if metadata.len() > 4 * 1024 * 1024 {
             return Err("Strategy catalog exceeds the 4 MB size limit".to_string());
         }
-        let data = fs::read(&path).map_err(|e| format!("Cannot read strategy catalog: {e}"))?;
+        let data = fs::read(path).map_err(|e| format!("Cannot read strategy catalog: {e}"))?;
         let catalog: StrategyCatalog = serde_json::from_slice(&data)
             .map_err(|e| format!("Strategy catalog is corrupted: {e}"))?;
         if catalog.schema_version != STRATEGY_CATALOG_SCHEMA_VERSION
@@ -479,6 +482,25 @@ impl CoreProvider for FlowsealProvider {
     fn strategies(&self) -> Result<Vec<String>, String> {
         Ok(self
             .read_catalog()?
+            .strategies
+            .into_iter()
+            .map(|strategy| strategy.name)
+            .collect())
+    }
+    fn strategies_readonly(&self) -> Result<Vec<String>, String> {
+        let _guard = STRATEGY_CATALOG_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let upstream = self.upstream_strategy_files()?;
+        let mut catalog = if !upstream.is_empty() {
+            self.build_catalog(&upstream)?
+        } else if self.catalog_path().is_file() {
+            self.read_catalog_file()?
+        } else {
+            self.read_catalog_from(&self.paths.root().join(STRATEGY_CATALOG_BACKUP_NAME))?
+        };
+        Self::migrate_catalog(&mut catalog);
+        Ok(catalog
             .strategies
             .into_iter()
             .map(|strategy| strategy.name)
@@ -678,6 +700,14 @@ mod tests {
         )
         .expect("legacy catalog");
         let p = FlowsealProvider::new(&root);
+        let before = std::fs::read(root.join(STRATEGY_CATALOG_NAME)).unwrap();
+        assert_eq!(p.strategies_readonly().unwrap(), ["ALT2", "ALT11"]);
+        assert_eq!(
+            std::fs::read(root.join(STRATEGY_CATALOG_NAME)).unwrap(),
+            before
+        );
+        assert!(root.join("ALT2.bat").is_file());
+        assert!(root.join("ALT11.bat").is_file());
         assert_eq!(p.strategies().expect("strategies"), ["ALT2", "ALT11"]);
         assert!(root.join(STRATEGY_CATALOG_NAME).is_file());
         assert!(!root.join("ALT2.bat").exists());

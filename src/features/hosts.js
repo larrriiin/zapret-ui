@@ -31,7 +31,7 @@ export function initHosts() {
     } catch (error) {
       const known = ['admin_required', 'download_failed', 'invalid_source', 'unsupported_encoding',
         'open_failed', 'read_failed', 'file_too_large', 'backup_failed', 'write_failed', 'restore_failed'];
-      message = known.includes(String(error)) ? `hosts_error_${error}` : 'hosts_error_write_failed';
+      message = error?.code === 'elevation_required' ? 'hosts_error_admin_required' : known.includes(String(error)) ? `hosts_error_${error}` : 'hosts_error_write_failed';
     } finally {
       busy = false;
       render();

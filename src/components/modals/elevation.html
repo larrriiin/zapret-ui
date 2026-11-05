@@ -1,0 +1,20 @@
+<dialog id="elevation-dialog" class="ui-dialog max-w-lg" aria-labelledby="elevation-title" aria-describedby="elevation-reason elevation-description">
+    <div class="flex items-center gap-3 mb-4">
+        <span class="material-symbols-outlined text-primary text-2xl" aria-hidden="true">shield</span>
+        <h2 id="elevation-title" class="font-headline text-lg font-bold text-primary" data-i18n="elevation_required"></h2>
+    </div>
+    <p id="elevation-reason" class="text-sm mb-3"></p>
+    <p id="elevation-description" class="text-sm text-on-surface-variant mb-6" data-i18n="elevation_description"></p>
+    <p id="elevation-error" class="text-sm text-error mb-4" role="alert" hidden></p>
+    <div class="flex flex-wrap justify-end gap-3">
+        <button id="elevation-cancel" class="ui-button" data-i18n="cancel" autofocus></button>
+        <button id="elevation-restart" class="ui-button ui-button-primary" data-i18n="elevation_restart"></button>
+    </div>
+</dialog>
+<div id="elevation-notice" class="ui-panel fixed bottom-4 right-4 left-24 z-40 p-4 flex flex-wrap items-center justify-between gap-3" role="status" hidden>
+    <p class="text-sm flex-1" data-i18n="elevation_background"></p>
+    <button id="elevation-notice-restart" class="ui-button ui-button-sm" data-i18n="elevation_restart"></button>
+    <button id="elevation-notice-close" type="button" class="ui-icon-button ui-icon-button-sm shrink-0 self-start" data-i18n="close" data-i18n-attr="aria-label">
+        <span class="material-symbols-outlined" aria-hidden="true">close</span>
+    </button>
+</div>

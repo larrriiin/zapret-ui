@@ -9,6 +9,7 @@ import { updateRestartBanner } from '../lib/restart.js';
 import { syncThemeFromStorage } from './theme.js';
 import { markSetupCompleted, shouldShowFirstRun } from './setup-state.js';
 import { installTelegram, moduleError } from './telegram.js';
+import { requestAdmin } from './admin-check.js';
 
 const isSetupWindow = new URLSearchParams(location.search).get('setup') === '1';
 
@@ -46,7 +47,18 @@ function goTo(next, animate = true) {
     item.toggleAttribute('data-complete', index < step);
     if (index === step) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current');
   });
-  $('setup-title').textContent = t(['setup_welcome', 'setup_prepare_title', 'setup_test_title', 'setup_complete_title'][step]);
+  const title = $('setup-title');
+  const titleText = t(['setup_welcome', 'setup_prepare_title', 'setup_test_title', 'setup_complete_title'][step]);
+  title.textContent = titleText;
+  if (step === 0) {
+    const brand = document.createElement('span');
+    brand.className = 'text-primary';
+    brand.textContent = 'ZAPRET UI';
+    const brandStart = titleText.indexOf(brand.textContent);
+    if (brandStart !== -1) {
+      title.replaceChildren(titleText.slice(0, brandStart), brand, titleText.slice(brandStart + brand.textContent.length));
+    }
+  }
   $('setup-description').textContent = t(['setup_welcome_desc', rerun ? 'setup_prepare_again_desc' : 'setup_prepare_desc', 'setup_test_desc', 'setup_complete_desc'][step]);
   $('setup-test-intro').hidden = Boolean(best);
   $('setup-result').hidden = !best;
@@ -67,7 +79,7 @@ function setProgress(label, detail = '', value = null) {
 }
 async function stopForSetup() {
   const pre = await invoke('precheck_tests');
-  if (!pre.is_admin) throw new Error(t('wizard_need_admin'));
+  if (!pre.is_admin) { requestAdmin('tests'); throw new Error(t('elevation_required')); }
   if (pre.service_installed || pre.service_running || pre.winws_running) {
     await invoke('stop_zapret');
     const after = await invoke('precheck_tests');

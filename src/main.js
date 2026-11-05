@@ -11,7 +11,7 @@ import {
   restartServiceIfRunning,
 } from './lib/restart.js';
 
-import { ensureAdminPrivileges } from './features/admin-check.js';
+import { initAdminPrivileges } from './features/admin-check.js';
 import { loadVersions } from './features/versions.js';
 import { initTitlebar } from './features/titlebar.js';
 import { initNavigation, showSection } from './features/navigation.js';
@@ -48,6 +48,8 @@ initTheme();
 window.addEventListener('DOMContentLoaded', async () => {
   try {
   initI18n();
+  initAdminPrivileges();
+  const elevationContext = await invoke('elevation_context');
   if (new URLSearchParams(location.search).get('setup') === '1') {
     document.documentElement.dataset.setupWindow = 'true';
     initFirstRun();
@@ -61,11 +63,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   initTitlebar();
   const warpReady = initWarp().then(() => null, error => error);
 
-  const adminOk = await ensureAdminPrivileges();
-  if (!adminOk) { document.documentElement.classList.remove('app-loading'); await invoke('show_app_window', { force: true }); return; }
-
   initFirstRun();
-  await maybeShowFirstRun();
+  if (elevationContext?.section === 'setup') await openSetup({ repeat: elevationContext.repeat, clearLists: elevationContext.clear_lists });
+  else await maybeShowFirstRun();
   await invoke('show_app_window', { force: false });
 
   await loadCachedTestResults();
@@ -88,6 +88,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }, 2000);
 
   initNavigation();
+  if (elevationContext && elevationContext.section !== 'setup') showSection(elevationContext.section);
   initAutomations();
   initTelegram();
   initConnectButtons();

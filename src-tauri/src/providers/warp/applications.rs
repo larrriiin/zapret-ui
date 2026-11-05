@@ -235,6 +235,10 @@ fn configure_inner(
     port: Option<u16>,
     persist: bool,
 ) -> Result<()> {
+    if enabled {
+        crate::privileges::require("warp_apps")
+            .map_err(|_| WarpError::new("admin_required", "warp_apps"))?;
+    }
     let mut guard = APPLICATIONS.lock().map_err(error)?;
     let runtime = guard
         .as_mut()

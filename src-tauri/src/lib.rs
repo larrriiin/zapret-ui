@@ -31,12 +31,19 @@ use tauri_plugin_notification::NotificationExt;
 
 mod automations;
 mod core;
+mod diagnostic_probes;
+#[cfg(windows)]
+mod elevation;
 mod hosts;
 mod ipset;
+mod owned_process;
+mod privileges;
 mod providers;
 mod strategy_test;
 mod telegram;
 mod traffic_monitor;
+#[cfg(windows)]
+mod windows_services;
 use core::{
     compare_versions, resolve_stable, Checksum, CoreInstallation, CoreInstallationState,
     CoreManager, CoreUpdateStatus, GameFilterSettings,
@@ -116,6 +123,10 @@ struct TrayTranslations {
     change_strategy: String,
     minimized_title: String,
     minimized_body: String,
+    #[serde(default)]
+    admin_required_title: String,
+    #[serde(default)]
+    admin_required_body: String,
     status_on: String,
     status_off: String,
 }
@@ -523,49 +534,68 @@ fn core_manager() -> CoreManager {
 }
 
 fn is_admin() -> bool {
-    // net session — самый быстрый и надежный способ проверки прав администратора на Windows
-    Command::new(system32_tool("net.exe"))
-        .arg("session")
-        .creation_flags(CREATE_NO_WINDOW)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY},
+        System::Threading::{GetCurrentProcess, OpenProcessToken},
+    };
+
+    // Check this process's actual elevation, independently of Windows services
+    // and of the account's membership in the Administrators group under UAC.
+    unsafe {
+        let mut token = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return false;
+        }
+
+        let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+        let mut returned_length = 0;
+        let success = GetTokenInformation(
+            token,
+            TokenElevation,
+            (&mut elevation as *mut TOKEN_ELEVATION).cast(),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut returned_length,
+        );
+        CloseHandle(token);
+
+        success != 0 && elevation.TokenIsElevated != 0
+    }
 }
 
-fn elevate_if_needed() {
-    if !is_admin() {
-        if let Ok(exe) = std::env::current_exe() {
-            let args: Vec<String> = std::env::args().skip(1).collect();
+#[cfg(all(test, windows))]
+mod admin_tests {
+    #[test]
+    fn elevation_matches_enabled_administrator_membership() {
+        use windows_sys::Win32::Security::{
+            CheckTokenMembership, CreateWellKnownSid, WinBuiltinAdministratorsSid,
+            SECURITY_MAX_SID_SIZE,
+        };
 
-            let ps_args = if args.is_empty() {
-                String::new()
-            } else {
-                let formatted = args
-                    .iter()
-                    .map(|s| format!("'{}'", s.replace("'", "''")))
-                    .collect::<Vec<String>>()
-                    .join(",");
-                format!("-ArgumentList @({})", formatted)
-            };
-
-            let ps_command = format!(
-                "Start-Process -FilePath '{}' {} -Verb RunAs",
-                exe.to_string_lossy().replace("'", "''"),
-                ps_args
+        // Check enabled group membership independently of TokenElevation. This
+        // works for both elevated and UAC-filtered test runners without services.
+        unsafe {
+            let mut sid = [0u32; SECURITY_MAX_SID_SIZE as usize / 4];
+            let mut sid_size = std::mem::size_of_val(&sid) as u32;
+            assert_ne!(
+                CreateWellKnownSid(
+                    WinBuiltinAdministratorsSid,
+                    std::ptr::null_mut(),
+                    sid.as_mut_ptr().cast(),
+                    &mut sid_size,
+                ),
+                0
             );
-
-            let _ = Command::new(powershell_path())
-                .args([
-                    "-NoProfile",
-                    "-WindowStyle",
-                    "Hidden",
-                    "-Command",
-                    &ps_command,
-                ])
-                .creation_flags(CREATE_NO_WINDOW)
-                .spawn();
-
-            std::process::exit(0);
+            let mut is_member = 0;
+            assert_ne!(
+                CheckTokenMembership(
+                    std::ptr::null_mut(),
+                    sid.as_mut_ptr().cast(),
+                    &mut is_member
+                ),
+                0
+            );
+            assert_eq!(super::is_admin(), is_member != 0);
         }
     }
 }
@@ -645,7 +675,11 @@ fn migrate_renamed_install_service_path() -> Result<(), String> {
         return Ok(());
     };
 
-    let was_running = is_zapret_service_running();
+    use windows_services::ServiceState;
+    let was_running = matches!(
+        windows_services::query_state("zapret").map_err(|error| error.to_string())?,
+        Some(ServiceState::Running | ServiceState::Starting)
+    );
     let status = Command::new(system32_tool("sc.exe"))
         .args(["config", "zapret", "binPath=", &updated_path])
         .creation_flags(CREATE_NO_WINDOW)
@@ -655,16 +689,20 @@ fn migrate_renamed_install_service_path() -> Result<(), String> {
         return Err("Failed to update zapret service path".to_string());
     }
     if was_running {
-        let _ = Command::new(system32_tool("sc.exe"))
+        let stop_status = Command::new(system32_tool("sc.exe"))
             .args(["stop", "zapret"])
             .creation_flags(CREATE_NO_WINDOW)
-            .status();
-        for _ in 0..50 {
-            if !is_zapret_service_running() {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            .status()
+            .map_err(|error| format!("Failed to stop migrated zapret service: {error}"))?;
+        if !stop_status.success()
+            && windows_services::query_state("zapret").map_err(|error| error.to_string())?
+                != Some(ServiceState::Stopped)
+        {
+            return Err("Failed to stop migrated zapret service".to_string());
         }
+        windows_services::wait_for_stopped("zapret", std::time::Duration::from_secs(5)).map_err(
+            |error| format!("Failed to wait for migrated zapret service to stop: {error}"),
+        )?;
         let status = Command::new(system32_tool("sc.exe"))
             .args(["start", "zapret"])
             .creation_flags(CREATE_NO_WINDOW)
@@ -772,6 +810,9 @@ fn get_ui_version_cmd() -> String {
 fn ensure_binaries_present() -> bool {
     let dir = find_binaries_dir();
     let manager = core_manager_at(&dir);
+    if !is_admin() {
+        return manager.provider().is_installed();
+    }
     match CoreInstallation::new(&dir)
         .and_then(|installation| installation.prepare_active(manager.provider()))
     {
@@ -839,44 +880,19 @@ fn ensure_strategy_user_lists(root: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Проверяет, запущен ли winws.exe через tasklist.
+/// Check the service state directly, without parsing localized command output.
 fn is_zapret_service_running() -> bool {
-    let output = Command::new(system32_tool("sc.exe"))
-        .args(["query", "zapret"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    match output {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout).to_lowercase();
-            stdout.contains("running") || stdout.contains("start_pending")
-        }
-        Err(_) => false,
-    }
+    matches!(
+        windows_services::query_state("zapret"),
+        Ok(Some(
+            windows_services::ServiceState::Running | windows_services::ServiceState::Starting
+        ))
+    )
 }
 
 /// Проверяет, установлена ли служба `zapret` (даже если сейчас остановлена).
-/// `sc query` пишет "the specified service does not exist as an installed service"
-/// в stderr при отсутствии службы.
 fn is_zapret_service_installed() -> bool {
-    let output = Command::new(system32_tool("sc.exe"))
-        .args(["query", "zapret"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    match output {
-        Ok(out) => {
-            let combined = format!(
-                "{}{}",
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
-            )
-            .to_lowercase();
-            // Наличие строки "service_name" и отсутствие "does not exist"
-            out.status.success()
-                && combined.contains("service_name")
-                && !combined.contains("does not exist")
-        }
-        Err(_) => false,
-    }
+    matches!(windows_services::query_state("zapret"), Ok(Some(_)))
 }
 
 fn is_winws_running() -> bool {
@@ -930,50 +946,17 @@ fn check_status_full(state: State<'_, AppState>) -> Result<SystemStatusReport, S
     let current_status = get_zapret_status(state);
 
     // 2. Check zapret service
-    let zapret_svc = Command::new(system32_tool("sc.exe"))
-        .args(["query", "zapret"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    let zapret_service = if let Ok(out) = zapret_svc {
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        if stdout.contains("RUNNING") {
-            "running"
-        } else if stdout.contains("STOPPED") {
-            "stopped"
-        } else if stdout.contains("FAILED 1060") || stdout.contains("1060") {
-            "not_installed"
-        } else {
-            "unknown"
-        }
-    } else {
-        "unknown"
-    };
+    let zapret_service = windows_services::status_label("zapret");
 
     // 3. Check WinDivert service
-    let windivert_svc = Command::new(system32_tool("sc.exe"))
-        .args(["query", "WinDivert"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    let windivert_service = if let Ok(out) = windivert_svc {
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        if stdout.contains("RUNNING") {
-            "running"
-        } else if stdout.contains("STOPPED") {
-            "stopped"
-        } else if stdout.contains("FAILED 1060") || stdout.contains("1060") {
-            "not_installed"
-        } else {
-            "unknown"
-        }
-    } else {
-        "unknown"
-    };
+    let windivert_service = windows_services::status_label("WinDivert");
 
     // 4. Check bypass (winws.exe)
     let task = Command::new(system32_tool("tasklist.exe"))
         .args(["/FI", "IMAGENAME eq winws.exe"])
         .creation_flags(CREATE_NO_WINDOW)
-        .output();
+        .output()
+        .and_then(diagnostic_probes::validate_output);
     let bypass_process = if let Ok(out) = task {
         let stdout = String::from_utf8_lossy(&out.stdout).to_lowercase();
         if stdout.contains("winws.exe") {
@@ -999,6 +982,9 @@ fn check_status_full(state: State<'_, AppState>) -> Result<SystemStatusReport, S
 fn get_strategies() -> Result<Vec<String>, String> {
     let dir = find_binaries_dir();
     let manager = core_manager_at(&dir);
+    if !is_admin() {
+        return manager.provider().strategies_readonly();
+    }
     CoreInstallation::new(&dir)?.prepare_active(manager.provider())?;
     manager.provider().strategies()
 }
@@ -1015,6 +1001,7 @@ fn remember_strategy_selection(strategy: String, state: State<'_, AppState>) -> 
 
 #[tauri::command]
 fn import_custom_strategy(file_name: String, content: String) -> Result<String, String> {
+    privileges::writable(&find_binaries_dir())?;
     let _operation_guard =
         CoreOperationGuard::acquire().map_err(|_| "strategy_import_error_busy".to_string())?;
     let path = std::path::Path::new(&file_name);
@@ -1256,6 +1243,7 @@ fn start_traffic_monitor(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TrafficSnapshot, String> {
+    privileges::require("traffic")?;
     refresh_traffic_routes(&app, &state);
     refresh_traffic_filter(state.clone());
     let dll_path = find_binaries_dir().join("bin").join("WinDivert.dll");
@@ -1356,6 +1344,7 @@ fn save_game_filter_settings(settings: &GameFilterSettings) -> Result<(), String
     let game_flag = find_binaries_dir()
         .join("utils")
         .join("game_filter.enabled");
+    privileges::writable(&game_flag)?;
     // Flowseal 1.10.3 intentionally retains ranges even when disabled, so a
     // later re-enable does not silently broaden a user's selected ports.
     std::fs::write(
@@ -1427,6 +1416,7 @@ fn set_game_filter(
 #[tauri::command]
 fn set_ipset_filter(mode: String) -> Result<(), String> {
     let dir = find_binaries_dir();
+    privileges::writable(&dir.join("lists"))?;
     let ipset_file = dir.join("lists").join("ipset-all.txt");
     let backup_file = dir.join("lists").join("ipset-all.txt.backup");
 
@@ -1597,6 +1587,8 @@ fn set_active_fake(fake_type: String, fake_name: String) -> Result<(), String> {
     }
 
     let target_bin_path = bin_dir.join(target_bin);
+    privileges::writable(&target_bin_path)?;
+    privileges::writable(&bin_dir)?;
 
     if target_bin_path.exists() {
         let _ = std::fs::remove_file(&target_bin_path);
@@ -1616,6 +1608,7 @@ fn start_zapret(
     mode: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
+    privileges::require("service")?;
     if !is_safe_strategy_name(&strategy) {
         return Err(format!("Invalid strategy name: {}", strategy));
     }
@@ -1783,6 +1776,7 @@ if (Get-Service -Name zapret -ErrorAction SilentlyContinue) {
 "#;
 
 fn stop_zapret_internal() -> Result<(), String> {
+    privileges::require("service")?;
     let encoded = encode_powershell_command(STOP_ZAPRET_SERVICE_SCRIPT);
     let status = Command::new(powershell_path())
         .args([
@@ -1804,9 +1798,10 @@ fn stop_zapret_internal() -> Result<(), String> {
 }
 
 /// Полностью останавливает zapret.
-/// Требует прав администратора — запрашивает их через PowerShell -Verb RunAs.
+/// Without administrator rights returns a recoverable error before any changes.
 #[tauri::command]
 fn stop_zapret(state: State<'_, AppState>) -> Result<(), String> {
+    privileges::require("service")?;
     {
         let mut child_lock = state.temp_process_child.lock_unpoisoned();
         if let Some(mut child) = child_lock.take() {
@@ -1825,13 +1820,9 @@ fn stop_zapret_on_exit(state: State<'_, AppState>) {
     {
         let mut child_lock = state.temp_process_child.lock_unpoisoned();
         if let Some(mut child) = child_lock.take() {
-            let _ = child.kill();
-            let _ = Command::new(system32_tool("taskkill.exe"))
-                .arg("/F")
-                .arg("/IM")
-                .arg("winws.exe")
-                .creation_flags(CREATE_NO_WINDOW)
-                .output();
+            if let Err(error) = owned_process::stop(&mut child) {
+                eprintln!("Failed to stop temporary winws process: {error}");
+            }
         }
     }
 }
@@ -1864,6 +1855,7 @@ fn read_user_list(filename: String) -> Result<Vec<String>, String> {
 #[tauri::command]
 fn write_user_list(filename: String, lines: Vec<String>) -> Result<(), String> {
     let file_path = resolve_list_path(&filename)?;
+    privileges::writable(&file_path)?;
 
     for line in &lines {
         let trimmed = line.trim();
@@ -1886,6 +1878,7 @@ fn write_user_list(filename: String, lines: Vec<String>) -> Result<(), String> {
 #[tauri::command]
 fn add_to_user_list(filename: String, entry: String) -> Result<(), String> {
     let file_path = resolve_list_path(&filename)?;
+    privileges::writable(&file_path)?;
     let entry_trimmed = entry.trim();
     if !is_safe_list_entry(entry_trimmed) {
         return Err(format!("Invalid list entry: {}", entry_trimmed));
@@ -1919,6 +1912,7 @@ fn add_to_user_list(filename: String, entry: String) -> Result<(), String> {
 #[tauri::command]
 fn remove_from_user_list(filename: String, entry: String) -> Result<(), String> {
     let file_path = resolve_list_path(&filename)?;
+    privileges::writable(&file_path)?;
 
     if !file_path.exists() {
         return Ok(());
@@ -2007,6 +2001,7 @@ impl BackupData {
     }
 
     fn restore(&self, paths: &[PathBuf; 3]) -> Result<(), String> {
+        for path in paths { privileges::writable(path)?; }
         // Preserve exact file contents (including comments) for recovery.
         let originals: Vec<Option<Vec<u8>>> = paths
             .iter()
@@ -2223,6 +2218,7 @@ mod backup_tests {
 /// Updates the IPSet list from the provider's upstream source.
 #[tauri::command]
 async fn update_ipset_list() -> Result<ipset::UpdateResult, String> {
+    privileges::writable(&find_binaries_dir().join("lists"))?;
     update_ipset_list_inner().await
 }
 
@@ -2350,8 +2346,13 @@ async fn download_and_install_update(
     custom_proxy: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<CoreUpdateResult, String> {
+    if get_zapret_status(state.clone()).running {
+        privileges::require("core")?;
+    }
     let _operation_guard = CoreOperationGuard::acquire()?;
     let dir = find_binaries_dir();
+    privileges::writable(&dir)?;
+    if let Some(parent) = dir.parent() { privileges::writable(parent)?; }
     let installation = CoreInstallation::new(&dir)?;
     let manager = core_manager_at(&dir);
     installation.prepare(manager.provider())?;
@@ -2852,8 +2853,15 @@ mod temporary_cleanup_tests {
 fn get_core_installation_state() -> Result<CoreInstallationState, String> {
     let dir = find_binaries_dir();
     let installation = CoreInstallation::new(&dir)?;
-    installation.prepare(core_manager_at(dir).provider())?;
-    Ok(installation.state())
+    let manager = core_manager_at(dir);
+    if is_admin() {
+        installation.prepare(manager.provider())?;
+    }
+    let mut state = installation.state();
+    if state.current_version.is_none() && manager.provider().is_installed() {
+        state.current_version = Some(manager.provider().local_version());
+    }
+    Ok(state)
 }
 
 #[tauri::command]
@@ -2861,8 +2869,13 @@ fn rollback_core_update(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<CoreInstallationState, String> {
+    if get_zapret_status(state.clone()).running {
+        privileges::require("core")?;
+    }
     let _operation_guard = CoreOperationGuard::acquire()?;
     let dir = find_binaries_dir();
+    privileges::writable(&dir)?;
+    if let Some(parent) = dir.parent() { privileges::writable(parent)?; }
     let previous_dir = dir.with_file_name("binaries.previous");
     let installation = CoreInstallation::new(&dir)?;
     let active_manager = core_manager_at(&dir);
@@ -2999,14 +3012,10 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     let mut vpn_services: Option<String> = None;
 
     // 1. Base Filtering Engine check
-    let bfe_check = Command::new(system32_tool("sc.exe"))
-        .args(["query", "BFE"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
+    let bfe_check = windows_services::query_state("BFE");
     match bfe_check {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            if stdout.to_lowercase().contains("running") {
+        Ok(state) => {
+            if state == Some(windows_services::ServiceState::Running) {
                 checks.push(DiagnosticCheck {
                     name: "Base Filtering Engine".to_string(),
                     status: "passed".to_string(),
@@ -3038,15 +3047,15 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
         .args([
             "-NoProfile",
             "-Command",
-            "try { $val = Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyEnable -ErrorAction Stop; if ($val.ProxyEnable -eq 1) { $srv = Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ProxyServer -ErrorAction SilentlyContinue; Write-Host \"PROXY_ENABLED:$($srv.ProxyServer)\" } else { Write-Host \"PROXY_DISABLED\" } } catch { Write-Host \"PROXY_DISABLED\" }"
+            "$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); $val = Get-ItemProperty -LiteralPath 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -ErrorAction Stop; if ($val.ProxyEnable -eq 1) { if ([string]::IsNullOrWhiteSpace($val.ProxyServer)) { throw 'Missing proxy address' }; [Console]::Write('PROXY_ENABLED:' + $val.ProxyServer) } else { [Console]::Write('PROXY_DISABLED') }"
         ])
         .creation_flags(CREATE_NO_WINDOW)
-        .output();
+        .output()
+        .and_then(diagnostic_probes::validate_output)
+        .and_then(|out| diagnostic_probes::parse_proxy(&String::from_utf8_lossy(&out.stdout)).map(|proxy| proxy.map(str::to_owned)));
     match proxy_check {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            if stdout.contains("PROXY_ENABLED:") {
-                let proxy = stdout.split(':').nth(1).unwrap_or("unknown").trim();
+        Ok(proxy) => {
+            if let Some(proxy) = proxy {
                 checks.push(DiagnosticCheck {
                     name: "System Proxy".to_string(),
                     status: "warning".to_string(),
@@ -3065,42 +3074,44 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
         Err(_) => {
             checks.push(DiagnosticCheck {
                 name: "System Proxy".to_string(),
-                status: "passed".to_string(),
-                message: "Proxy check passed".to_string(),
+                status: "warning".to_string(),
+                message: "Failed to check system proxy".to_string(),
                 link: None,
             });
         }
     }
 
     // 3. TCP timestamps check
-    let tcp_check = Command::new(powershell_path())
-        .args([
-            "-NoProfile",
-            "-Command",
-            "$out = netsh interface tcp show global; if ($out -match 'RFC 1323.*enabled') { Write-Host 'TIMESTAMPS_ENABLED' } else { Write-Host 'TIMESTAMPS_DISABLED' }"
-        ])
+    let tcp_check = Command::new(system32_tool("netsh.exe"))
+        .args(["interface", "tcp", "dump"])
         .creation_flags(CREATE_NO_WINDOW)
-        .output();
+        .output()
+        .and_then(diagnostic_probes::validate_output)
+        .and_then(|out| {
+            diagnostic_probes::parse_tcp_timestamps(&String::from_utf8_lossy(&out.stdout))
+        });
     match tcp_check {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            if stdout.contains("TIMESTAMPS_ENABLED") {
+        Ok(state) => {
+            if state == diagnostic_probes::TcpTimestamps::Enabled {
                 checks.push(DiagnosticCheck {
                     name: "TCP Timestamps".to_string(),
                     status: "passed".to_string(),
                     message: "TCP timestamps are enabled".to_string(),
                     link: None,
                 });
-            } else {
-                // Try to enable
-                let _ = Command::new("netsh")
-                    .args(["interface", "tcp", "set", "global", "timestamps=enabled"])
-                    .creation_flags(CREATE_NO_WINDOW)
-                    .output();
+            } else if state == diagnostic_probes::TcpTimestamps::Disabled {
                 checks.push(DiagnosticCheck {
                     name: "TCP Timestamps".to_string(),
                     status: "warning".to_string(),
-                    message: "TCP timestamps were disabled. Attempted to enable them.".to_string(),
+                    message: "TCP timestamps are disabled. System settings were not changed."
+                        .to_string(),
+                    link: None,
+                });
+            } else {
+                checks.push(DiagnosticCheck {
+                    name: "TCP Timestamps".to_string(),
+                    status: "passed".to_string(),
+                    message: "TCP timestamps are allowed when requested by the peer".to_string(),
                     link: None,
                 });
             }
@@ -3116,10 +3127,11 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 4. Adguard check
-    let adguard_check = Command::new("tasklist")
+    let adguard_check = Command::new(system32_tool("tasklist.exe"))
         .args(["/FI", "IMAGENAME eq AdguardSvc.exe", "/FO", "CSV", "/NH"])
         .creation_flags(CREATE_NO_WINDOW)
-        .output();
+        .output()
+        .and_then(diagnostic_probes::validate_output);
     match adguard_check {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
@@ -3145,8 +3157,8 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
         Err(_) => {
             checks.push(DiagnosticCheck {
                 name: "Adguard".to_string(),
-                status: "passed".to_string(),
-                message: "Adguard check passed".to_string(),
+                status: "warning".to_string(),
+                message: "Failed to check Adguard".to_string(),
                 link: None,
             });
         }
@@ -3156,7 +3168,8 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     let killer_check = Command::new(system32_tool("sc.exe"))
         .args(["query"])
         .creation_flags(CREATE_NO_WINDOW)
-        .output();
+        .output()
+        .and_then(diagnostic_probes::validate_output);
     match killer_check {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
@@ -3179,8 +3192,8 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
         Err(_) => {
             checks.push(DiagnosticCheck {
                 name: "Killer Network Service".to_string(),
-                status: "passed".to_string(),
-                message: "Killer check passed".to_string(),
+                status: "warning".to_string(),
+                message: "Failed to check Killer services".to_string(),
                 link: None,
             });
         }
@@ -3190,7 +3203,8 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     let intel_check = Command::new(system32_tool("sc.exe"))
         .args(["query"])
         .creation_flags(CREATE_NO_WINDOW)
-        .output();
+        .output()
+        .and_then(diagnostic_probes::validate_output);
     match intel_check {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout).to_lowercase();
@@ -3217,8 +3231,8 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
         Err(_) => {
             checks.push(DiagnosticCheck {
                 name: "Intel Connectivity Network Service".to_string(),
-                status: "passed".to_string(),
-                message: "Intel Connectivity check passed".to_string(),
+                status: "warning".to_string(),
+                message: "Failed to check Intel Connectivity".to_string(),
                 link: None,
             });
         }
@@ -3228,7 +3242,8 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     let checkpoint_check = Command::new(system32_tool("sc.exe"))
         .args(["query"])
         .creation_flags(CREATE_NO_WINDOW)
-        .output();
+        .output()
+        .and_then(diagnostic_probes::validate_output);
     match checkpoint_check {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout).to_lowercase();
@@ -3252,8 +3267,8 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
         Err(_) => {
             checks.push(DiagnosticCheck {
                 name: "Check Point".to_string(),
-                status: "passed".to_string(),
-                message: "Check Point check passed".to_string(),
+                status: "warning".to_string(),
+                message: "Failed to check Check Point services".to_string(),
                 link: None,
             });
         }
@@ -3263,7 +3278,8 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     let smartbyte_check = Command::new(system32_tool("sc.exe"))
         .args(["query"])
         .creation_flags(CREATE_NO_WINDOW)
-        .output();
+        .output()
+        .and_then(diagnostic_probes::validate_output);
     match smartbyte_check {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout).to_lowercase();
@@ -3287,8 +3303,8 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
         Err(_) => {
             checks.push(DiagnosticCheck {
                 name: "SmartByte".to_string(),
-                status: "passed".to_string(),
-                message: "SmartByte check passed".to_string(),
+                status: "warning".to_string(),
+                message: "Failed to check SmartByte services".to_string(),
                 link: None,
             });
         }
@@ -3298,7 +3314,8 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     let vpn_check = Command::new(system32_tool("sc.exe"))
         .args(["query"])
         .creation_flags(CREATE_NO_WINDOW)
-        .output();
+        .output()
+        .and_then(diagnostic_probes::validate_output);
     match vpn_check {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
@@ -3331,8 +3348,8 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
         Err(_) => {
             checks.push(DiagnosticCheck {
                 name: "VPN Services".to_string(),
-                status: "passed".to_string(),
-                message: "VPN check passed".to_string(),
+                status: "warning".to_string(),
+                message: "Failed to check VPN services".to_string(),
                 link: None,
             });
         }
@@ -3343,14 +3360,15 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
         .args([
             "-NoProfile",
             "-Command",
-            "try { $count = Get-ChildItem -Recurse -Path 'HKLM:System\\CurrentControlSet\\Services\\Dnscache\\InterfaceSpecificParameters\\' | Get-ItemProperty | Where-Object { $_.DohFlags -gt 0 } | Measure-Object | Select-Object -ExpandProperty Count; Write-Host \"DOH:$count\" } catch { Write-Host \"DOH:0\" }"
+            "$ErrorActionPreference = 'Stop'; $path = 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Dnscache\\InterfaceSpecificParameters'; $count = 0; if (Test-Path -LiteralPath $path -ErrorAction Stop) { $count = @(Get-ChildItem -Recurse -LiteralPath $path -ErrorAction Stop | Get-ItemProperty -ErrorAction Stop | Where-Object { $_.DohFlags -gt 0 }).Count }; [Console]::Write('DOH:' + $count)"
         ])
         .creation_flags(CREATE_NO_WINDOW)
-        .output();
+        .output()
+        .and_then(diagnostic_probes::validate_output)
+        .and_then(|out| diagnostic_probes::parse_doh_count(&String::from_utf8_lossy(&out.stdout)));
     match doh_check {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            if stdout.contains("DOH:0") {
+        Ok(count) => {
+            if count == 0 {
                 checks.push(DiagnosticCheck {
                     name: "Secure DNS".to_string(),
                     status: "warning".to_string(),
@@ -3400,21 +3418,17 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
     }
 
     // 12. WinDivert check
-    let windivert_check = Command::new(system32_tool("sc.exe"))
-        .args(["query", "WinDivert"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
+    let windivert_check = windows_services::query_state("WinDivert");
     match windivert_check {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            if stdout.to_lowercase().contains("running") {
+        Ok(state) => {
+            if state == Some(windows_services::ServiceState::Running) {
                 checks.push(DiagnosticCheck {
                     name: "WinDivert".to_string(),
                     status: "passed".to_string(),
                     message: "WinDivert driver is running".to_string(),
                     link: None,
                 });
-            } else {
+            } else if state.is_none() || state == Some(windows_services::ServiceState::Stopped) {
                 checks.push(DiagnosticCheck {
                     name: "WinDivert".to_string(),
                     status: "passed".to_string(),
@@ -3422,13 +3436,20 @@ async fn run_diagnostics() -> Result<DiagnosticsResult, String> {
                         .to_string(),
                     link: None,
                 });
+            } else {
+                checks.push(DiagnosticCheck {
+                    name: "WinDivert".to_string(),
+                    status: "warning".to_string(),
+                    message: "WinDivert driver is not ready".to_string(),
+                    link: None,
+                });
             }
         }
         Err(_) => {
             checks.push(DiagnosticCheck {
                 name: "WinDivert".to_string(),
-                status: "passed".to_string(),
-                message: "WinDivert check passed".to_string(),
+                status: "warning".to_string(),
+                message: "Failed to check WinDivert".to_string(),
                 link: None,
             });
         }
@@ -3775,6 +3796,7 @@ async fn run_tests(
     test_type: String,
     _test_mode: String,
 ) -> Result<Vec<TestResult>, String> {
+    privileges::require("tests")?;
     let dir = find_binaries_dir();
     ensure_strategy_user_lists(&dir)?;
     let manager = core_manager_at(&dir);
@@ -4237,10 +4259,18 @@ fn take_update_open_request(state: State<'_, AppState>) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Err(error) = privileges::accept_handoff() {
+        eprintln!("Cannot complete elevation handoff: {error}");
+        return;
+    }
     #[cfg(windows)]
     {
-        elevate_if_needed();
-        if let Err(error) = migrate_renamed_install_service_path() {
+        let migration = if is_admin() {
+            migrate_renamed_install_service_path()
+        } else {
+            Ok(())
+        };
+        if let Err(error) = migration {
             eprintln!("Cannot migrate renamed zapret service path: {error}");
         }
     }
@@ -4388,6 +4418,9 @@ pub fn run() {
                     let action = event.id.as_ref().to_string();
                     tauri::async_runtime::spawn_blocking(move || {
                         if let Err(error) = run_tray_action(&app, &action) {
+                            if let Some(reason) = error.strip_prefix(privileges::ADMIN_REQUIRED) {
+                                let _ = privileges::request_admin_from_tray(app.clone(), reason.into());
+                            }
                             eprintln!("Tray action {action}: {error}");
                         }
                     });
@@ -4449,7 +4482,13 @@ pub fn run() {
                 .maximizable(false).minimizable(false).skip_taskbar(true)
                 .always_on_top(true).shadow(true).build()?;
 
-            automations::start(app.handle().clone());
+            let automation_app = app.handle().clone();
+            std::thread::spawn(move || {
+                if let Err(error) = privileges::resume_routing() {
+                    eprintln!("Cannot restore proxy routing after elevation: {error}");
+                }
+                automations::start(automation_app);
+            });
 
             // The Telegram Proxy preference belongs to the application lifecycle,
             // not to a particular Zapret service start. Run it in the background
@@ -4513,6 +4552,9 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            privileges::restart_as_admin,
+            privileges::elevation_context,
+            privileges::request_admin_from_tray,
             tray_action,
             tray_snapshot,
             automations::get_application_rules,

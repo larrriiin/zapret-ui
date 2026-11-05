@@ -1,7 +1,7 @@
 {
   "name": "zapret-ui",
   "private": true,
-  "version": "26.10.5",
+  "version": "26.11.1",
   "type": "module",
   "scripts": {
     "installer:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1",
@@ -24,6 +24,7 @@
     "test:strategy-notes": "node --test scripts/strategy-notes.test.mjs",
     "test:traffic": "node --test scripts/traffic-classification.test.mjs",
     "test:warp": "node --test scripts/warp-state.test.mjs",
+    "test:elevation": "node --test scripts/privilege-errors.test.mjs scripts/elevation-ui.test.mjs",
     "test:automations": "node --test scripts/automations-ui.test.mjs",
     "test:warp-ui": "node --test scripts/warp-ui.test.mjs",
     "test:update-notifications": "node --test scripts/update-notifications.test.mjs",
@@ -35,15 +36,15 @@
   "devDependencies": {
     "@tailwindcss/forms": "^0.5.11",
     "@tailwindcss/vite": "^4.3.3",
-    "@tauri-apps/cli": "^2.12.3",
-    "autoprefixer": "^10.6.1",
+    "@tauri-apps/cli": "^2.12.4",
+    "autoprefixer": "^10.6.2",
     "playwright-core": "^1.64.1",
-    "postcss": "^8.5.31",
+    "postcss": "^8.5.32",
     "tailwindcss": "^4.3.3",
-    "vite": "^8.3.4"
+    "vite": "^8.3.5"
   },
   "optionalDependencies": {
-    "@rolldown/binding-win32-x64-msvc": "^1.2.11",
+    "@rolldown/binding-win32-x64-msvc": "^1.2.16",
     "@tailwindcss/oxide-win32-x64-msvc": "^4.3.3"
   }
 }

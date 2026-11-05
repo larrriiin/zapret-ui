@@ -20,6 +20,32 @@ class VirusTotalRequestError extends Error {
   }
 }
 
+function analysisLocation(uploaded) {
+  const data = uploaded?.data;
+  if (data?.type !== 'analysis') throw new Error('VirusTotal upload did not return an analysis object.');
+  const id = data.id;
+  if (typeof id !== 'string' || id.length > 2048 || !/^[A-Za-z0-9_+/-]+={0,2}$/.test(id)) {
+    throw new Error('VirusTotal did not return a valid analysis ID.');
+  }
+  // Match vt-py's path construction: Base64 padding is part of the opaque ID.
+  const segment = encodeURIComponent(id).replaceAll('%3D', '=').replaceAll('%2B', '+');
+  const fallback = `${API}/analyses/${segment}`;
+  const self = data.links?.self;
+  if (self === undefined) return { id, url: fallback };
+  let target;
+  try { target = new URL(self); }
+  catch { throw new Error('VirusTotal returned an invalid analysis URL.'); }
+  const prefix = '/api/v3/analyses/';
+  let linkedId;
+  try { linkedId = decodeURIComponent(target.pathname.slice(prefix.length)); }
+  catch { throw new Error('VirusTotal returned an invalid analysis URL.'); }
+  if (target.origin !== new URL(API).origin || target.username || target.password
+      || target.search || target.hash || !target.pathname.startsWith(prefix) || linkedId !== id) {
+    throw new Error('VirusTotal returned an unexpected analysis URL.');
+  }
+  return { id, url: target.href };
+}
+
 export function createClient(apiKey, { fetchImpl = fetch, wait = sleep, now = Date.now } = {}) {
   if (!apiKey?.trim()) throw new Error('Add the VIRUSTOTAL_API_KEY repository secret before publishing.');
   let nextRequest = 0;
@@ -61,7 +87,7 @@ export function createClient(apiKey, { fetchImpl = fetch, wait = sleep, now = Da
   };
 }
 
-export async function scanInstaller(file, request, { wait = sleep, maxPolls = 20 } = {}) {
+export async function scanInstaller(file, request, { wait = sleep, maxPolls = 20, onProgress = () => {} } = {}) {
   const bytes = await readFile(file);
   if (!bytes.length || bytes.length > 650 * 1024 * 1024) throw new Error('Installer size is outside VirusTotal upload limits.');
   const sha256 = createHash('sha256').update(bytes).digest('hex');
@@ -74,19 +100,21 @@ export async function scanInstaller(file, request, { wait = sleep, maxPolls = 20
   const form = new FormData();
   form.append('file', new Blob([bytes]), path.basename(file));
   const uploaded = await request(uploadUrl, { method: 'POST', body: form });
-  const id = uploaded.data?.id;
-  if (typeof id !== 'string' || !id) throw new Error('VirusTotal did not return an analysis ID.');
+  const { id, url: analysisUrl } = analysisLocation(uploaded);
+  // This is the public analysis location, never the key or temporary upload URL.
+  onProgress(`VirusTotal upload accepted. SHA-256: ${sha256}. Analysis: ${analysisUrl}`);
   let unavailableError;
   for (let poll = 0; poll < maxPolls; poll++) {
     await wait(30_000);
     let analysis;
     try {
-      analysis = await request(`${API}/analyses/${encodeURIComponent(id)}`);
+      analysis = await request(analysisUrl);
     } catch (error) {
       // A newly accepted upload may not be visible to the analysis API yet.
       // Retry only this read, within the existing polling budget; never re-upload.
       if (error instanceof VirusTotalRequestError
           && (error.status === 404 || (error.status === 400 && error.code === 'NotAvailableYet'))) {
+        if (!unavailableError) onProgress(`VirusTotal analysis is unavailable (HTTP ${error.status}${error.code ? `, ${error.code}` : ''}); waiting for the same analysis ID.`);
         unavailableError = error;
         continue;
       }
@@ -101,7 +129,7 @@ export async function scanInstaller(file, request, { wait = sleep, maxPolls = 20
     if (!['queued', 'in-progress'].includes(status)) throw new Error('VirusTotal returned an unexpected analysis status.');
   }
   if (unavailableError) {
-    throw new Error(`VirusTotal accepted the installer upload, but its analysis remained unavailable within the polling limit (HTTP ${unavailableError.status}${unavailableError.code ? `, ${unavailableError.code}` : ''}). The release was not marked as scanned. Rerun later.`);
+    throw new Error(`VirusTotal accepted the installer upload, but its analysis remained unavailable within the polling limit (HTTP ${unavailableError.status}${unavailableError.code ? `, ${unavailableError.code}` : ''}). Analysis ID: ${id}. SHA-256: ${sha256}. The release was not marked as scanned. Inspect the analysis URL logged above before resubmitting.`);
   }
   throw new Error('VirusTotal analysis is still pending after 10 minutes. Rerun the workflow later.');
 }
@@ -138,7 +166,7 @@ export async function scanRelease({ github, context, core, apiKey, releaseId, ve
   const reports = [];
   for (const { file, kind } of files) {
     core.info(`Submitting ${kind} installer to VirusTotal and waiting for analysis.`);
-    reports.push({ ...await scanInstaller(file, request, scanOptions), kind });
+    reports.push({ ...await scanInstaller(file, request, { onProgress: message => core.info(message), ...scanOptions }), kind });
   }
   // Fetch immediately before editing so hand-written release notes survive reruns.
   const { data: release } = await github.rest.repos.getRelease({ ...context.repo, release_id: releaseId });
