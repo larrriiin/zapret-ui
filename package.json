@@ -45,6 +45,6 @@
   },
   "optionalDependencies": {
     "@rolldown/binding-win32-x64-msvc": "^1.2.16",
-    "@tailwindcss/oxide-win32-x64-msvc": "^4.3.3"
+    "@tailwindcss/oxide-win32-x64-msvc": "^4.3.5"
   }
 }
