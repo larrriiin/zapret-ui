@@ -7,7 +7,7 @@ This is an operating desktop application. Keep controls consistent across sectio
 - Theme colors: `src/styles.css` (`@theme` and theme overrides).
 - Shared controls and geometry tokens: `src/ui.css`, imported by `src/styles.css`. Change shared appearance there, then check all consumers.
 - Fonts: locally bundled Inter (`font-headline` / `--font-headline`).
-- Icons: bundled Material Symbols Outlined; decorative icons use `aria-hidden="true"`.
+- Icons: bundled Material Symbols Outlined; decorative icons use `aria-hidden="true"`. After adding an icon name to HTML or JavaScript, regenerate the local WOFF2 with `python scripts/subset-material-symbols.py` (requires Python packages `fonttools` and `brotli`). Use `--check` to verify the generated file.
 - Text: `src/i18n/ru.js` and `src/i18n/en.js`; use `data-i18n` or the translation helper.
 - Feature styles own layout, spacing between components, and domain-specific state. Do not copy a visual skin into a feature selector or a long Tailwind class list.
 
@@ -29,6 +29,7 @@ This is an operating desktop application. Keep controls consistent across sectio
 | Switch | `ui-switch` | Native checkbox track uses `is-on`/`is-off`; button uses `data-enabled`; optional `ui-switch-sm` |
 | Select | `ui-select-trigger`, `ui-select-popup`, `ui-select-option` | Shared skin; keep feature selection/search behavior; selected option uses `dropdown-option-selected` |
 | Tab/filter | `ui-tab` | Active state via `aria-selected` or `aria-pressed` |
+| Page title | `ui-page-title` | Use on the localized `<h2>`. Reference: `src/components/sections/zapret-settings.html` |
 | Tab content transition | `transitionTabContent` from `src/lib/tab-transition.js` | Fade out for 100ms, switch panels, fade in for 180ms; latest selection wins; instant with reduced motion |
 | Panel | `ui-panel` | Add layout/padding utilities, e.g. `p-6`; shared frame and theme surface |
 | Native dialog | `ui-dialog` | Shared popup surface and backdrop |
@@ -93,6 +94,10 @@ Reference: `#app-header` and `#app-sidebar` in `src/index.html`; shell layout is
 
 The soft background accents live in a single fixed `.app-backdrop` under the isolated body. Keep the main scroll container and page roots transparent so the backdrop continues from the header into every page without an opaque seam. Individual cards retain their own surfaces. Text-only dialog dismissal uses `ui-button` in a right-aligned footer; `ui-icon-button` is reserved for an actual icon, never a translated Close label. References: `info-help.html`, `status.html`, and the WARP information dialog footer.
 
+At startup, center the main window within the work area of the monitor under the pointer. Fit its height to the initial home layout within that work area, using the monitor's DPI and the configured minimum size where it fits. Keep the same size as the user navigates. Overflow stays in the central scroll area.
+
+The home page restores the WARP card from the last confirmed installation state. While the first status check is pending, its overlay shows the localized initialization message and its controls are inert. A successful check refreshes the saved installation state.
+
 An active automation uses `ui-panel ui-panel-active`: the normal panel border becomes the semantic `--color-success` green, without changing its width, background or adding a glow. The active status remains screen-reader text, not a visible label. Disabled rules and disabled observation use the ordinary border.
 
 Automation creation/editing uses the native `#auto-editor` dialog, with `ui-dialog ui-dialog-wide` (760px maximum width), not a disclosure in the page. Put validation errors inside the dialog. Pass the dialog as `createWarpDropdown().init(dialog)`'s popup host so options remain interactive in the native modal top layer; the default host for other consumers is body. Closing cancels the draft, preserves saved rules and restores focus to the initiating action.
@@ -104,6 +109,8 @@ Reference: `src/components/modals/elevation.html` and `src/features/admin-check.
 Use a native `ui-dialog` with a reason, a cancel action and an explicit restart action. Focus starts on Cancel; Escape cancels unless a restart is in progress. Permission errors from user actions open the dialog; background rules use the non-modal `ui-panel` notice and never open UAC themselves. Restart returns to the current section; the user repeats the action after elevation.
 
 The background notice has an accessible `ui-icon-button ui-icon-button-sm` close action. Dismissing it suppresses the notice until the next application launch, including repeated background polls and events. Explicit user actions still show their permission dialog.
+
+The administrator startup preference uses the shared `ui-switch` in Application behavior. Saving applies to future launches, including Windows autostart. Startup uses the standard Windows UAC prompt and continues in ordinary mode if elevation is declined.
 
 ## Tray context menu
 

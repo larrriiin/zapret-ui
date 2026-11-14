@@ -1,10 +1,72 @@
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::windows::ffi::OsStrExt;
+use windows_sys::Win32::{
+    Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS},
+    System::Registry::{
+        RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_DWORD, RRF_RT_REG_DWORD,
+    },
+};
 
 const ELEVATION_ATTEMPTED_ARG: &str = "--zapret-elevation-attempted";
+const PREFERENCES_KEY: windows_sys::core::PCWSTR = windows_sys::w!("Software\\com.alexx.zapret-ui");
+const ALWAYS_RUN_AS_ADMIN: windows_sys::core::PCWSTR = windows_sys::w!("AlwaysRunAsAdmin");
 
-// Elevation is explicitly requested by a user action, never at app startup.
+fn read_preference() -> io::Result<bool> {
+    let mut value = 0u32;
+    let mut size = std::mem::size_of_val(&value) as u32;
+    // The type filter and buffer size limit the read to one DWORD.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            PREFERENCES_KEY,
+            ALWAYS_RUN_AS_ADMIN,
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&mut value as *mut u32).cast(),
+            &mut size,
+        )
+    };
+    match status {
+        ERROR_SUCCESS => Ok(value == 1),
+        ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => Ok(false),
+        code => Err(io::Error::from_raw_os_error(code as i32)),
+    }
+}
+
+#[tauri::command]
+pub(crate) fn get_always_run_as_admin() -> Result<bool, String> {
+    read_preference().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn set_always_run_as_admin(enabled: bool) -> Result<bool, String> {
+    let value = u32::from(enabled);
+    // Store the preference for the current Windows account without requesting elevation.
+    let status = unsafe {
+        RegSetKeyValueW(
+            HKEY_CURRENT_USER,
+            PREFERENCES_KEY,
+            ALWAYS_RUN_AS_ADMIN,
+            REG_DWORD,
+            (&value as *const u32).cast(),
+            std::mem::size_of_val(&value) as u32,
+        )
+    };
+    if status == ERROR_SUCCESS {
+        Ok(enabled)
+    } else {
+        Err(io::Error::from_raw_os_error(status as i32).to_string())
+    }
+}
+
+pub(crate) fn request_at_startup() -> io::Result<bool> {
+    if !read_preference()? {
+        return Ok(false);
+    }
+    request_restart(&std::env::args_os().skip(1).collect::<Vec<_>>())
+}
+
 pub(crate) fn request_restart(args: &[OsString]) -> io::Result<bool> {
     elevate_once(crate::is_admin(), args, relaunch_elevated)
 }

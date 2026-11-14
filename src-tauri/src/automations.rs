@@ -181,38 +181,28 @@ fn path_key(path: &str) -> String {
 #[cfg(windows)]
 fn running_paths() -> Result<HashSet<String>, String> {
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
-        System::{
-            Diagnostics::ToolHelp::*,
-            Threading::{
-                OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
-            },
+        Foundation::CloseHandle,
+        System::Threading::{
+            OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
         },
     };
-    unsafe {
-        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snapshot == INVALID_HANDLE_VALUE {
-            return Err(std::io::Error::last_os_error().to_string());
-        }
-        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
-        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
-        let mut paths = HashSet::new();
-        let mut found = Process32FirstW(snapshot, &mut entry);
-        while found != 0 {
+    let mut paths = HashSet::new();
+    let mut buf = vec![0u16; 32768];
+    crate::windows_processes::any_process(|entry| {
+        unsafe {
             let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, entry.th32ProcessID);
             if !process.is_null() {
-                let mut buf = vec![0u16; 32768];
                 let mut len = buf.len() as u32;
                 if QueryFullProcessImageNameW(process, 0, buf.as_mut_ptr(), &mut len) != 0 {
                     paths.insert(path_key(&String::from_utf16_lossy(&buf[..len as usize])));
                 }
                 CloseHandle(process);
             }
-            found = Process32NextW(snapshot, &mut entry);
         }
-        CloseHandle(snapshot);
-        Ok(paths)
-    }
+        false
+    })
+    .map_err(|error| error.to_string())?;
+    Ok(paths)
 }
 #[cfg(not(windows))]
 fn running_paths() -> Result<HashSet<String>, String> {

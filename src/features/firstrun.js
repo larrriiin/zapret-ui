@@ -230,7 +230,7 @@ async function closeSetup(completed = false) {
   previousFocus?.focus(); resolveSetup?.(); resolveSetup = null;
   if (rerun) Promise.allSettled([pollStatus(), pollFilters(), pollFakes()]);
 }
-export async function openSetup({ repeat = false, clearLists = false } = {}) {
+export async function openSetup({ repeat = false, clearLists = false, restoreMain = true } = {}) {
   if (state.setupActive) return Promise.resolve();
   if (!isSetupWindow && window.__TAURI__) {
     state.setupActive = true;
@@ -250,7 +250,7 @@ export async function openSetup({ repeat = false, clearLists = false } = {}) {
             await loadCachedTestResults();
             await Promise.allSettled([loadStrategies(), pollStatus(), pollFilters(), pollFakes()]);
           }
-          await invoke('show_app_window', { force: true });
+          if (restoreMain) await invoke('show_app_window', { force: true });
         } finally { resolveFinished(); }
       });
       await invoke('open_setup_window', { repeat, clearLists });
@@ -258,7 +258,7 @@ export async function openSetup({ repeat = false, clearLists = false } = {}) {
     } catch (error) {
       unlisten?.();
       state.setupActive = false;
-      await invoke('show_app_window', { force: true });
+      if (restoreMain) await invoke('show_app_window', { force: true });
       console.error('Setup window failed:', error);
     }
     return;
@@ -317,5 +317,7 @@ export function initFirstRun() {
   });
 }
 export async function maybeShowFirstRun() {
-  if (await shouldShowFirstRun({ ensureBinaries: () => invoke('ensure_binaries_present') })) await openSetup();
+  const required = await shouldShowFirstRun({ ensureBinaries: () => invoke('ensure_binaries_present') });
+  if (required) await openSetup({ restoreMain: false });
+  return required;
 }

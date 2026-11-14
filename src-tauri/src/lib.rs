@@ -39,9 +39,12 @@ mod ipset;
 mod owned_process;
 mod privileges;
 mod providers;
+mod status_files;
 mod strategy_test;
 mod telegram;
 mod traffic_monitor;
+#[cfg(windows)]
+mod windows_processes;
 #[cfg(windows)]
 mod windows_services;
 use core::{
@@ -82,6 +85,7 @@ struct AppState {
     warp_tray_busy: AtomicBool,
     warp_tray_connected: AtomicBool,
     active_strategy: Mutex<Option<String>>,
+    zapret_status: Mutex<Option<(std::time::Instant, ZapretStatus)>>,
     test_process_pid: Mutex<Option<u32>>,
     status_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
     strategy_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
@@ -131,7 +135,7 @@ struct TrayTranslations {
     status_off: String,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 struct ZapretStatus {
     running: bool,
     strategy: Option<String>,
@@ -896,45 +900,46 @@ fn is_zapret_service_installed() -> bool {
 }
 
 fn is_winws_running() -> bool {
-    let output = Command::new("tasklist")
-        .args(["/fi", "IMAGENAME eq winws.exe", "/fo", "csv", "/nh"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    match output {
-        Ok(out) => String::from_utf8_lossy(&out.stdout)
-            .to_lowercase()
-            .contains("winws.exe"),
-        Err(_) => false,
-    }
+    probe_winws().unwrap_or(false)
+}
+
+fn probe_winws() -> std::io::Result<bool> {
+    windows_processes::any_process(|entry| {
+        let image = entry.szExeFile.split(|&unit| unit == 0).next().unwrap_or_default();
+        image.len() == b"winws.exe".len()
+            && image.iter().zip(b"winws.exe").all(|(&actual, &expected)| {
+                u8::try_from(actual).is_ok_and(|byte| byte.eq_ignore_ascii_case(&expected))
+            })
+    })
 }
 
 /// Читает активную стратегию из реестра Windows
 /// (записывается при установке zapret как Windows-сервис).
 fn get_strategy_from_registry() -> Option<String> {
-    let out = Command::new(system32_tool("reg.exe"))
-        .args([
-            "query",
-            "HKLM\\System\\CurrentControlSet\\Services\\zapret",
-            "/v",
-            "zapret-discord-youtube",
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .ok()?;
-
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    // Строка: "    zapret-discord-youtube    REG_SZ    general (ALT)"
-    for line in stdout.lines() {
-        if line.contains("REG_SZ") {
-            if let Some(pos) = line.find("REG_SZ") {
-                let value = line[pos + "REG_SZ".len()..].trim();
-                if !value.is_empty() {
-                    return Some(value.to_string());
-                }
-            }
-        }
+    use windows_sys::Win32::{
+        Foundation::ERROR_SUCCESS,
+        System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ},
+    };
+    // The service stores the validated strategy name (at most 128 characters).
+    let mut value = [0u16; 256];
+    let mut size = std::mem::size_of_val(&value) as u32;
+    let result = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            windows_sys::w!("SYSTEM\\CurrentControlSet\\Services\\zapret"),
+            windows_sys::w!("zapret-discord-youtube"),
+            RRF_RT_REG_SZ,
+            std::ptr::null_mut(),
+            value.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    if result != ERROR_SUCCESS {
+        return None;
     }
-    None
+    let value = String::from_utf16_lossy(value.split(|&unit| unit == 0).next()?);
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
 }
 
 // ─── Commands ─────────────────────────────────────────────────────────────────
@@ -943,7 +948,7 @@ fn get_strategy_from_registry() -> Option<String> {
 fn check_status_full(state: State<'_, AppState>) -> Result<SystemStatusReport, String> {
     // Use the same source of truth as the main screen. Unlike the service
     // registry, it also knows about a temporary winws launch and its strategy.
-    let current_status = get_zapret_status(state);
+    let current_status = read_zapret_status(state.inner());
 
     // 2. Check zapret service
     let zapret_service = windows_services::status_label("zapret");
@@ -952,20 +957,10 @@ fn check_status_full(state: State<'_, AppState>) -> Result<SystemStatusReport, S
     let windivert_service = windows_services::status_label("WinDivert");
 
     // 4. Check bypass (winws.exe)
-    let task = Command::new(system32_tool("tasklist.exe"))
-        .args(["/FI", "IMAGENAME eq winws.exe"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .and_then(diagnostic_probes::validate_output);
-    let bypass_process = if let Ok(out) = task {
-        let stdout = String::from_utf8_lossy(&out.stdout).to_lowercase();
-        if stdout.contains("winws.exe") {
-            "running"
-        } else {
-            "stopped"
-        }
-    } else {
-        "unknown"
+    let bypass_process = match probe_winws() {
+        Ok(true) => "running",
+        Ok(false) => "stopped",
+        Err(_) => "unknown",
     };
 
     Ok(SystemStatusReport {
@@ -1088,6 +1083,20 @@ fn natural_sort_compare(a: &str, b: &str) -> std::cmp::Ordering {
 /// Текущий статус zapret: запущен ли и какая стратегия.
 #[tauri::command]
 fn get_zapret_status(state: State<'_, AppState>) -> ZapretStatus {
+    // Coalesce UI, tray and traffic polls. Backend actions that depend on the
+    // current state can read it directly, and launch/stop invalidate this cache.
+    let mut cache = state.zapret_status.lock_unpoisoned();
+    if let Some((time, status)) = &*cache {
+        if time.elapsed() < std::time::Duration::from_millis(750) {
+            return status.clone();
+        }
+    }
+    let status = read_zapret_status(state.inner());
+    *cache = Some((std::time::Instant::now(), status.clone()));
+    status
+}
+
+fn read_zapret_status(state: &AppState) -> ZapretStatus {
     let mut running = is_winws_running();
     let is_service = is_zapret_service_running();
     if is_service {
@@ -1358,6 +1367,23 @@ fn save_game_filter_settings(settings: &GameFilterSettings) -> Result<(), String
 }
 
 /// Состояние Game Filter и IPSet Filter по файлам конфигурации.
+static IPSET_STATUS: status_files::Cache<&'static str> = Mutex::new(None);
+
+fn ipset_mode(content: &str) -> &'static str {
+    let mut lines = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .peekable();
+    if lines.peek().is_none() {
+        "any"
+    } else if lines.any(|line| line == "203.0.113.113/32") {
+        "none"
+    } else {
+        "loaded"
+    }
+}
+
 #[tauri::command]
 fn get_filters_status() -> FiltersStatus {
     let dir = find_binaries_dir();
@@ -1365,19 +1391,16 @@ fn get_filters_status() -> FiltersStatus {
 
     // ── IPSet Filter: binaries/lists/ipset-all.txt ──
     let ipset_file = dir.join("lists").join("ipset-all.txt");
-    let ipset = if !ipset_file.exists() {
-        "any".to_string()
-    } else {
-        let content = std::fs::read_to_string(&ipset_file).unwrap_or_default();
-        let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
-        if lines.is_empty() {
-            "any".to_string()
-        } else if lines.iter().any(|l| l.trim() == "203.0.113.113/32") {
-            "none".to_string()
-        } else {
-            "loaded".to_string()
-        }
-    };
+    let ipset = status_files::read(
+        &IPSET_STATUS,
+        || Ok(status_files::FileStamp::optional(&ipset_file)?.into_iter().collect()),
+        |files| match files.first() {
+            Some(file) => std::fs::read_to_string(&file.path).map(|text| ipset_mode(&text)),
+            None => Ok("any"),
+        },
+    )
+    .unwrap_or("any")
+    .to_string();
 
     FiltersStatus {
         game_filter: game_settings.mode,
@@ -1464,6 +1487,7 @@ fn set_ipset_filter(mode: String) -> Result<(), String> {
         }
         _ => return Err(format!("Invalid IPSet mode: {}", mode)),
     }
+    *IPSET_STATUS.lock_unpoisoned() = None;
 
     Ok(())
 }
@@ -1489,77 +1513,75 @@ fn get_fakes_info() -> Result<FakesInfo, String> {
         return Err("bin folder not found".to_string());
     }
 
-    let discord_active_path = bin_dir.join("ACTIVE_DISCORD_UDP.bin");
-    let game_active_path = bin_dir.join("ACTIVE_GAME_UDP.bin");
+    let files = || fake_file_stamps(&bin_dir);
+    status_files::read(&FAKES_STATUS, files, |files| read_fakes(files, true))
+        .or_else(|_| read_fakes(&files()?, false))
+        .map_err(|error| error.to_string())
+}
 
-    let discord_hash = if discord_active_path.exists() {
-        sha256_file(&discord_active_path).ok()
-    } else {
-        None
+static FAKES_STATUS: status_files::Cache<FakesInfo> = Mutex::new(None);
+const ACTIVE_DISCORD_FAKE: &str = "ACTIVE_DISCORD_UDP.bin";
+const ACTIVE_GAME_FAKE: &str = "ACTIVE_GAME_UDP.bin";
+
+fn fake_file_stamps(bin_dir: &std::path::Path) -> std::io::Result<Vec<status_files::FileStamp>> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(bin_dir)?.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if path.extension().is_some_and(|extension| extension == "bin")
+            && (!name.starts_with("ACTIVE_") || matches!(name, ACTIVE_DISCORD_FAKE | ACTIVE_GAME_FAKE))
+        {
+            files.extend(status_files::FileStamp::optional(&path)?);
+        }
+    }
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(files)
+}
+
+fn read_fakes(files: &[status_files::FileStamp], strict: bool) -> std::io::Result<FakesInfo> {
+    let mut discord_hash = None;
+    let mut game_hash = None;
+    let mut available = Vec::new();
+    for file in files {
+        let path = &file.path;
+        let (Some(filename), Some(name)) = (
+            path.file_name().and_then(|value| value.to_str()),
+            path.file_stem().and_then(|value| value.to_str()),
+        ) else {
+            continue;
+        };
+        let hash = match sha256_file(path) {
+            Ok(hash) => Some(hash),
+            Err(error) if strict => return Err(std::io::Error::other(error)),
+            Err(_) => None,
+        };
+        match filename {
+            ACTIVE_DISCORD_FAKE => discord_hash = hash,
+            ACTIVE_GAME_FAKE => game_hash = hash,
+            _ => available.push((
+                FakeFileItem {
+                    name: name.into(),
+                    filename: filename.into(),
+                },
+                hash,
+            )),
+        }
+    }
+    available.sort_by(|(a, _), (b, _)| natural_sort_compare(&a.name, &b.name));
+    let active_name = |active: Option<String>, default: &str| {
+        available
+            .iter()
+            .rev()
+            .find(|(_, hash)| active.is_some() && *hash == active)
+            .map(|(file, _)| file.name.clone())
+            .unwrap_or_else(|| default.to_string())
     };
-
-    let game_hash = if game_active_path.exists() {
-        sha256_file(&game_active_path).ok()
-    } else {
-        None
-    };
-
-    let mut available_fakes = Vec::new();
-    let mut fake_hashes: Vec<(String, String)> = Vec::new();
-
-    if let Ok(entries) = std::fs::read_dir(&bin_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("bin") {
-                if let Some(file_name_str) = path.file_name().and_then(|s| s.to_str()) {
-                    if file_name_str.starts_with("ACTIVE_") {
-                        continue;
-                    }
-                    let base_name = path
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("")
-                        .to_string();
-                    if base_name.is_empty() {
-                        continue;
-                    }
-                    let hash = sha256_file(&path).unwrap_or_default();
-                    fake_hashes.push((base_name.clone(), hash));
-                    available_fakes.push(FakeFileItem {
-                        name: base_name,
-                        filename: file_name_str.to_string(),
-                    });
-                }
-            }
-        }
-    }
-
-    available_fakes.sort_by(|a, b| natural_sort_compare(&a.name, &b.name));
-    fake_hashes.sort_by(|a, b| natural_sort_compare(&a.0, &b.0));
-
-    let mut current_discord_fake = "quic_initial_steamcommunity_com".to_string();
-    if let Some(ref d_hash) = discord_hash {
-        for (name, hash) in &fake_hashes {
-            if hash.eq_ignore_ascii_case(d_hash) {
-                current_discord_fake = name.clone();
-            }
-        }
-    }
-
-    // Determine current GameFilter fake
-    let mut current_game_fake = "quic_initial_dbankcloud_ru".to_string();
-    if let Some(ref g_hash) = game_hash {
-        for (name, hash) in &fake_hashes {
-            if hash.eq_ignore_ascii_case(g_hash) {
-                current_game_fake = name.clone();
-            }
-        }
-    }
-
     Ok(FakesInfo {
-        current_discord_fake,
-        current_game_fake,
-        available_fakes,
+        current_discord_fake: active_name(discord_hash, "quic_initial_steamcommunity_com"),
+        current_game_fake: active_name(game_hash, "quic_initial_dbankcloud_ru"),
+        available_fakes: available.into_iter().map(|(file, _)| file).collect(),
     })
 }
 
@@ -1572,8 +1594,8 @@ fn set_active_fake(fake_type: String, fake_name: String) -> Result<(), String> {
     }
 
     let target_bin = match fake_type.as_str() {
-        "discord" => "ACTIVE_DISCORD_UDP.bin",
-        "game" => "ACTIVE_GAME_UDP.bin",
+        "discord" => ACTIVE_DISCORD_FAKE,
+        "game" => ACTIVE_GAME_FAKE,
         _ => return Err("Invalid fake type".to_string()),
     };
 
@@ -1594,8 +1616,9 @@ fn set_active_fake(fake_type: String, fake_name: String) -> Result<(), String> {
         let _ = std::fs::remove_file(&target_bin_path);
     }
 
-    std::fs::copy(&source_path, &target_bin_path)
-        .map_err(|e| format!("Failed to replace active fake: {}", e))?;
+    let result = std::fs::copy(&source_path, &target_bin_path);
+    *FAKES_STATUS.lock_unpoisoned() = None;
+    result.map_err(|e| format!("Failed to replace active fake: {}", e))?;
 
     Ok(())
 }
@@ -1749,6 +1772,7 @@ try {{
         refreshing: false,
     });
     *state.last_strategy.lock_unpoisoned() = Some(strategy);
+    *state.zapret_status.lock_unpoisoned() = None;
     Ok("Connected".into())
 }
 
@@ -1809,10 +1833,14 @@ fn stop_zapret(state: State<'_, AppState>) -> Result<(), String> {
             let _ = child.wait();
         }
     }
-    stop_zapret_internal()?;
+    if let Err(error) = stop_zapret_internal() {
+        *state.zapret_status.lock_unpoisoned() = None;
+        return Err(error);
+    }
     *state.active_strategy.lock_unpoisoned() = None;
     *state.running_winws_args.lock_unpoisoned() = None;
     state.traffic_monitor.clear_filter();
+    *state.zapret_status.lock_unpoisoned() = None;
     Ok(())
 }
 
@@ -2286,6 +2314,9 @@ async fn update_ipset_list_inner() -> Result<ipset::UpdateResult, String> {
                 return Err("Downloaded ipset list is empty".to_string());
             }
             let result = ipset::install_if_changed(&list_file, &content);
+            if result.as_ref().is_ok_and(|result| result.changed) {
+                *IPSET_STATUS.lock_unpoisoned() = None;
+            }
             let _ = std::fs::remove_file(&download_file);
             result
         }
@@ -2346,7 +2377,7 @@ async fn download_and_install_update(
     custom_proxy: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<CoreUpdateResult, String> {
-    if get_zapret_status(state.clone()).running {
+    if read_zapret_status(state.inner()).running {
         privileges::require("core")?;
     }
     let _operation_guard = CoreOperationGuard::acquire()?;
@@ -2521,7 +2552,7 @@ async fn download_and_install_update(
 
     // Capture the exact runtime state only after the candidate is ready, just
     // before stopping anything managed by the application.
-    let restart = restart_context(get_zapret_status(state.clone()), "update")?;
+    let restart = restart_context(read_zapret_status(state.inner()), "update")?;
     let should_restart = restart.is_some();
     let filters_status = get_filters_status();
     let traffic_monitor_was_running = state.traffic_monitor.is_running();
@@ -2568,6 +2599,7 @@ async fn download_and_install_update(
         Ok(())
     })();
 
+    *FAKES_STATUS.lock_unpoisoned() = None;
     let mut warnings = Vec::new();
     let mut ipset_updated = false;
     if operation.is_ok() {
@@ -2869,7 +2901,7 @@ fn rollback_core_update(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<CoreInstallationState, String> {
-    if get_zapret_status(state.clone()).running {
+    if read_zapret_status(state.inner()).running {
         privileges::require("core")?;
     }
     let _operation_guard = CoreOperationGuard::acquire()?;
@@ -2881,7 +2913,7 @@ fn rollback_core_update(
     let active_manager = core_manager_at(&dir);
     installation.prepare(active_manager.provider())?;
     let filters = get_filters_status();
-    let restart = restart_context(get_zapret_status(state.clone()), "rollback")?;
+    let restart = restart_context(read_zapret_status(state.inner()), "rollback")?;
     let traffic_monitor_was_running = state.traffic_monitor.is_running();
     if traffic_monitor_was_running {
         state
@@ -2925,6 +2957,7 @@ fn rollback_core_update(
         }
         Ok(result)
     })();
+    *FAKES_STATUS.lock_unpoisoned() = None;
 
     let restart_result = restart.map(|(strategy, mode)| {
         start_zapret(app.clone(), strategy, mode, state.clone())
@@ -3869,7 +3902,7 @@ fn run_tray_action(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
         }
         "toggle" => {
             let state = app.state::<AppState>();
-            let status = get_zapret_status(state.clone());
+            let status = read_zapret_status(state.inner());
             if status.running {
                 stop_zapret(state)?;
             } else {
@@ -3968,11 +4001,11 @@ fn show_tray_popup(app: &tauri::AppHandle, point: tauri::PhysicalPosition<f64>) 
 
 fn refresh_tray_menu(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
-    let status = get_zapret_status(state.clone());
     // Native menu setters synchronously dispatch to the UI thread. Release the
     // translations mutex first: UI callbacks also read/update translations.
     let translations = state.translations.lock_unpoisoned().clone();
     let Some(trans) = translations else { return };
+    let status = get_zapret_status(state.clone());
     refresh_warp_tray(app, false);
 
     let status_mi = state.status_item.lock_unpoisoned().clone();
@@ -4183,6 +4216,80 @@ fn finish_setup_window(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn fit_initial_window_height(window: tauri::WebviewWindow, height: u32) -> tauri::Result<()> {
+    if window.label() != "main" || window.is_visible()? || window.is_maximized()? {
+        return Ok(());
+    }
+    if let Some(monitor) = window.current_monitor()? {
+        let width = window.inner_size()?.width;
+        let minimum = window_config(window.app_handle()).min_height.unwrap_or(1.0);
+        let height = f64::from(height).max(minimum);
+        place_main_window(&window, &monitor, width, height)?;
+    }
+    Ok(())
+}
+
+fn window_config(app: &tauri::AppHandle) -> &tauri::utils::config::WindowConfig {
+    &app.config().app.windows[0]
+}
+
+fn place_main_window(
+    window: &tauri::WebviewWindow,
+    monitor: &tauri::Monitor,
+    width: u32,
+    height: f64,
+) -> tauri::Result<()> {
+    let area = monitor.work_area();
+    let width = width.min(area.size.width).max(1);
+    let height = ((height * monitor.scale_factor()).ceil() as u32)
+        .min(area.size.height)
+        .max(1);
+    window.set_size(tauri::PhysicalSize::new(width, height))?;
+    window.set_position(tauri::PhysicalPosition::new(
+        area.position.x + (area.size.width.saturating_sub(width) / 2) as i32,
+        area.position.y + (area.size.height.saturating_sub(height) / 2) as i32,
+    ))
+}
+
+fn prepare_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let Some(window) = app.get_webview_window("main") else {
+        return Ok(());
+    };
+    let cursor_monitor = window
+        .cursor_position()
+        .ok()
+        .and_then(|point| window.monitor_from_point(point.x, point.y).ok().flatten());
+    let monitor = if let Some(monitor) = cursor_monitor {
+        Some(monitor)
+    } else {
+        window.current_monitor()?.or(window.primary_monitor()?)
+    };
+    let Some(monitor) = monitor else {
+        return Ok(());
+    };
+    let area = monitor.work_area();
+    let scale = monitor.scale_factor();
+    let config = window_config(app);
+    // Move the hidden window first so Windows applies the target monitor's DPI.
+    window.set_position(area.position)?;
+    let min_width = config
+        .min_width
+        .unwrap_or(1.0)
+        .min(f64::from(area.size.width) / scale);
+    let min_height = config
+        .min_height
+        .unwrap_or(1.0)
+        .min(f64::from(area.size.height) / scale);
+    window.set_min_size(Some(tauri::LogicalSize::new(min_width, min_height)))?;
+    place_main_window(
+        &window,
+        &monitor,
+        (config.width * scale).round() as u32,
+        config.height,
+    )
+}
+
+#[tauri::command]
 fn show_app_window(app: tauri::AppHandle, force: bool) -> Result<(), String> {
     if app.get_webview_window("setup").is_some()
         || (!force && std::env::args().any(|arg| arg == "--autostart"))
@@ -4265,6 +4372,14 @@ pub fn run() {
     }
     #[cfg(windows)]
     {
+        // Relaunch before acquiring the single-instance lock, so the elevated
+        // child can start with the same arguments (including --autostart).
+        match elevation::request_at_startup() {
+            Ok(true) => return,
+            Ok(false) => {}
+            Err(error) if error.raw_os_error() == Some(1223) => {}
+            Err(error) => eprintln!("Cannot start with administrator rights: {error}"),
+        }
         let migration = if is_admin() {
             migrate_renamed_install_service_path()
         } else {
@@ -4301,6 +4416,7 @@ pub fn run() {
             warp_tray_busy: AtomicBool::new(false),
             warp_tray_connected: AtomicBool::new(false),
             active_strategy: Mutex::new(None),
+            zapret_status: Mutex::new(None),
             test_process_pid: Mutex::new(None),
             status_item: Mutex::new(None),
             strategy_item: Mutex::new(None),
@@ -4319,6 +4435,9 @@ pub fn run() {
         })
         .manage(automations::Store::default())
         .setup(|app| {
+            if let Err(error) = prepare_main_window(app.handle()) {
+                eprintln!("Cannot fit the main window to the monitor: {error}");
+            }
             let notification_app = app.handle().clone();
             app.notification().on_action(move |event| {
                 if is_update_notification_action(
@@ -4533,8 +4652,8 @@ pub fn run() {
                     let (title, body) = match translations.as_ref() {
                         Some(t) => (&t.minimized_title, &t.minimized_body),
                         None => (
-                            &"Zapret minimized".to_string(),
-                            &"The app is still running in the system tray.".to_string(),
+                            &"ZAPRET UI minimized".to_string(),
+                            &"It will keep running in the tray".to_string(),
                         ),
                     };
 
@@ -4552,6 +4671,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            elevation::get_always_run_as_admin,
+            elevation::set_always_run_as_admin,
             privileges::restart_as_admin,
             privileges::elevation_context,
             privileges::request_admin_from_tray,
@@ -4600,6 +4721,7 @@ pub fn run() {
             setup_window_ready,
             finish_setup_window,
             show_app_window,
+            fit_initial_window_height,
             get_strategies,
             remember_strategy_selection,
             import_custom_strategy,

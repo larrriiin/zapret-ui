@@ -7,6 +7,12 @@ button:disabled { cursor: not-allowed; }
 .app-header { position:fixed; top:8px; left:8px; right:8px; height:64px; display:flex; align-items:center; gap:20px; padding:0 12px 0 24px; z-index:60; user-select:none; }
 :root { --app-content-top:84px; }
 .app-sidebar { top:var(--app-content-top); }
+@media (max-height: 650px) {
+  .app-sidebar { overflow-y: auto; padding-block: 8px; }
+  .app-sidebar nav { gap: 6px; }
+  .app-sidebar a { height: 40px; flex-shrink: 0; }
+  .app-sidebar > div:last-child { padding-bottom: 0; }
+}
 .app-backdrop { position:fixed; inset:0; z-index:-1; pointer-events:none; overflow:hidden; }
 .app-content { position:fixed; top:var(--app-content-top); bottom:0; left:80px; right:0; }
 .app-header-brand { display:flex; flex-direction:column; flex:1; min-width:0; gap:2px; }
@@ -93,7 +99,6 @@ button:disabled { cursor: not-allowed; }
 #warp-diag-result { overflow-wrap: anywhere; }
 #warp-diag-create[aria-busy="true"] { cursor: progress; }
 
-/* WARP only changes the home composition after successful installation detection. */
 .provider-heading[hidden], .connection-heading[hidden], #warp-card[hidden],
 .warp-proxy[hidden], .warp-port-form[hidden], .warp-error[hidden], #warp-install[hidden] { display: none; }
 #section-home > section.has-warp {
@@ -126,6 +131,17 @@ button:disabled { cursor: not-allowed; }
 }
 .has-warp > .zapret-connection:has(#status-lamp-divider.is-on), .connection-card[data-state="connected"] {
   border-color: var(--color-secondary);
+}
+.warp-card-initializing {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--color-popup) 84%, transparent);
+  color: var(--color-on-surface);
+  font-weight: 700;
 }
 .provider-heading { display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 6px 12px; margin-bottom: 26px; }
 .provider-title-row { display:flex; align-items:center; gap:6px; }
@@ -440,7 +456,7 @@ input, textarea { caret-color: var(--color-primary); }
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url('./assets/fonts/material-symbols-outlined.ttf') format('truetype');
+  src: url('./assets/fonts/material-symbols-outlined.woff2') format('woff2');
 }
 
 .material-symbols-outlined {

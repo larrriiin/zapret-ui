@@ -3,7 +3,7 @@
 
     <!-- Header -->
     <div class="flex flex-wrap items-center justify-between gap-3">
-        <h2 class="font-headline text-[10px] font-bold uppercase tracking-[0.2em] text-primary/70" data-i18n="settings">Settings</h2>
+        <h2 class="ui-page-title" data-i18n="settings">Settings</h2>
         <a id="settings-github-link" href="https://github.com/larrriiin/zapret-ui" target="_blank" rel="noopener noreferrer"
             class="group inline-flex min-h-11 items-center gap-2 rounded-lg px-2 text-xs font-medium text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
             <span class="underline-offset-4 group-hover:underline" data-i18n="project_github">Project on GitHub</span>
@@ -71,7 +71,7 @@
         <h3 class="font-headline text-[11px] font-bold uppercase tracking-[0.2em] text-primary/70" data-i18n="settings_section_behavior">Application behavior</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <!-- Autostart -->
-            <div class="ui-panel p-6 flex flex-col justify-between">
+            <div class="ui-panel p-6 space-y-4">
                 <label class="flex items-start justify-between gap-3 cursor-pointer">
                     <div class="flex-1">
                         <div class="text-sm text-on-surface font-headline font-bold" data-i18n="autostart_label">Launch on Windows startup</div>
@@ -81,6 +81,16 @@
 
                     </button>
                 </label>
+                <div class="border-t border-outline-variant/10 pt-4">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0 flex-1">
+                            <div id="always-run-as-admin-label" class="text-sm text-on-surface font-headline font-bold" data-i18n="always_run_as_admin_label">Always run as administrator</div>
+                            <div id="always-run-as-admin-hint" class="text-xs text-on-surface-variant mt-1" data-i18n="always_run_as_admin_hint">Applies on the next launch</div>
+                        </div>
+                        <button id="always-run-as-admin-toggle" type="button" class="ui-switch" role="switch" aria-checked="false" aria-labelledby="always-run-as-admin-label" aria-describedby="always-run-as-admin-hint" disabled></button>
+                    </div>
+                    <p id="always-run-as-admin-error" class="mt-2 text-xs text-error" role="status" hidden></p>
+                </div>
             </div>
 
             <!-- Close button behavior -->

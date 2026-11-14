@@ -30,6 +30,29 @@ test('ordinary startup, explicit elevation, cancellation, background rules and s
       assert.equal(await page.locator('html').getAttribute('data-theme'), theme);
       assert.equal(await page.locator('#elevation-dialog').isVisible(), false);
       assert.equal(await page.evaluate(() => window.elevationCalls.some(c => c.command === 'restart_as_admin')), false);
+      await page.locator('#nav-settings').click();
+      const adminToggle = page.getByRole('switch', { name: lang === 'ru' ? 'Всегда запускать от имени администратора' : 'Always run as administrator' });
+      await adminToggle.waitFor({ state: 'visible' });
+      await page.waitForSelector('#always-run-as-admin-toggle:enabled');
+      assert.equal(await adminToggle.getAttribute('aria-checked'), 'false');
+      await adminToggle.focus();
+      await page.keyboard.press('Space');
+      await page.waitForSelector('#always-run-as-admin-toggle[aria-checked="true"]');
+      assert.equal(await page.evaluate(() => window.elevationCalls.some(c => c.command === 'restart_as_admin')), false);
+      await page.reload();
+      await page.waitForFunction(() => !document.documentElement.classList.contains('app-loading'));
+      await page.locator('#nav-settings').click();
+      await page.waitForSelector('#always-run-as-admin-toggle[aria-checked="true"]');
+      await page.evaluate(() => { window.adminPreferenceSaveFailure = true; });
+      await adminToggle.click();
+      await page.locator('#always-run-as-admin-error').waitFor({ state: 'visible' });
+      assert.equal(await adminToggle.getAttribute('aria-checked'), 'true');
+      await page.evaluate(() => { window.adminPreferenceSaveFailure = false; });
+      await adminToggle.click();
+      await page.waitForSelector('#always-run-as-admin-toggle[aria-checked="false"]');
+      assert.equal(await page.locator('#always-run-as-admin-error').isVisible(), false);
+      assert.equal(await page.evaluate(() => window.elevationCalls.some(c => c.command === 'restart_as_admin')), false);
+      await page.locator('#app-sidebar nav a').first().click();
       await page.locator('#connect-btn').click();
       await page.locator('#elevation-dialog').waitFor({ state: 'visible' });
       assert.match(await page.locator('#elevation-reason').textContent(), lang === 'ru' ? /службой/ : /service/);
@@ -84,6 +107,37 @@ test('ordinary startup, explicit elevation, cancellation, background rules and s
       await page.locator('#section-traffic').waitFor({ state: 'visible' });
       assert.equal(await page.locator('#elevation-dialog').isVisible(), false);
       if (theme === 'zapret') {
+        await page.goto(`http://127.0.0.1:${server.config.server.port}/elevation-test.html?slow-warp=1`);
+        await page.waitForFunction(() => window.failWarpDetection && !document.documentElement.classList.contains('app-loading'));
+        await page.locator('#section-home').waitFor({ state: 'visible' });
+        assert.equal(await page.locator('#warp-card').isVisible(), false);
+        await page.locator('#nav-warp-settings').click();
+        await page.waitForSelector('#warp-page-status[data-state="detecting"]');
+        assert.equal(await page.locator('#warp-sites-add').isDisabled(), true);
+        await page.evaluate(() => window.failWarpDetection());
+        await page.locator('#warp-page-error').waitFor({ state: 'visible' });
+        assert.equal(await page.locator('#startup-retry').isVisible(), false);
+        await page.evaluate(() => { window.warpRecovered = true; });
+        await page.waitForSelector('#warp-sites-add:enabled');
+        await page.locator('#warp-page-error').waitFor({ state: 'hidden' });
+
+        await page.goto(`http://127.0.0.1:${server.config.server.port}/elevation-test.html?removed-warp=1`);
+        await page.waitForFunction(() => !document.documentElement.classList.contains('app-loading'));
+        await page.locator('#warp-card-initializing').waitFor({ state: 'visible' });
+        assert.equal(await page.locator('#warp-card-controls').evaluate(el => el.inert), true);
+        assert.equal(await page.evaluate(() => {
+          const fit = window.elevationCalls.findIndex(call => call.command === 'fit_initial_window_height');
+          const show = window.elevationCalls.findIndex(call => call.command === 'show_app_window');
+          const content = document.getElementById('sections-host').getBoundingClientRect();
+          const home = document.getElementById('section-home').getBoundingClientRect();
+          return fit >= 0 && fit < show && window.elevationCalls[fit].args.height === Math.ceil(content.top + home.height);
+        }), true);
+        await page.evaluate(() => window.finishWarpDetection());
+        await page.locator('#warp-card').waitFor({ state: 'hidden' });
+        await page.reload();
+        await page.waitForFunction(() => window.finishWarpDetection && !document.documentElement.classList.contains('app-loading'));
+        assert.equal(await page.locator('#warp-card').isVisible(), false);
+
         await page.goto(`http://127.0.0.1:${server.config.server.port}/elevation-test.html?setup=1&repeat=true&clearLists=true`);
         await page.locator('#setup-dialog').waitFor({ state: 'visible' });
         assert.equal(await page.locator('#elevation-dialog').isVisible(), false);

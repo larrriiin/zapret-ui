@@ -13,6 +13,7 @@
   --ui-duration-exit: 100ms;
   --ui-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
+.ui-page-title { @apply font-headline text-2xl font-bold text-primary; }
 .ui-icon-tile { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; width:48px; height:48px; border-radius:var(--ui-radius-control); background:color-mix(in srgb, var(--color-primary) 14%, transparent); color:var(--color-primary); }
 .glass-panel, .ui-panel { background: color-mix(in srgb, var(--color-primary) 5%, transparent); backdrop-filter: blur(40px); }
 .ui-panel { border: 1px solid var(--ui-border); border-radius: var(--ui-radius-panel); min-width: 0; }

@@ -302,7 +302,7 @@ mod handoff {
         use super::*;
 
         #[test]
-        fn startup_never_requests_elevation_even_with_autostart() {
+        fn startup_without_handoff_arguments_is_accepted() {
             assert!(accept(&["--autostart".into()]).is_ok());
         }
 
