@@ -5,6 +5,7 @@ import { t } from '../lib/i18n.js';
 let availableFakes = [];
 let currentDiscordFake = 'quic_initial_steamcommunity_com';
 let currentGameFake = 'quic_initial_dbankcloud_ru';
+const renderedOptions = new WeakMap();
 
 export function closeFakeDropdowns() {
   const discordPanel = $('discord-fake-options');
@@ -24,6 +25,9 @@ function renderFakeOptionsList(type) {
   const activeFake = isDiscord ? currentDiscordFake : currentGameFake;
 
   if (!listContainer) return;
+  const signature = JSON.stringify([activeFake, availableFakes.map(fake => fake.name), t('no_fake_files')]);
+  if (renderedOptions.get(listContainer) === signature) return;
+  renderedOptions.set(listContainer, signature);
   listContainer.innerHTML = '';
 
   if (availableFakes.length === 0) {
@@ -40,10 +44,17 @@ function renderFakeOptionsList(type) {
     btn.type = 'button';
     btn.className = 'ui-select-option ui-code justify-between' + (isSelected ? ' dropdown-option-selected' : '');
 
-    btn.innerHTML = `
-      <span class="truncate">${fake.name}</span>
-      ${isSelected ? '<span class="material-symbols-outlined text-sm text-primary ml-2">check</span>' : ''}
-    `;
+    const label = document.createElement('span');
+    label.className = 'truncate';
+    label.textContent = fake.name;
+    btn.appendChild(label);
+    if (isSelected) {
+      const check = document.createElement('span');
+      check.className = 'material-symbols-outlined text-sm text-primary ml-2';
+      check.setAttribute('aria-hidden', 'true');
+      check.textContent = 'check';
+      btn.appendChild(check);
+    }
 
     btn.addEventListener('click', (e) => {
       e.stopPropagation();

@@ -84,15 +84,16 @@ const rects = () => elements.map(e => { const r=e.getBoundingClientRect(); retur
 await document.fonts.ready;
 const before = JSON.stringify(rects());
 const loadingVisible = getComputedStyle($('startup-loader')).display === 'flex' && getComputedStyle($('sections-host')).visibility === 'hidden';
-await initWarp();
+initWarp();
 initNavigation(); initTrafficMonitor();
-const detectionFinished = $('warp-settings-status').textContent.includes('WARP');
 document.documentElement.classList.remove('app-loading');
 initInfoModals(); initStatusCheck();
-await wait(200);
 const results = [];
 function check(condition, label) {results.push(`${condition?'PASS':'FAIL'}: ${label}`); if(!condition) console.error(label);}
-check(loadingVisible && detectionFinished && startupBusy === 0 && getComputedStyle($('startup-loader')).display === 'none', 'Startup waits for detection even when the WARP client is busy');
+check(loadingVisible && startupBusy === 2 && $('warp-install').disabled && getComputedStyle($('startup-loader')).display === 'none', 'The main UI is visible while WARP detection is pending');
+const detectionDeadline = performance.now() + 3000;
+while ($('warp-install').disabled && performance.now() < detectionDeadline) await wait(20);
+check(startupBusy === 0 && !$('warp-install').disabled, 'Initial detection retries while the WARP client is busy');
 for (const id of ['connect-btn', 'check-status-btn', 'status-modal-close', 'status-modal-done']) check(getComputedStyle($(id)).cursor === 'pointer', `${id} uses a pointer cursor`);
 $('zapret-info-btn').click();
 check(!$('info-modal').classList.contains('hidden') && $('info-content').textContent.includes('DPI'), 'Zapret help works without WARP');

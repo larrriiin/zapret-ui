@@ -1,11 +1,53 @@
 import { $, invoke, getCurrentWindow } from '../lib/core.js';
+import { t } from '../lib/i18n.js';
 
 const CLOSE_PREF_KEY = 'zapret.closePref'; // 'ask' | 'tray' | 'exit'
 const getClosePref = () => localStorage.getItem(CLOSE_PREF_KEY) || 'ask';
 const setClosePref = (v) => localStorage.setItem(CLOSE_PREF_KEY, v);
 
+async function initAdminStartupPreference() {
+  const toggle = $('always-run-as-admin-toggle');
+  const errorMessage = $('always-run-as-admin-error');
+  if (!toggle || !errorMessage) return;
+
+  let enabled;
+  const showError = (key) => {
+    errorMessage.dataset.i18n = key;
+    errorMessage.textContent = t(key);
+    errorMessage.hidden = false;
+  };
+  const render = () => {
+    toggle.dataset.enabled = String(enabled);
+    toggle.setAttribute('aria-checked', String(enabled));
+  };
+
+  try {
+    enabled = await invoke('get_always_run_as_admin');
+    render();
+    toggle.disabled = false;
+  } catch (error) {
+    console.error('Could not read administrator startup preference:', error);
+    showError('always_run_as_admin_load_failed');
+    return;
+  }
+
+  toggle.addEventListener('click', async () => {
+    toggle.disabled = true;
+    errorMessage.hidden = true;
+    try {
+      enabled = await invoke('set_always_run_as_admin', { enabled: !enabled });
+      render();
+    } catch (error) {
+      console.error('Could not save administrator startup preference:', error);
+      showError('always_run_as_admin_save_failed');
+    } finally {
+      toggle.disabled = false;
+    }
+  });
+}
 
 export function initTitlebar() {
+  void initAdminStartupPreference();
   try {
     const win = getCurrentWindow();
     const tbMin = $('tb-minimize');

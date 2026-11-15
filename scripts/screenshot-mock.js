@@ -245,6 +245,8 @@ window.__TAURI__ = {
       switch (cmd) {
         case 'check_admin_privileges':
           return true;
+        case 'get_always_run_as_admin':
+          return false;
         case 'show_app_window':
           return null;
         case 'get_strategies':

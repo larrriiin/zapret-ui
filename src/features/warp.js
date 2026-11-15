@@ -15,6 +15,8 @@ export const WARP_MODE_KEYS = {
   'warp+dot': 'warp_mode_warp_dot', 'warp+doh': 'warp_mode_warp_doh',
   proxy: 'warp_mode_proxy', tunnel_only: 'warp_mode_tunnel_only',
 };
+const INSTALLED_KEY = 'zapret.warpInstalled';
+let lastInstalled = false;
 let snapshot = null;
 let busy = false;
 let polling = null;
@@ -110,7 +112,6 @@ function diagnosticErrors() {
 }
 
 function layout(installed) {
-  $('nav-warp-settings').hidden = false;
   if (hero.classList.contains('has-warp') === installed) return;
   hero.classList.toggle('has-warp', installed);
   heading.hidden = !installed;
@@ -124,11 +125,19 @@ function layout(installed) {
 function render() {
   const s = snapshot;
   setWarpSummary(Boolean(s?.installed && s?.connected && !requestError && !s?.error));
-  if (s) layout(s.installed);
-  const status = operation || (requestError || operationError ? 'error' : s?.state) || 'disconnected';
-  const locked = busy || checking || status === 'connecting' || status === 'disconnecting';
-  $('warp-state').textContent = t(`warp_state_${status}`);
+  if (typeof s?.installed === 'boolean' && s.installed !== lastInstalled) {
+    lastInstalled = s.installed;
+    try { localStorage.setItem(INSTALLED_KEY, String(lastInstalled)); } catch { /* Storage is optional. */ }
+  }
+  layout(lastInstalled);
+  const status = operation || (requestError || operationError ? 'error' : s?.state) || 'detecting';
+  const statusLabel = t(status === 'detecting' ? 'warp_detecting' : `warp_state_${status}`);
+  const locked = !s || busy || checking || status === 'connecting' || status === 'disconnecting';
+  $('warp-state').textContent = statusLabel;
   $('warp-card').dataset.state = status;
+  const initializing = lastInstalled && status === 'detecting';
+  $('warp-card-controls').inert = initializing;
+  $('warp-card-initializing').hidden = !initializing;
   const connecting = operation === 'connecting' || (!busy && s?.state === 'connecting');
   $('warp-connect-label').textContent = connecting ? t('warp_cancel_connect') : operation ? t(`warp_state_${operation}`) : t(s?.connected ? 'warp_disconnect' : 'warp_connect');
   $('warp-connect').disabled = (!connecting && locked) || !s?.installed || (!s?.modes?.length && !s?.connected && !connecting);
@@ -168,8 +177,8 @@ function render() {
   }
   const sitesEnabled = rulesVerified && Boolean(sites?.runtime_active);
   $('warp-home-rules').hidden = false;
-  siteInput.disabled = busy;
-  $('warp-sites-add').disabled = busy || checking;
+  siteInput.disabled = !s || busy;
+  $('warp-sites-add').disabled = !s || busy || checking;
   $('warp-sites-toggle').disabled = locked || (!sitesEnabled && !siteInput.value.trim());
   $('warp-sites-toggle').textContent = t(sitesEnabled ? 'warp_sites_disable' : 'warp_sites_enable');
   $('warp-sites-toggle').dataset.enabled = String(sitesEnabled);
@@ -192,8 +201,8 @@ function render() {
       actions.append(remove); row.append(icon, name, actions); return row;
     }));
   }
-  $('warp-page-status').textContent = t(`warp_state_${s?.state || 'disconnected'}`);
-  $('warp-page-status').dataset.state = s?.state || 'disconnected';
+  $('warp-page-status').textContent = statusLabel;
+  $('warp-page-status').dataset.state = status;
   $('warp-apps-empty').hidden = apps.paths.length > 0;
   $('warp-apps-add').disabled = locked;
   $('warp-apps-toggle').disabled = locked || (!appsEnabled && !apps.paths.length);
@@ -291,7 +300,9 @@ function renderReport() {
     title.textContent = t(`warp_state_${error ? 'error' : snapshot.state}`);
     summary.append(title); report.append(summary);
   }
-  const rows = [{ icon: 'cloud', labelKey: 'warp_client', value: snapshot?.installed ? 'selected' : 'not_installed', valueLabel: snapshot?.installed ? t('warp_installed_short') : t('warp_not_installed'), detail: snapshot?.installed ? snapshot.version || t('warp_unknown') : undefined }];
+  const clientState = snapshot?.installed ? 'selected' : snapshot ? 'not_installed' : 'unknown';
+  const clientLabel = snapshot?.installed ? 'warp_installed_short' : snapshot ? 'warp_not_installed' : 'warp_unknown';
+  const rows = [{ icon: 'cloud', labelKey: 'warp_client', value: clientState, valueLabel: t(clientLabel), detail: snapshot?.installed ? snapshot.version || t('warp_unknown') : undefined }];
   if (snapshot?.installed) {
     rows.push({ icon: 'power_settings_new', labelKey: 'status_label', value: error ? 'unknown' : snapshot.connected ? 'running' : 'stopped', detail: t(`warp_state_${error ? 'error' : snapshot.state}`) },
       { icon: 'route', labelKey: 'warp_mode', value: snapshot.mode ? 'selected' : 'unknown', detail: t(WARP_MODE_KEYS[snapshot.mode] || 'warp_unknown') },
@@ -418,6 +429,7 @@ async function toggleRule(kind) {
 }
 
 export function initWarp() {
+  try { lastInstalled = localStorage.getItem(INSTALLED_KEY) === 'true'; } catch { /* Storage is optional. */ }
   hero = document.querySelector('#section-home > section');
   zapret = hero.querySelector(':scope > .relative');
   zapret.classList.add('zapret-connection');
@@ -544,18 +556,16 @@ export function initWarp() {
     catch (error) { $('warp-install-result').textContent = errorText(error); }
     finally { installing = false; await refresh(); render(); }
   });
-  // One loop per webview; the backend gate also serializes across windows.
-  async function poll() { await refresh(); window.setTimeout(poll, 3000); }
-  // A tray query may own the client gate during startup. Do not reveal an
-  // undecided layout; wait for detection or let the startup screen offer retry.
-  return (async () => {
-    const deadline = Date.now() + 45000;
-    do {
+  $('nav-warp-settings').hidden = false;
+  render();
+  // The tray can briefly hold the backend gate during initial detection.
+  async function poll() {
+    try {
       await refresh();
-      if (snapshot) return;
-      if (requestError && requestError.code !== 'warp_busy') throw requestError;
-      await new Promise(resolve => window.setTimeout(resolve, 200));
-    } while (Date.now() < deadline);
-    throw new Error('WARP detection timed out');
-  })().finally(() => window.setTimeout(poll, 3000));
+    } catch (error) {
+      console.error('Could not refresh WARP controls:', error);
+    }
+    window.setTimeout(poll, snapshot || requestError ? 3000 : 200);
+  }
+  void poll();
 }

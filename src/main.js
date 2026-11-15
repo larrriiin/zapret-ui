@@ -39,8 +39,7 @@ import { initTrafficMonitor, refreshTrafficTranslations } from './features/traff
 import { initTelegram } from './features/telegram.js';
 import { initWarp } from './features/warp.js';
 
-// Mount HTML fragments synchronously so `[data-i18n]` elements are already in
-// the DOM when Tailwind's CDN JIT observer and i18n engine run over them.
+// Mount HTML fragments before initializing translations and controls.
 mountComponents();
 initTheme();
 
@@ -61,12 +60,12 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.addEventListener('contextmenu', (e) => e.preventDefault());
 
   initTitlebar();
-  const warpReady = initWarp().then(() => null, error => error);
+  initWarp();
 
   initFirstRun();
-  if (elevationContext?.section === 'setup') await openSetup({ repeat: elevationContext.repeat, clearLists: elevationContext.clear_lists });
-  else await maybeShowFirstRun();
-  await invoke('show_app_window', { force: false });
+  const resumeSetup = elevationContext?.section === 'setup';
+  const forceShow = resumeSetup || await maybeShowFirstRun();
+  if (resumeSetup) await openSetup({ repeat: elevationContext.repeat, clearLists: elevationContext.clear_lists, restoreMain: false });
 
   await loadCachedTestResults();
   await loadStrategies();
@@ -80,15 +79,17 @@ window.addEventListener('DOMContentLoaded', async () => {
   await pollFakes();
   syncTrayLocalization();
 
-  setInterval(async () => {
-    if (state.setupActive) return;
-    await pollStatus();
-    await pollFilters();
-    await pollFakes();
-  }, 2000);
+  async function pollHome() {
+    if (!state.setupActive) {
+      await pollStatus();
+      await pollFilters();
+      await pollFakes();
+    }
+    setTimeout(pollHome, 2000);
+  }
+  setTimeout(pollHome, 2000);
 
   initNavigation();
-  if (elevationContext && elevationContext.section !== 'setup') showSection(elevationContext.section);
   initAutomations();
   initTelegram();
   initConnectButtons();
@@ -154,9 +155,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     refreshTrafficTranslations();
   });
 
-  const [warpError] = await Promise.all([warpReady, document.fonts.ready]);
-  if (warpError) throw warpError;
+  await document.fonts.ready;
+  const home = $('section-home').getBoundingClientRect();
+  const content = $('sections-host').getBoundingClientRect();
+  await invoke('fit_initial_window_height', { height: Math.ceil(content.top + home.height) })
+    .catch(error => console.warn('Could not fit the initial window height:', error));
+  if (elevationContext && elevationContext.section !== 'setup') showSection(elevationContext.section);
   document.documentElement.classList.remove('app-loading');
+  await invoke('show_app_window', { force: forceShow });
   } catch (error) {
     console.error('Startup failed:', error);
     document.getElementById('startup-spinner').hidden = true;
