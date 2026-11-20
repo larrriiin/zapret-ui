@@ -42,6 +42,63 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
 
       assert.equal(await page.locator('vite-error-overlay').count(), 0);
       assert.ok(await page.title());
+      await page.evaluate(() => {
+        const original = window.__TAURI__.core.invoke;
+        let profiles = 0;
+        window.profileRevealed = false;
+        window.__TAURI__.core.invoke = async (command, args) => {
+          if (command === 'reveal_warp_profile') {
+            window.profileRevealed = true;
+            return;
+          }
+          if (command !== 'save_warp_profile') return original(command, args);
+          const defaults = { endpoint: '', randomEndpoint: true, maskingDomain: '',
+            services: null, dns: 'cloudflare', excludeLan: false, ipv6: true, mtu: 1280, keepalive: 0 };
+          const expected = profiles === 0 ? defaults : {
+            ...defaults, endpoint: 'vpn.example:2408', randomEndpoint: false, maskingDomain: 'example.com',
+            services: ['youtube', 'telegram'], excludeLan: true, ipv6: false, mtu: 1200, keepalive: 25,
+          };
+          if (!args.acceptedTerms || JSON.stringify(args.options) !== JSON.stringify(expected) || 'saveTitle' in args) {
+            throw 'warp_profile_routes_error';
+          }
+          return `WARP-WireSock-${++profiles}.conf`;
+        };
+      });
+      const profileOpen = page.locator('#warp-profile-open');
+      const profileDialog = page.locator('#warp-profile-dialog');
+      const profileSave = page.locator('#warp-profile-save');
+      await profileOpen.click();
+      assert.equal(await profileDialog.isVisible(), true);
+      assert.equal(await profileDialog.evaluate(element => element.scrollWidth > element.clientWidth), false);
+      assert.equal(await profileSave.isDisabled(), true);
+      assert.equal(await page.locator('#warp-profile-endpoint').isVisible(), false);
+      await page.locator('#warp-profile-terms').check();
+      await profileSave.click();
+      await page.locator('#warp-profile-status').filter({ hasText: 'WARP-WireSock-1.conf' }).waitFor();
+      await page.locator('#warp-profile-reveal').click();
+      assert.equal(await page.evaluate(() => window.profileRevealed), true);
+      assert.equal(await profileSave.isDisabled(), false);
+      await page.locator('#warp-profile-advanced summary').press('Enter');
+      assert.equal(await page.locator('#warp-profile-endpoint').isDisabled(), true);
+      await page.locator('#warp-profile-random-endpoint').uncheck();
+      await page.locator('#warp-profile-endpoint').fill('vpn.example:2408');
+      assert.equal(await page.locator('#warp-profile-masking-domain').isVisible(), true);
+      await page.locator('#warp-profile-masking-domain').fill('example.com');
+      await page.locator('#warp-profile-split').check();
+      assert.equal(await profileSave.isDisabled(), true);
+      assert.equal(await page.locator('#warp-profile-dns input[value="google"]').isDisabled(), true);
+      await page.locator('#warp-profile-services input[value="youtube"]').check();
+      await page.locator('#warp-profile-services input[value="telegram"]').check();
+      await page.locator('#warp-profile-exclude-lan').check();
+      await page.locator('#warp-profile-ipv6').uncheck();
+      await page.locator('#warp-profile-mtu').fill('1200');
+      await page.locator('#warp-profile-keepalive').fill('25');
+      await profileSave.click();
+      await page.locator('#warp-profile-status').filter({ hasText: 'WARP-WireSock-2.conf' }).waitFor();
+      await page.keyboard.press('Escape');
+      assert.equal(await profileDialog.isVisible(), false);
+      assert.equal(await profileOpen.evaluate(element => element === document.activeElement), true);
+
       await page.locator('#warp-advanced').evaluate(element => { element.open = true; });
       await page.locator('#warp-protocol-trigger').scrollIntoViewIfNeeded();
       assert.equal(await page.locator('#warp-protocol').inputValue(), 'MASQUE');

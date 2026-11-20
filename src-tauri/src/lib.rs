@@ -4708,6 +4708,8 @@ pub fn run() {
             providers::warp::diagnostics::check_warp_connection,
             providers::warp::diagnostics::create_warp_diagnostics,
             providers::warp::diagnostics::reveal_warp_diagnostics,
+            providers::warp::profile::save_warp_profile,
+            providers::warp::profile::reveal_warp_profile,
             providers::warp::set_warp_sites,
             providers::warp::set_warp_applications,
             providers::warp::applications::choose_warp_applications,

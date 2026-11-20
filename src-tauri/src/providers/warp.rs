@@ -13,6 +13,7 @@ pub mod applications;
 pub mod control;
 pub mod diagnostics;
 pub mod installer;
+pub mod profile;
 pub mod sites;
 
 const MODES: &[&str] = &[

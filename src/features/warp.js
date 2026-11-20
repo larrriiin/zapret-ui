@@ -9,6 +9,7 @@ import { showConfirm } from '../lib/dom.js';
 import { openWarpTraffic } from './traffic.js';
 import { routingState, needsProxyConfirmation, orderedWarpModes } from './warp-state.js';
 import { adminReason } from '../lib/privilege-errors.js';
+import { initWarpProfile } from './warp-profile.js';
 
 export const WARP_MODE_KEYS = {
   doh: 'warp_mode_doh', dot: 'warp_mode_dot', warp: 'warp_mode_warp',
@@ -429,6 +430,7 @@ async function toggleRule(kind) {
 }
 
 export function initWarp() {
+  initWarpProfile();
   try { lastInstalled = localStorage.getItem(INSTALLED_KEY) === 'true'; } catch { /* Storage is optional. */ }
   hero = document.querySelector('#section-home > section');
   zapret = hero.querySelector(':scope > .relative');

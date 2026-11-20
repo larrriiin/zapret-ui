@@ -5759,9 +5759,12 @@ dependencies = [
 name = "zapret-ui"
 version = "26.11.2"
 dependencies = [
+ "aws-lc-rs",
  "base64 0.23.1",
  "futures-util",
+ "ipnet",
  "minisign-verify",
+ "rand",
  "reqwest",
  "rfd",
  "serde",
@@ -5775,8 +5778,11 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tempfile",
+ "time",
  "tokio",
  "windows-sys 0.61.2",
+ "zeroize",
  "zip",
 ]
 
@@ -5877,6 +5883,7 @@ version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
 dependencies = [
+ "serde",
  "zeroize_derive",
 ]
 
