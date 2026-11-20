@@ -11,8 +11,7 @@ const STATUS_META = {
   unknown: { label: 'system_state_unknown', icon: 'help', tone: 'text-tertiary', badge: 'bg-tertiary/10 text-tertiary' },
 };
 
-export function makeStatusRow({ icon, labelKey, value, detail, valueLabel }) {
-  const meta = STATUS_META[value] || STATUS_META.unknown;
+export function makeStatusRow({ icon, labelKey, value, detail, valueLabel, showBadge = true }) {
   const row = document.createElement('div');
   row.className = 'flex items-center gap-3 rounded-xl bg-surface-container-high/40 px-4 py-3 min-w-0';
 
@@ -34,7 +33,10 @@ export function makeStatusRow({ icon, labelKey, value, detail, valueLabel }) {
     detailEl.textContent = detail;
     copy.appendChild(detailEl);
   }
+  row.append(itemIcon, copy);
+  if (!showBadge) return row;
 
+  const meta = STATUS_META[value] || STATUS_META.unknown;
   const state = document.createElement('span');
   state.className = `shrink-0 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold ${meta.badge}`;
   const stateIcon = document.createElement('span');
@@ -43,8 +45,33 @@ export function makeStatusRow({ icon, labelKey, value, detail, valueLabel }) {
   const stateLabel = document.createElement('span');
   stateLabel.textContent = valueLabel || t(meta.label);
   state.append(stateIcon, stateLabel);
-  row.append(itemIcon, copy, state);
+  row.append(state);
   return row;
+}
+
+export function makeStatusSummary({ state, title, detail }) {
+  const healthy = state === 'running';
+  const stopped = state === 'stopped';
+  const summary = document.createElement('div');
+  summary.className = `rounded-xl p-4 ${healthy ? 'bg-secondary/10' : stopped ? 'bg-white/5' : 'bg-tertiary/10'}`;
+  const heading = document.createElement('div');
+  heading.className = `font-headline text-base font-bold ${healthy ? 'text-secondary' : stopped ? 'text-on-surface' : 'text-tertiary'}`;
+  heading.textContent = title;
+  summary.append(heading);
+  if (detail) {
+    const description = document.createElement('p');
+    description.className = 'mt-1 text-sm text-on-surface-variant/80';
+    description.textContent = detail;
+    summary.append(description);
+  }
+  return summary;
+}
+
+export function makeStatusMessage(message, tone = 'neutral') {
+  const messageEl = document.createElement('div');
+  messageEl.className = `rounded-xl p-5 text-sm ${tone === 'error' ? 'bg-error-dim/10 text-error-dim' : 'bg-surface-container-high/70 text-on-surface-variant'}`;
+  messageEl.textContent = message;
+  return messageEl;
 }
 
 export function getSystemSummaryState(report) {
@@ -62,21 +89,9 @@ function renderStatusReport(report) {
   statusContent.replaceChildren();
   statusContent.setAttribute('aria-busy', 'false');
 
-  const summaryState = getSystemSummaryState(report);
-  const healthy = summaryState === 'running';
-  const stopped = summaryState === 'stopped';
-  const summary = document.createElement('div');
-  summary.className = `rounded-xl p-4 ${healthy ? 'bg-secondary/10' : stopped ? 'bg-white/5' : 'bg-tertiary/10'}`;
-  const summaryTitle = document.createElement('div');
-  summaryTitle.className = `font-headline text-base font-bold ${healthy ? 'text-secondary' : stopped ? 'text-on-surface' : 'text-tertiary'}`;
-  summaryTitle.textContent = t(healthy ? 'system_summary_running' : stopped ? 'system_summary_stopped' : 'system_summary_attention');
-  const summaryDesc = document.createElement('p');
-  summaryDesc.className = 'mt-1 text-sm text-on-surface-variant/80';
-  summaryDesc.textContent = t(healthy ? 'system_summary_running_desc' : stopped ? 'system_summary_stopped_desc' : 'system_summary_attention_desc');
-  summary.append(summaryTitle, summaryDesc);
-  statusContent.appendChild(summary);
-
+  const state = getSystemSummaryState(report);
   statusContent.append(
+    makeStatusSummary({ state, title: t(`system_summary_${state}`), detail: t(`system_summary_${state}_desc`) }),
     makeStatusRow({ icon: 'route', labelKey: 'system_status_strategy', value: report.strategy ? 'selected' : 'unknown', detail: report.strategy || t('system_strategy_unknown') }),
     makeStatusRow({ icon: 'settings_ethernet', labelKey: 'system_status_zapret', value: report.zapret_service }),
     makeStatusRow({ icon: 'security', labelKey: 'system_status_windivert', value: report.windivert_service }),
@@ -87,12 +102,8 @@ function renderStatusReport(report) {
 function renderStatusMessage(message, tone = 'neutral') {
   const statusContent = $('status-content');
   if (!statusContent) return;
-  statusContent.replaceChildren();
   statusContent.setAttribute('aria-busy', tone === 'loading' ? 'true' : 'false');
-  const messageEl = document.createElement('div');
-  messageEl.className = `rounded-xl p-5 text-sm ${tone === 'error' ? 'bg-error-dim/10 text-error-dim' : 'bg-surface-container-high/70 text-on-surface-variant'}`;
-  messageEl.textContent = message;
-  statusContent.appendChild(messageEl);
+  statusContent.replaceChildren(makeStatusMessage(message, tone));
 }
 
 export function initStatusCheck() {

@@ -19,7 +19,7 @@ test('ordinary startup, explicit elevation, cancellation, background rules and s
   } }] });
   let browser;
   try {
-    await server.listen(); browser = await chromium.launch({ channel: 'msedge', headless: true });
+    await server.listen(); browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge', headless: true });
     await mkdir('src-tauri/target/elevation-qa', { recursive: true });
     for (const [theme, lang, width, height] of [['zapret','ru',1100,850], ['light','en',900,750], ['graphite','ru',900,750]]) {
       const page = await browser.newPage({ viewport: { width, height }, reducedMotion: 'reduce' });
@@ -130,13 +130,48 @@ test('ordinary startup, explicit elevation, cancellation, background rules and s
           const show = window.elevationCalls.findIndex(call => call.command === 'show_app_window');
           const content = document.getElementById('sections-host').getBoundingClientRect();
           const home = document.getElementById('section-home').getBoundingClientRect();
-          return fit >= 0 && fit < show && window.elevationCalls[fit].args.height === Math.ceil(content.top + home.height);
+          return fit >= 0 && fit < show && window.elevationCalls[fit].args.height === Math.ceil(content.top + home.height + 24);
         }), true);
         await page.evaluate(() => window.finishWarpDetection());
         await page.locator('#warp-card').waitFor({ state: 'hidden' });
         await page.reload();
         await page.waitForFunction(() => window.finishWarpDetection && !document.documentElement.classList.contains('app-loading'));
         assert.equal(await page.locator('#warp-card').isVisible(), false);
+
+        await page.goto(`http://127.0.0.1:${server.config.server.port}/elevation-test.html?wiresock-startup=1`);
+        await page.waitForFunction(() => window.finishWireSockDetection && !document.documentElement.classList.contains('app-loading'));
+        assert.equal(await page.locator('#aux-provider-switch').isVisible(), true);
+        assert.equal(await page.evaluate(() => {
+          const rect = document.getElementById('section-home').getBoundingClientRect();
+          return window.elevationCalls.find(call => call.command === 'fit_initial_window_height').args.height === Math.ceil(rect.bottom + 24);
+        }), true);
+        await page.evaluate(() => window.finishWireSockDetection());
+
+        await page.goto(`http://127.0.0.1:${server.config.server.port}/elevation-test.html?wiresock-permission=1`);
+        await page.locator('#aux-provider-wiresock').click();
+        await page.locator('#wiresock-connect').click();
+        await page.locator('#wiresock-setup').click();
+        await page.locator('#elevation-dialog').waitFor();
+        await page.locator('#elevation-restart').click();
+        await page.locator('#elevation-error').waitFor();
+        const wireSockHandoff = await page.evaluate(() => window.elevationCalls.findLast(c => c.command === 'restart_as_admin').args.context.wiresock_setup);
+        assert.deepEqual(wireSockHandoff, { profile: 'Office VPN', generated: false, strategy: 'general' });
+        await page.locator('#elevation-cancel').click();
+        assert.equal(await page.locator('#wiresock-setup-dialog').isVisible(), true);
+        assert.equal(await page.evaluate(() => window.elevationCalls.some(c => c.command === 'connect_wiresock')), false);
+
+        await page.goto(`http://127.0.0.1:${server.config.server.port}/elevation-test.html?wiresock-resume=1`);
+        await page.waitForSelector('#wiresock-connect[data-action="stop"]');
+        assert.equal(await page.evaluate(() => localStorage.getItem('zapret.wiresock.lastConnected')), 'Office VPN');
+        assert.equal(await page.evaluate(() => window.elevationCalls.filter(c => c.command === 'resume_wiresock_setup').length), 1);
+
+        await page.goto(`http://127.0.0.1:${server.config.server.port}/elevation-test.html?setup=1&wiresock-onboarding=1`);
+        await page.locator('#setup-next').click();
+        await page.locator('#setup-wiresock').check();
+        await page.locator('#setup-next').click();
+        await page.locator('[data-setup-panel="2"]').waitFor();
+        assert.equal(await page.evaluate(() => window.elevationCalls.filter(c => c.command === 'install_wiresock').length), 1);
+        assert.match(await page.locator('#setup-wiresock-detail').textContent(), /3\.8\.2\.1/);
 
         await page.goto(`http://127.0.0.1:${server.config.server.port}/elevation-test.html?setup=1&repeat=true&clearLists=true`);
         await page.locator('#setup-dialog').waitFor({ state: 'visible' });

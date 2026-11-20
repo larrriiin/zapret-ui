@@ -11,9 +11,41 @@ window.elevationCalls = [];
 window.restartFailure = 'elevation_cancelled';
 window.adminPreferenceSaveFailure = false;
 window.backgroundPermission = false;
+const wireSockProfile = 'Office VPN';
+let wireSockConnected = false;
+let setupWireSockInstalled = false;
 const originalInvoke = window.__TAURI__.core.invoke;
 window.__TAURI__.core.invoke = async (command, args) => {
   window.elevationCalls.push({ command, args });
+  if (params.has('wiresock-onboarding')) {
+    if (command === 'get_wiresock_installation') return { installed: setupWireSockInstalled, version: setupWireSockInstalled ? '3.8.2.1' : null };
+    if (command === 'install_wiresock') { setupWireSockInstalled = true; return; }
+  }
+  if (params.has('wiresock-permission') || params.has('wiresock-resume')) {
+    if (command === 'get_tunnel_installations') return { warp: true, wiresock: true };
+    if (command === 'get_wiresock_status') return { installed: true, state: wireSockConnected ? 'connected' : 'disconnected' };
+    if (command === 'list_wiresock_profiles') return [{ name: wireSockProfile, imported: true }];
+    if (command === 'get_wiresock_setup') return { domains: 11, ipset: 17, hosts: 4, ipset_mode: 'loaded' };
+    if (command === 'apply_wiresock_setup') throw 'admin_required:hosts';
+    if (command === 'elevation_context' && params.has('wiresock-resume')) {
+      return { section: 'home', wiresock_setup: { profile: wireSockProfile, generated: false, strategy: 'general' } };
+    }
+    if (command === 'resume_wiresock_setup') {
+      wireSockConnected = true;
+      return { status: { installed: true, state: 'connected', profile: wireSockProfile } };
+    }
+  }
+  if (command === 'get_tunnel_installations' && params.has('wiresock-startup')) {
+    return { warp: true, wiresock: true };
+  }
+  if (command === 'get_tunnel_installations' && params.has('slow-warp')) {
+    return { warp: false, wiresock: false };
+  }
+  if (command === 'get_wiresock_status' && params.has('wiresock-startup')) {
+    return new Promise(resolve => {
+      window.finishWireSockDetection = () => resolve({ installed: true, state: 'disconnected' });
+    });
+  }
   if (command === 'get_warp_status' && params.has('removed-warp') && window.finishWarpDetection) {
     return { installed: false, state: 'disconnected' };
   }

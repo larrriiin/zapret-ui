@@ -10,6 +10,7 @@ import { openWarpTraffic } from './traffic.js';
 import { routingState, needsProxyConfirmation, orderedWarpModes } from './warp-state.js';
 import { adminReason } from '../lib/privilege-errors.js';
 import { initWarpProfile } from './warp-profile.js';
+import { initWireSock } from './wiresock.js';
 
 export const WARP_MODE_KEYS = {
   doh: 'warp_mode_doh', dot: 'warp_mode_dot', warp: 'warp_mode_warp',
@@ -36,7 +37,7 @@ let activeInfo = null;
 let diagArchive = '';
 let automationNotice = '';
 let auxiliaryCommand = '';
-let hero, zapret, heading, zapretHeader, statusHeading;
+let hero, zapret, heading, zapretHeader, statusHeading, wireSock;
 
 function errorText(error) {
   if (adminReason(error)) return t('elevation_reason_warp_apps');
@@ -130,7 +131,7 @@ function render() {
     lastInstalled = s.installed;
     try { localStorage.setItem(INSTALLED_KEY, String(lastInstalled)); } catch { /* Storage is optional. */ }
   }
-  layout(lastInstalled);
+  layout(lastInstalled || wireSock?.installed() === true);
   const status = operation || (requestError || operationError ? 'error' : s?.state) || 'detecting';
   const statusLabel = t(status === 'detecting' ? 'warp_detecting' : `warp_state_${status}`);
   const locked = !s || busy || checking || status === 'connecting' || status === 'disconnecting';
@@ -279,6 +280,7 @@ function render() {
   if ($('warp-install-details')) $('warp-install-details').hidden = true;
   renderWarpInfo();
   renderReport();
+  wireSock?.render(lastInstalled, busy || checking);
 }
 
 function renderReport() {
@@ -429,8 +431,12 @@ async function toggleRule(kind) {
   });
 }
 
+export function resumeWireSockSetup(request) {
+  wireSock?.resumeSetup(request);
+}
+
 export function initWarp() {
-  initWarpProfile();
+  const openProfile = initWarpProfile();
   try { lastInstalled = localStorage.getItem(INSTALLED_KEY) === 'true'; } catch { /* Storage is optional. */ }
   hero = document.querySelector('#section-home > section');
   zapret = hero.querySelector(':scope > .relative');
@@ -444,18 +450,20 @@ export function initWarp() {
   const fragment = document.createElement('template');
   fragment.innerHTML = markup;
   hero.append(fragment.content);
-  document.body.append($('warp-status-dialog'));
+  const dialogs = ['warp-status-dialog', 'wiresock-setup-dialog', 'wiresock-status-dialog'].map($);
+  document.body.append(...dialogs);
   heading = hero.querySelector('.connection-heading');
   hero.prepend(heading);
   // Translate only the inserted content: translating the whole page here would
   // reset Zapret's live status/button labels to their initial HTML values.
-  for (const root of [heading, zapretHeader, $('warp-card'), $('warp-status-dialog')]) {
+  for (const root of [heading, zapretHeader, $('warp-card'), ...dialogs]) {
     root.querySelectorAll('[data-i18n]').forEach(el => {
       if (el.dataset.i18nAttr) el.setAttribute(el.dataset.i18nAttr, t(el.dataset.i18n));
       else el.textContent = t(el.dataset.i18n);
     });
   }
   initWarpModes(); initWarpProtocols();
+  wireSock = initWireSock(render, openProfile);
   const warpInfoDialog = $('warp-settings-info-dialog');
   document.body.append(warpInfoDialog);
   $('warp-settings-info-close').addEventListener('click', () => warpInfoDialog.close());
@@ -570,4 +578,11 @@ export function initWarp() {
     window.setTimeout(poll, snapshot || requestError ? 3000 : 200);
   }
   void poll();
+  return invoke('get_tunnel_installations').then(detected => {
+    if (typeof snapshot?.installed !== 'boolean' && typeof detected?.warp === 'boolean') {
+      lastInstalled = detected.warp;
+    }
+    wireSock.seedInstallation(detected?.wiresock);
+    render();
+  }).catch(error => console.warn('Could not detect tunnel installations:', error));
 }

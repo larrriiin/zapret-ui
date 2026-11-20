@@ -27,6 +27,8 @@ export function initWarpProfile() {
   const error = $('warp-profile-error');
   let busy = false;
   let fileName = '';
+  let opener = open;
+  let onSaved = null;
 
   function selectedServices() {
     return Array.from(serviceGroup.querySelectorAll('input:checked'), input => input.value);
@@ -53,7 +55,9 @@ export function initWarpProfile() {
     element.hidden = !key;
   }
 
-  open.addEventListener('click', () => {
+  function show(trigger = open, saved = null) {
+    opener = trigger;
+    onSaved = saved;
     form.reset();
     advanced.open = false;
     fileName = '';
@@ -61,7 +65,8 @@ export function initWarpProfile() {
     setMessage(error);
     updateControls();
     dialog.showModal();
-  });
+  }
+  open.addEventListener('click', () => show());
   form.addEventListener('change', updateControls);
   form.addEventListener('invalid', event => {
     if (advanced.contains(event.target)) advanced.open = true;
@@ -77,7 +82,7 @@ export function initWarpProfile() {
   dialog.addEventListener('cancel', event => {
     if (busy) event.preventDefault();
   });
-  dialog.addEventListener('close', () => open.focus());
+  dialog.addEventListener('close', () => opener.focus());
 
   form.addEventListener('submit', async event => {
     event.preventDefault();
@@ -102,6 +107,7 @@ export function initWarpProfile() {
         acceptedTerms: terms.checked,
       });
       setMessage(status, 'warp_profile_saved', { fileName });
+      onSaved?.(fileName);
     } catch (reason) {
       setMessage(status);
       const key = typeof reason === 'string' ? reason : '';
@@ -112,4 +118,5 @@ export function initWarpProfile() {
       (error.hidden ? reveal : save).focus();
     }
   });
+  return show;
 }

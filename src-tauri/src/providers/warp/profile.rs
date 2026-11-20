@@ -21,6 +21,12 @@ use zeroize::Zeroizing;
 mod routes;
 use routes::Service;
 
+pub(crate) fn profile_directory(app: &tauri::AppHandle) -> tauri::Result<PathBuf> {
+    app.path()
+        .app_local_data_dir()
+        .map(|dir| dir.join("profiles").join("wiresock"))
+}
+
 // Consumer WARP device registration is separate from the official desktop client.
 // This API is undocumented. Reference: https://github.com/vernette/warpscout/blob/master/register.go
 const REGISTRATION_URL: &str = "https://api.devices.cloudflare.com/v0a4005/reg";
@@ -143,16 +149,13 @@ pub async fn save_warp_profile(
     if options.mtu < if options.ipv6 { 1280 } else { 576 } {
         return Err("warp_profile_invalid_mtu");
     }
-    let downloads = app
-        .path()
-        .download_dir()
-        .map_err(|_| "warp_profile_write_error")?;
-    std::fs::create_dir_all(&downloads).map_err(|_| "warp_profile_write_error")?;
+    let directory = profile_directory(&app).map_err(|_| "warp_profile_write_error")?;
+    std::fs::create_dir_all(&directory).map_err(|_| "warp_profile_write_error")?;
     let file_name = format!("WARP-WireSock-{:016X}.conf", rand::random::<u64>());
-    let path = downloads.join(&file_name);
+    let path = directory.join(&file_name);
     let mut output = tempfile::Builder::new()
         .prefix(".warp-")
-        .tempfile_in(&downloads)
+        .tempfile_in(&directory)
         .map_err(|_| "warp_profile_write_error")?;
 
     let client = reqwest::Client::builder()

@@ -293,6 +293,10 @@ fn is_safe_list_entry(entry: &str) -> bool {
 /// otherwise allow the filename allowlist to be sidestepped at runtime.
 fn resolve_list_path(filename: &str) -> Result<PathBuf, String> {
     ensure_safe_list_filename(filename)?;
+    resolve_core_list_path(filename)
+}
+
+fn resolve_core_list_path(filename: &str) -> Result<PathBuf, String> {
     let lists_dir = find_binaries_dir().join("lists");
     let file_path = lists_dir.join(filename);
 
@@ -4216,6 +4220,14 @@ fn finish_setup_window(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_tunnel_installations() -> serde_json::Value {
+    serde_json::json!({
+        "warp": providers::warp::discover().is_some(),
+        "wiresock": providers::wiresock::is_installed(),
+    })
+}
+
+#[tauri::command]
 fn fit_initial_window_height(window: tauri::WebviewWindow, height: u32) -> tauri::Result<()> {
     if window.label() != "main" || window.is_visible()? || window.is_maximized()? {
         return Ok(());
@@ -4710,6 +4722,17 @@ pub fn run() {
             providers::warp::diagnostics::reveal_warp_diagnostics,
             providers::warp::profile::save_warp_profile,
             providers::warp::profile::reveal_warp_profile,
+            providers::wiresock::get_wiresock_status,
+            providers::wiresock::get_wiresock_installation,
+            providers::wiresock::installer::install_wiresock,
+            providers::wiresock::list_wiresock_profiles,
+            providers::wiresock::import_wiresock_profile,
+            providers::wiresock::delete_wiresock_profile,
+            providers::wiresock::connect_wiresock,
+            providers::wiresock::disconnect_wiresock,
+            providers::wiresock::setup::get_wiresock_setup,
+            providers::wiresock::setup::apply_wiresock_setup,
+            providers::wiresock::setup::resume_wiresock_setup,
             providers::warp::set_warp_sites,
             providers::warp::set_warp_applications,
             providers::warp::applications::choose_warp_applications,
@@ -4723,6 +4746,7 @@ pub fn run() {
             setup_window_ready,
             finish_setup_window,
             show_app_window,
+            get_tunnel_installations,
             fit_initial_window_height,
             get_strategies,
             remember_strategy_selection,

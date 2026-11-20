@@ -174,10 +174,32 @@ pub(super) fn run(command: Command, timeout: Duration) -> Result<String> {
 }
 
 pub(super) fn run_with_success_codes(
-    mut command: Command,
+    command: Command,
     timeout: Duration,
     success_codes: &[i32],
 ) -> Result<String> {
+    let output = run_output(command, timeout)?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output
+        .status
+        .code()
+        .is_some_and(|code| success_codes.contains(&code))
+    {
+        let detail = if stderr.trim().is_empty() {
+            stdout.trim()
+        } else {
+            stderr.trim()
+        };
+        return Err(WarpError::new(
+            "warp_cli_error",
+            format!("{}: {detail}", output.status),
+        ));
+    }
+    Ok(stdout.trim().to_owned())
+}
+
+pub(super) fn run_output(mut command: Command, timeout: Duration) -> Result<std::process::Output> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -214,38 +236,28 @@ pub(super) fn run_with_success_codes(
             }
         }
     };
-    let output = String::from_utf8_lossy(&stdout.join().unwrap_or_default())
-        .trim()
-        .to_owned();
-    let error = String::from_utf8_lossy(&stderr.join().unwrap_or_default())
-        .trim()
-        .to_owned();
-    if !status
-        .code()
-        .is_some_and(|code| success_codes.contains(&code))
-    {
-        return Err(WarpError::new(
-            "warp_cli_error",
-            format!(
-                "{status}: {}",
-                if error.is_empty() { output } else { error }
-            ),
-        ));
-    }
-    Ok(output)
+    Ok(std::process::Output {
+        status,
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+    })
 }
 
 pub(super) fn verify_signature(path: &Path) -> Result<()> {
+    verify_publisher(path, "Cloudflare, Inc.")
+}
+
+pub(super) fn verify_publisher(path: &Path, publisher: &str) -> Result<()> {
     let mut command = Command::new(system_exe("WindowsPowerShell/v1.0/powershell.exe"));
     // Path travels through an environment variable, never interpolated into shell source.
-    command.env("ZAPRET_WARP_VERIFY", path).args(["-NoProfile", "-NonInteractive", "-Command",
-        "$ErrorActionPreference='Stop'; $OutputEncoding=[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new(); Import-Module \"$PSHOME\\Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1\" -ErrorAction Stop; $s=Get-AuthenticodeSignature -LiteralPath $env:ZAPRET_WARP_VERIFY; if ($s.Status -ne 'Valid' -or $s.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,$false) -ne 'Cloudflare, Inc.') { throw 'Invalid Cloudflare Authenticode signature' }"]);
+    command.env("ZAPRET_VERIFY_FILE", path).env("ZAPRET_VERIFY_PUBLISHER", publisher).args(["-NoProfile", "-NonInteractive", "-Command",
+        "$ErrorActionPreference='Stop'; $OutputEncoding=[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new(); Import-Module \"$PSHOME\\Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1\" -ErrorAction Stop; $s=Get-AuthenticodeSignature -LiteralPath $env:ZAPRET_VERIFY_FILE; if ($s.Status -ne 'Valid' -or $s.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,$false) -ne $env:ZAPRET_VERIFY_PUBLISHER) { throw 'Invalid installer Authenticode signature or publisher' }"]);
     run(command, Duration::from_secs(30))
         .map(|_| ())
         .map_err(|e| WarpError::new("warp_signature", e.detail))
 }
 
-fn discover() -> Option<PathBuf> {
+pub(crate) fn discover() -> Option<PathBuf> {
     // Official Windows installation directories; never search PATH/current directory.
     ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"]
         .iter()
@@ -461,6 +473,22 @@ async fn execute(action: Action) -> Result<WarpStatus> {
         crate::privileges::require("warp_apps")
             .map_err(|_| WarpError::new("admin_required", "warp_apps"))?;
     }
+    let _provider_switch = if matches!(
+        &action,
+        Action::Connect
+            | Action::ApplicationConnection(_, true, _)
+            | Action::Sites(_, true, _)
+            | Action::Applications(_, true, _)
+            | Action::Mode(..)
+            | Action::Protocol(..)
+            | Action::Port(_)
+    ) {
+        let guard = super::wiresock::SWITCH.lock().await;
+        super::wiresock::prepare_warp_connection(matches!(&action, Action::Connect)).await?;
+        Some(guard)
+    } else {
+        None
+    };
     tauri::async_runtime::spawn_blocking(move || {
         let mut guard = CLIENT
             .try_lock()
@@ -806,6 +834,37 @@ async fn execute(action: Action) -> Result<WarpStatus> {
     })
     .await
     .map_err(|e| WarpError::new("warp_process", e))?
+}
+
+pub(super) async fn stop_for_wiresock() -> std::result::Result<(), &'static str> {
+    if discover().is_none() {
+        return Ok(());
+    }
+    let mut requested = false;
+    for _ in 0..20 {
+        let result = if requested {
+            execute(Action::Status).await
+        } else {
+            execute(Action::Disconnect).await
+        };
+        match result {
+            Ok(status) if status.error.is_none() => {
+                if !status.connected
+                    && !matches!(
+                        status.state.as_str(),
+                        "connecting" | "disconnecting" | "error"
+                    )
+                {
+                    return Ok(());
+                }
+                requested = true;
+            }
+            Err(error) if error.code == "warp_busy" => {}
+            _ => break,
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    Err("wiresock_warp_still_active")
 }
 
 #[tauri::command]

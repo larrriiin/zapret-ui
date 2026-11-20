@@ -4,11 +4,13 @@ import { state } from '../lib/state.js';
 
 let zapret = { running: false };
 let warpConnected = false;
+let wireSockConnected = false;
 
-export function connectionLabel(status, warp, fallback) {
+export function connectionLabel(status, warp, fallback, wiresock = false) {
   const parts = [];
   if (status.running) parts.push(status.strategy || fallback);
-  if (warp) parts.push('WARP');
+  if (wiresock) parts.push('WireSock');
+  else if (warp) parts.push('Cloudflare');
   return parts.join(' + ');
 }
 
@@ -16,7 +18,7 @@ function render() {
   if (state.restartInProgress) return;
   const header = $('header-status');
   if (!header) return;
-  const label = connectionLabel(zapret, warpConnected, t('status_connected'));
+  const label = connectionLabel(zapret, warpConnected, t('status_connected'), wireSockConnected);
   const prefix = document.createElement('span');
   prefix.className = 'text-primary';
   prefix.setAttribute('data-tauri-drag-region', '');
@@ -30,4 +32,9 @@ function render() {
 
 export function setZapretSummary(status) { zapret = status; render(); }
 export function setWarpSummary(connected) { warpConnected = connected; render(); }
+export function setWireSockSummary(connected) {
+  if (wireSockConnected === connected) return;
+  wireSockConnected = connected;
+  render();
+}
 onLangChange(render);

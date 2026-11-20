@@ -146,6 +146,14 @@ async function prepare() {
       $('setup-warp').checked = false;
       await detectModules();
     }
+    if ($('setup-wiresock').checked && !$('setup-wiresock').disabled) {
+      setProgress(t('wiresock_installing'));
+      await invoke('install_wiresock');
+      const wiresock = await invoke('get_wiresock_installation');
+      if (!wiresock?.installed) throw new Error(t('wiresock_install_incomplete'));
+      $('setup-wiresock').checked = false;
+      await detectModules();
+    }
     goTo(2);
   } catch (error) { $('setup-progress').hidden = true; errorMessage(error); }
   finally { unlisten?.(); busy = false; controls(); }
@@ -161,8 +169,9 @@ async function detectModules() {
         catch (error) { if (error?.code !== 'warp_busy' || attempt >= 15) throw error; await new Promise(resolve => setTimeout(resolve, 200)); }
       }
     })(),
+    invoke('get_wiresock_installation'),
   ]);
-  const [telegram, warp] = results;
+  const [telegram, warp, wiresock] = results;
   if (telegram.status === 'fulfilled') {
     const value = telegram.value;
     $('setup-telegram').disabled = value.installed;
@@ -178,6 +187,17 @@ async function detectModules() {
     $('setup-warp-installed').hidden = !warp.value.installed;
     $('setup-warp-detail').textContent = t(warp.value.installed ? 'tg_warp_installed' : 'tg_warp_offer');
     if (warp.value.installed) $('setup-warp').checked = false;
+  }
+  if (wiresock.status === 'fulfilled' && typeof wiresock.value?.installed === 'boolean') {
+    const { installed, version } = wiresock.value;
+    $('setup-wiresock-choice').hidden = false;
+    $('setup-wiresock').hidden = installed;
+    $('setup-wiresock').disabled = installed;
+    $('setup-wiresock-installed').hidden = !installed;
+    $('setup-wiresock-detail').textContent = installed
+      ? t(version ? 'wiresock_installed_version' : 'warp_installed_short', { version })
+      : t('wiresock_setup_offer');
+    if (installed) $('setup-wiresock').checked = false;
   }
   if (results.some(result => result.status === 'rejected')) {
     $('setup-modules-message').textContent = t('tg_detection_failed');
@@ -267,6 +287,7 @@ export async function openSetup({ repeat = false, clearLists = false, restoreMai
   previousFocus = document.activeElement;
   $('setup-telegram').checked = false;
   $('setup-warp').checked = false;
+  $('setup-wiresock').checked = false;
   detectModules();
   appearance = document.querySelector('.theme-settings');
   appearanceHome = document.createComment('appearance settings'); appearance.before(appearanceHome);

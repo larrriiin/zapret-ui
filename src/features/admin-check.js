@@ -4,6 +4,7 @@ import { state } from '../lib/state.js';
 import { adminReason } from '../lib/privilege-errors.js';
 
 let reason = 'service', busy = false, previousFocus;
+let continuation;
 let noticeDismissed = false;
 const notices = new Map();
 const rawInvoke = (command, args) => window.__TAURI__.core.invoke(command, args);
@@ -15,10 +16,11 @@ function render() {
   $('elevation-dialog').setAttribute('aria-busy', String(busy));
 }
 
-export function requestAdmin(requestedReason = 'service') {
+export function requestAdmin(requestedReason = 'service', context) {
   const dialog = $('elevation-dialog');
   if (!dialog || busy || dialog.open) return;
   reason = requestedReason; previousFocus = document.activeElement;
+  continuation = context;
   $('elevation-error').hidden = true;
   render(); dialog.showModal();
 }
@@ -35,7 +37,10 @@ export function initAdminPrivileges() {
   const dialog = $('elevation-dialog');
   $('elevation-cancel').addEventListener('click', () => dialog.close());
   dialog.addEventListener('cancel', event => { if (busy) event.preventDefault(); });
-  dialog.addEventListener('close', () => previousFocus?.isConnected && previousFocus.focus({ preventScroll: true }));
+  dialog.addEventListener('close', () => {
+    continuation = undefined;
+    if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+  });
   $('elevation-notice-restart').addEventListener('click', () => requestAdmin($('elevation-notice').dataset.reason));
   $('elevation-notice-close').addEventListener('click', () => {
     noticeDismissed = true;
@@ -52,6 +57,7 @@ export function initAdminPrivileges() {
         ? document.querySelector('[data-zapret-pane][aria-selected="true"]')?.dataset.zapretPane || 'ips'
         : state.currentSectionId || 'home';
       await rawInvoke('restart_as_admin', { context: {
+        ...continuation,
         section: params.get('setup') === '1' ? 'setup' : section,
         repeat: params.get('repeat') === 'true', clear_lists: params.get('clearLists') === 'true',
       } });

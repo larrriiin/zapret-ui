@@ -31,6 +31,7 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
     ];
     for (const variant of variants) {
       const context = await browser.newContext({ viewport: variant });
+      await context.addInitScript(() => localStorage.setItem('zapret.wiresock.lastConnected', 'Home VPN'));
       const page = await context.newPage(); const errors = [];
       page.on('pageerror', error => errors.push(String(error)));
       await page.goto(`http://127.0.0.1:${server.config.server.port}/warp-preview.html?lang=${variant.lang}&theme=${variant.theme}`);
@@ -38,6 +39,7 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
       const results = await page.locator('#test-results').textContent();
       assert.equal(results.split('\n').filter(line => line.startsWith('FAIL')).join('\n'), '', results);
       assert.deepEqual(errors, []);
+      assert.ok((await page.evaluate(() => window.wireSockLabelsAtStartup)).every(label => label.trim()), 'WireSock dialog text exists before a language change');
 
 
       assert.equal(await page.locator('vite-error-overlay').count(), 0);
@@ -178,7 +180,7 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
       await page.waitForSelector('#section-home:not(.hidden)'); await page.waitForTimeout(200);
       for (const selector of ['#warp-title', '.zapret-connection .provider-heading .provider-title-row']) {
         const row = page.locator(selector);
-        const metrics = await row.evaluate(e => { const text = e.querySelector(':scope > span').getBoundingClientRect(), button = e.querySelector('button').getBoundingClientRect(); return {text: text.y + text.height / 2, button: button.y + button.height / 2}; });
+        const metrics = await row.evaluate(e => { const text = e.querySelector(':scope > span').getBoundingClientRect(), button = e.querySelector('.ui-icon-button').getBoundingClientRect(); return {text: text.y + text.height / 2, button: button.y + button.height / 2}; });
         assert.ok(Math.abs(metrics.text - metrics.button) <= 1, `${selector}: info icon aligns with title`);
       }
       await mkdir('artifacts/title-alignment', { recursive: true });
@@ -193,6 +195,208 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
         await page.screenshot({ path: join(process.env.QA_SCREENSHOTS_DIR, `warp-status-${variant.lang}-${variant.width}.png`) });
       }
       await page.locator('#warp-status-close').click();
+
+      assert.equal(await page.locator('#aux-provider-switch').isVisible(), false);
+      await page.evaluate(() => {
+        const original = window.__TAURI__.core.invoke;
+        window.wire = { installed: false, state: 'disconnected', active: null, applied: 0, checks: 0, restarts: 0, restartPending: false, connections: 0, profiles: [
+          { name: 'WARP-WireSock-1234567890ABCDEF', file_source: 'legacy_downloads', imported: false, created_at: 1784563200 },
+          { name: 'Home VPN', file_source: null, imported: true, created_at: 1784563200 },
+          ...Array.from({ length: 24 }, (_, index) => ({ name: `Saved VPN ${index + 1}`, file_source: null, imported: true, created_at: 1784563200 })),
+        ] };
+        const installation = () => ({ installed: window.wire.installed, version: window.wire.installed ? '3.8.2.1' : null });
+        const status = () => ({ ...installation(), state: window.wire.state, profile: window.wire.active, address: window.wire.active ? '203.0.113.8' : null });
+        const connect = ({ profile: name, generated }) => {
+          const profile = window.wire.profiles.find(item => item.name === name);
+          if (!profile || generated !== (Boolean(profile.file_source) && !profile.imported)) throw 'wiresock_profile_missing';
+          profile.imported = true;
+          window.wire.state = 'connected'; window.wire.active = name;
+          return status();
+        };
+        window.__TAURI__.core.invoke = async (command, args) => {
+          const wire = window.wire;
+          if (command === 'get_wiresock_status') return status();
+          if (command === 'get_wiresock_installation') return installation();
+          if (command === 'install_wiresock') {
+            if (!wire.installTried) {
+              wire.installTried = true;
+              throw { code: 'wiresock_install_error', detail: 'WireSock Setup 1603\nC:\\Logs\\wiresock-install-test.log' };
+            }
+            wire.installed = true;
+            return;
+          }
+          if (command === 'list_wiresock_profiles') {
+            if (wire.failList) throw 'wiresock_cli_failed';
+            return wire.profiles;
+          }
+          if (command === 'get_wiresock_setup') {
+            wire.checks++;
+            return { domains: wire.applied ? 0 : 11, hosts: wire.applied ? 0 : 4, ipset: wire.applied ? 0 : 17, ipset_mode: 'loaded', restart_pending: wire.restartPending };
+          }
+          if (command === 'apply_wiresock_setup') {
+            if (!args.confirmed) throw 'wiresock_setup_confirmation';
+            wire.applied = 1;
+            wire.restarts++;
+            if (wire.restarts === 1) {
+              wire.restartPending = true;
+              throw 'wiresock_zapret_restart_failed';
+            }
+            wire.restartPending = false;
+            return { status: connect(args.request) };
+          }
+          if (command === 'connect_wiresock') {
+            wire.connections++;
+            return connect(args);
+          }
+          if (command === 'disconnect_wiresock') { wire.state = 'disconnected'; wire.active = null; return status(); }
+          if (command === 'import_wiresock_profile') {
+            wire.profiles.push({ name: 'Imported profile', file_source: null, imported: true, created_at: 1784563200 });
+            return 'Imported profile';
+          }
+          if (command === 'delete_wiresock_profile') {
+            if (wire.profiles.find(item => item.name === args.profile)?.file_source !== args.fileSource) throw 'wiresock_profile_missing';
+            wire.profiles = wire.profiles.filter(item => item.name !== args.profile);
+            return;
+          }
+          if (command === 'save_warp_profile') {
+            const name = 'WARP-WireSock-5555555555555555';
+            wire.profiles.unshift({ name, file_source: 'app_data', imported: false, created_at: 1784563200 });
+            return `${name}.conf`;
+          }
+          return original(command, args);
+        };
+      });
+      await page.locator('#nav-settings').click();
+      assert.equal(await page.locator('#wiresock-settings-remove').isVisible(), false);
+      await page.locator('#wiresock-install').click();
+      await page.locator('#wiresock-install-result').filter({ hasText: 'WireSock Setup 1603' }).waitFor();
+      assert.match(await page.locator('#wiresock-install-result').textContent(), /wiresock-install-test\.log/);
+      await page.locator('#wiresock-install').click();
+      await page.locator('#wiresock-settings-status').filter({ hasText: '3.8.2.1' }).waitFor();
+      assert.equal(await page.locator('#wiresock-install').isVisible(), false);
+      await page.locator('#wiresock-settings-refresh').click();
+      await page.waitForFunction(() => document.getElementById('wiresock-status-report').getAttribute('aria-busy') === 'false');
+      assert.match(await page.locator('#wiresock-status-report').textContent(), /3\.8\.2\.1/);
+      await page.locator('#wiresock-status-close').click();
+      await page.locator('#wiresock-settings-remove').click();
+      await page.locator('#wiresock-remove-dialog').waitFor();
+      assert.match(await page.locator('#wiresock-remove-dialog ol').textContent(), /WireSock Secure Connect/);
+      await page.keyboard.press('Escape');
+      await page.locator('aside nav a').first().click();
+      await page.locator('#aux-provider-wiresock').click({ timeout: 12000 });
+      await page.locator('#wiresock-logo').waitFor();
+      await page.locator('#wiresock-info-btn').click();
+      assert.equal(await page.locator('#info-title').textContent(), 'WireSock');
+      await page.locator('#info-modal-close').click();
+      assert.equal(await page.locator('#warp-connect').isVisible(), false);
+      assert.equal(await page.locator('#wiresock-setup').isVisible(), false);
+      await page.locator('#wiresock-profile-label').filter({ hasText: 'Home VPN' }).waitFor();
+      assert.equal(await page.locator('#wiresock-profile-options [role="menuitem"]').first().isVisible(), false);
+      async function alignedActions(connect, status) {
+        for (const [left, right] of [['#connect-btn', connect], ['#check-status-btn', status]]) {
+          const a = await page.locator(left).boundingBox();
+          const b = await page.locator(right).boundingBox();
+          assert.ok(Math.abs(a.y + a.height - b.y - b.height) <= 1, `${left} and ${right} share a bottom edge`);
+        }
+      }
+      await alignedActions('#wiresock-connect', '#wiresock-refresh');
+      await page.locator('#wiresock-profile-trigger').click();
+      const menu = page.locator('#wiresock-profile-options-list');
+      assert.equal(await menu.evaluate(el => el.scrollHeight > el.clientHeight), true);
+      assert.equal(await menu.evaluate(el => {
+        const bounds = el.getBoundingClientRect();
+        return bounds.top >= 0 && bounds.bottom <= innerHeight;
+      }), true);
+      assert.equal(await menu.locator('.ui-select-option-group:has([aria-checked="true"])').evaluate(row => {
+        const button = row.querySelector('[role="menuitemradio"]');
+        return getComputedStyle(row).backgroundColor !== 'rgba(0, 0, 0, 0)' && getComputedStyle(button).backgroundColor === 'rgba(0, 0, 0, 0)';
+      }), true);
+      await menu.hover();
+      await page.mouse.wheel(0, 240);
+      await page.waitForFunction(() => document.getElementById('wiresock-profile-options-list').scrollTop > 0);
+      await page.keyboard.press('End');
+      await page.waitForFunction(() => {
+        const list = document.getElementById('wiresock-profile-options-list');
+        const action = list.lastElementChild.querySelector('[role="menuitem"]');
+        return document.activeElement === action && action.getBoundingClientRect().bottom <= list.getBoundingClientRect().bottom;
+      });
+      await page.keyboard.press('Home');
+      const pick = page.locator('#wiresock-profile-options [role="menuitemradio"]').filter({ hasText: 'WARP-WireSock-1234567890ABCDEF' });
+      assert.match(await pick.textContent(), /\d{1,2}:\d{2}/);
+      await pick.click();
+      await page.locator('#wiresock-connect').click();
+      const missing = page.locator('#wiresock-setup-status');
+      assert.match(await missing.textContent(), /— 11\nIPSet — 17\nhosts — 4$/);
+      assert.equal(await missing.evaluate(el => getComputedStyle(el).whiteSpace), 'pre-line');
+      await page.locator('#wiresock-setup-close').click();
+      assert.equal(await page.evaluate(() => window.wire.state), 'disconnected');
+      await page.locator('#wiresock-connect').click();
+      await page.locator('#wiresock-setup-skip').click();
+      await page.waitForFunction(() => document.getElementById('wiresock-connect').dataset.action === 'stop');
+      assert.match(await page.locator('#header-status').textContent(), /general \(ALT12\) \+ WireSock/);
+      assert.equal(await page.evaluate(() => window.wire.applied), 0);
+      assert.equal(await page.evaluate(() => localStorage.getItem('zapret.wiresock.lastConnected')), 'WARP-WireSock-1234567890ABCDEF');
+      await page.locator('#wiresock-refresh').click();
+      await page.waitForFunction(() => document.getElementById('wiresock-status-report').getAttribute('aria-busy') === 'false');
+      assert.equal(await page.locator('#wiresock-status-state').getAttribute('class'), await page.locator('#status-content > div').first().getAttribute('class'));
+      assert.equal(await page.locator('#wiresock-status-profile').getAttribute('class'), await page.locator('#status-content > div').nth(1).getAttribute('class'));
+      assert.match(await page.locator('#wiresock-status-profile').textContent(), /WARP-WireSock-1234567890ABCDEF/);
+      assert.match(await page.locator('#wiresock-address').textContent(), /203\.0\.113\.8/);
+      await page.locator('#wiresock-status-dismiss').click();
+      assert.equal(await page.locator('#wiresock-status-dialog').isVisible(), false);
+      await page.locator('#wiresock-refresh').click();
+      await page.locator('#wiresock-status-close').click();
+      await page.evaluate(() => { window.wire.failList = true; });
+      await page.locator('#wiresock-connect').click();
+      await page.waitForFunction(() => document.getElementById('wiresock-connect').dataset.action === 'start');
+      assert.equal(await page.locator('#wiresock-error').isVisible(), false);
+      await page.evaluate(() => { window.wire.failList = false; });
+      await page.locator('#wiresock-import').click();
+      await page.locator('#wiresock-profile-label').filter({ hasText: 'Imported profile' }).waitFor();
+      const deleteImported = page.locator('#wiresock-profile-options button[role="menuitem"][aria-label*="Imported profile"]');
+      await page.locator('#wiresock-profile-trigger').click();
+      await deleteImported.click();
+      await page.locator('#confirm-modal-cancel').click();
+      assert.equal(await page.evaluate(() => window.wire.profiles.some(item => item.name === 'Imported profile')), true);
+      await page.locator('#wiresock-profile-trigger').click();
+      await deleteImported.click();
+      await page.locator('#confirm-modal-ok').click();
+      await page.locator('#wiresock-profile-label').filter({ hasText: 'WARP-WireSock-1234567890ABCDEF' }).waitFor();
+      await page.locator('#wiresock-create').click();
+      await page.locator('#warp-profile-terms').check();
+      await page.locator('#warp-profile-save').click();
+      await page.locator('#warp-profile-status').filter({ hasText: 'WARP-WireSock-5555555555555555.conf' }).waitFor();
+      await page.locator('#warp-profile-close').click();
+      await page.locator('#wiresock-profile-label').filter({ hasText: 'WARP-WireSock-5555555555555555' }).waitFor();
+      await page.locator('#wiresock-connect').click();
+      await page.locator('#wiresock-setup').click();
+      await page.locator('#wiresock-setup-error').waitFor();
+      await page.locator('#wiresock-setup-skip').waitFor({ state: 'hidden' });
+      assert.equal(await page.evaluate(() => window.wire.state), 'disconnected');
+      await page.locator('#wiresock-setup').click();
+      await page.locator('#wiresock-setup').waitFor({ state: 'hidden' });
+      await page.waitForFunction(() => document.getElementById('wiresock-connect').dataset.action === 'stop');
+      assert.equal(await page.evaluate(() => window.wire.applied), 1);
+      assert.equal(await page.evaluate(() => window.wire.restarts), 2);
+      assert.equal(await page.evaluate(() => window.wire.connections), 1);
+      await page.locator('#wiresock-connect').click();
+      await page.waitForFunction(() => document.getElementById('wiresock-connect').dataset.action === 'start');
+      await page.locator('#wiresock-connect').click();
+      await page.waitForFunction(() => document.getElementById('wiresock-connect').dataset.action === 'stop');
+      assert.equal(await page.locator('#wiresock-setup-dialog').isVisible(), false);
+      assert.equal(await page.evaluate(() => window.wire.checks), 5);
+      await page.locator('#aux-provider-warp').click();
+      assert.equal(await page.locator('#warp-connect').isVisible(), true);
+      assert.equal(await page.locator('#wiresock-panel').isVisible(), false);
+      assert.equal(await page.locator('#warp-provider-name').textContent(), 'Cloudflare');
+      await alignedActions('#warp-connect', '#warp-refresh');
+      await page.evaluate(async () => {
+        const { updateStatusUI } = await import('/features/status.js');
+        updateStatusUI({ running: false });
+      });
+      assert.equal(await page.locator('#connect-temp-btn').isVisible(), true);
+      await alignedActions('#warp-connect', '#warp-refresh');
+      assert.deepEqual(errors, []);
       await context.close();
     }
   } finally { await browser?.close(); await server.close(); }

@@ -124,7 +124,7 @@
                     <div class="flex items-start gap-4">
                         <span class="material-symbols-outlined warp-cloud text-3xl shrink-0" aria-hidden="true">cloud</span>
                         <div class="min-w-0 flex-1">
-                            <h4 id="warp-settings-title" class="text-sm font-headline font-bold text-on-surface">Cloudflare WARP</h4>
+                            <h4 id="warp-settings-title" class="text-sm font-headline font-bold text-on-surface">Cloudflare</h4>
                             <p id="warp-settings-description" class="text-xs text-on-surface-variant mt-0.5" data-i18n="warp_subtitle">Additional connection</p>
                             <p id="warp-settings-status" class="mt-2 text-xs text-on-surface-variant" role="status" data-i18n="warp_detecting"></p>
                         </div>
@@ -161,6 +161,25 @@
                     </div>
                     <progress id="telegram-download-progress" class="ui-progress module-progress" max="100" value="0" hidden aria-label="Telegram"></progress>
                     <p id="telegram-settings-message" class="module-message" role="status"></p>
+                </div>
+            </section>
+
+            <section class="ui-panel p-6 flex flex-col justify-between min-h-[180px] md:col-span-2" aria-labelledby="wiresock-settings-title">
+                <div class="flex items-start gap-4">
+                    <span class="material-symbols-outlined text-secondary text-3xl shrink-0" aria-hidden="true">shield</span>
+                    <div class="min-w-0 flex-1">
+                        <h4 id="wiresock-settings-title" class="text-sm font-headline font-bold text-on-surface">WireSock</h4>
+                        <p class="text-xs text-on-surface-variant mt-0.5" data-i18n="wiresock_subtitle"></p>
+                        <p id="wiresock-settings-status" class="mt-2 text-xs text-on-surface-variant" role="status" data-i18n="warp_detecting"></p>
+                    </div>
+                </div>
+                <div class="mt-auto pt-6">
+                    <div class="module-actions flex flex-wrap items-center gap-2">
+                        <button id="wiresock-install" type="button" class="ui-button" data-i18n="wiresock_install" disabled></button>
+                        <button id="wiresock-settings-refresh" type="button" class="ui-button" data-i18n="check_status" hidden></button>
+                        <button id="wiresock-settings-remove" type="button" class="ui-button" data-i18n="warp_remove_module" hidden></button>
+                    </div>
+                    <p id="wiresock-install-result" class="module-message whitespace-pre-line break-words" role="status"></p>
                 </div>
             </section>
         </div>
@@ -235,6 +254,32 @@
         <div class="mt-6 flex justify-end">
             <button id="warp-remove-done" type="button" class="ui-button" data-i18n="close">Close</button>
         </div>
+    </dialog>
+
+    <dialog id="wiresock-remove-dialog" class="ui-dialog" aria-labelledby="wiresock-remove-title">
+        <header class="flex items-center justify-between gap-4 mb-4">
+            <div class="flex items-center gap-3 min-w-0">
+                <span class="material-symbols-outlined text-primary text-2xl" aria-hidden="true">delete</span>
+                <h2 id="wiresock-remove-title" class="font-headline text-lg font-bold text-on-surface" data-i18n="wiresock_remove_title"></h2>
+            </div>
+            <form method="dialog"><button class="ui-icon-button" data-i18n="close" data-i18n-attr="aria-label"><span class="material-symbols-outlined text-xl" aria-hidden="true">close</span></button></form>
+        </header>
+        <div class="space-y-4 text-sm text-on-surface">
+            <div class="rounded-xl bg-surface-container-high border border-outline-variant/20 p-4">
+                <div class="flex items-start gap-3">
+                    <span class="material-symbols-outlined text-primary text-lg shrink-0 mt-0.5" aria-hidden="true">info</span>
+                    <span class="text-xs leading-relaxed" data-i18n="wiresock_remove_warning"></span>
+                </div>
+            </div>
+            <ol class="list-decimal list-inside space-y-2 text-xs text-on-surface-variant/90 pl-1">
+                <li data-i18n="warp_remove_step_1"></li>
+                <li data-i18n="warp_remove_step_2"></li>
+                <li data-i18n="wiresock_remove_step_3"></li>
+                <li data-i18n="warp_remove_step_4"></li>
+                <li data-i18n="warp_remove_step_5"></li>
+            </ol>
+        </div>
+        <form method="dialog" class="mt-6 flex justify-end"><button class="ui-button" data-i18n="close"></button></form>
     </dialog>
 
     <dialog id="telegram-status-dialog" class="ui-dialog" aria-labelledby="telegram-status-modal-title">

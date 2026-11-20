@@ -50,7 +50,7 @@ fn records(text: &str) -> Result<Vec<(IpAddr, Vec<String>)>, String> {
     Ok(result)
 }
 
-fn additions(existing: &[u8], source: &str) -> Result<(String, usize), String> {
+pub(crate) fn additions(existing: &[u8], source: &str) -> Result<(String, usize), String> {
     // Preserve original bytes, including legacy-encoded comments. UTF-16 is
     // rejected rather than appending incompatible ASCII bytes to it.
     if existing.contains(&0)
@@ -85,7 +85,7 @@ fn additions(existing: &[u8], source: &str) -> Result<(String, usize), String> {
     Ok((output, count))
 }
 
-fn update_file(path: &Path, source: &str) -> Result<UpdateResult, String> {
+pub(crate) fn update_file(path: &Path, source: &str) -> Result<UpdateResult, String> {
     let mut options = OpenOptions::new();
     options.read(true).write(true);
     #[cfg(windows)]

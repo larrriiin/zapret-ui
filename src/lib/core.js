@@ -6,7 +6,7 @@ import { adminReason } from './privilege-errors.js';
 import { requestAdmin, showAdminNotice } from '../features/admin-check.js';
 import { t } from './i18n.js';
 
-export async function invoke(cmd, args) {
+export async function invoke(cmd, args, elevationContext) {
   try {
     const result = await window.__TAURI__.core.invoke(cmd, args);
     if (cmd === 'get_warp_status' || cmd === 'get_application_rules') {
@@ -21,7 +21,7 @@ export async function invoke(cmd, args) {
         await window.__TAURI__.core.invoke('request_admin_from_tray', { reason });
         return;
       }
-      requestAdmin(reason);
+      requestAdmin(reason, elevationContext);
       throw Object.assign(new Error(t('elevation_required')), { code: 'elevation_required' });
     }
     throw error;
