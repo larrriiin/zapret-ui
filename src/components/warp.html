@@ -53,21 +53,19 @@
     </div>
     <div id="wiresock-panel" class="contents" hidden>
       <label id="wiresock-profile-title" class="provider-label" for="wiresock-profile-trigger" data-i18n="wiresock_profile_title"></label>
-      <div class="flex items-center gap-2">
-      <div id="wiresock-profile-dropdown" class="relative min-w-0 flex-1">
-        <button id="wiresock-profile-trigger" type="button" class="ui-select-trigger" aria-haspopup="menu" aria-expanded="false" aria-controls="wiresock-profile-options-list" aria-labelledby="wiresock-profile-title wiresock-profile-label">
-          <span id="wiresock-profile-label" class="truncate text-on-surface"></span>
-          <span id="wiresock-profile-chevron" class="material-symbols-outlined text-primary/60 text-base ml-2" aria-hidden="true">expand_more</span>
-        </button>
-        <select hidden id="wiresock-profile" tabindex="-1" aria-hidden="true"></select>
-        <div id="wiresock-profile-options" class="ui-select-popup" hidden>
-          <div id="wiresock-profile-options-list" class="max-h-64 overflow-y-auto overscroll-contain py-1" role="menu" aria-labelledby="wiresock-profile-title"></div>
+      <div class="wiresock-profile-controls grid items-center gap-2">
+        <div id="wiresock-profile-dropdown" class="relative min-w-0">
+          <button id="wiresock-profile-trigger" type="button" class="ui-select-trigger" aria-haspopup="menu" aria-expanded="false" aria-controls="wiresock-profile-options-list" aria-labelledby="wiresock-profile-title wiresock-profile-label">
+            <span id="wiresock-profile-label" class="truncate text-on-surface"></span>
+            <span id="wiresock-profile-chevron" class="material-symbols-outlined text-primary/60 text-base ml-2" aria-hidden="true">expand_more</span>
+          </button>
+          <select hidden id="wiresock-profile" tabindex="-1" aria-hidden="true"></select>
+          <div id="wiresock-profile-options" class="ui-select-popup" hidden>
+            <div id="wiresock-profile-options-list" class="max-h-64 overflow-y-auto overscroll-contain py-1" role="menu" aria-labelledby="wiresock-profile-title"></div>
+          </div>
         </div>
-      </div>
-        <button id="wiresock-add-profile" type="button" class="ui-icon-button shrink-0" aria-haspopup="dialog" aria-controls="wiresock-add-profile-dialog" data-i18n="wiresock_add_profile" data-i18n-attr="aria-label"><span class="material-symbols-outlined" aria-hidden="true">add</span></button>
-      </div>
-      <div class="wiresock-split-controls mt-2 flex items-center gap-2">
-        <button id="wiresock-split-open" type="button" class="ui-button ui-button-status min-w-0 flex-1" data-i18n="wiresock_split_title"></button>
+        <button id="wiresock-add-profile" type="button" class="ui-icon-button justify-self-center" aria-haspopup="dialog" aria-controls="wiresock-add-profile-dialog" data-i18n="wiresock_add_profile" data-i18n-attr="aria-label"><span class="material-symbols-outlined" aria-hidden="true">add</span></button>
+        <button id="wiresock-split-open" type="button" class="ui-button ui-button-status min-w-0" data-i18n="wiresock_split_title"></button>
         <button id="wiresock-split-toggle" type="button" role="switch" class="ui-switch" aria-labelledby="wiresock-split-open" aria-checked="false" disabled></button>
       </div>
       <p id="wiresock-error" class="warp-error" role="alert" hidden></p>

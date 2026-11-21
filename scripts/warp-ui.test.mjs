@@ -399,6 +399,10 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
       });
       await page.locator('#wiresock-profile-trigger').click();
       const menu = page.locator('#wiresock-profile-options-list');
+      const splitWidth = (await page.locator('#wiresock-split-open').boundingBox()).width;
+      for (const selector of ['#wiresock-profile-trigger', '#wiresock-profile-options']) {
+        assert.ok(Math.abs((await page.locator(selector).boundingBox()).width - splitWidth) < 1, `${selector} matches the split tunneling button width`);
+      }
       assert.equal(await menu.evaluate(el => el.scrollHeight > el.clientHeight), true);
       assert.equal(await menu.evaluate(el => {
         const bounds = el.getBoundingClientRect();

@@ -178,7 +178,7 @@ check(!$('warp-mode-options').hidden, 'Custom mode dropdown opens');
 $('warp-mode-options').querySelector('[data-value="proxy"]').click();
 if (!$('confirm-modal').classList.contains('hidden')) $('confirm-modal-ok').click();
 await wait(200);
-check($('warp-mode-options').hidden && $('warp-mode-label').textContent === 'Локальный прокси', 'Custom dropdown selects mode and closes');
+check($('warp-mode-options').hidden && $('warp-mode-label').textContent === 'Раздельное туннелирование', 'Custom dropdown selects mode and closes');
 check(!$('warp-proxy').hidden && $('warp-proxy-endpoint').textContent.includes('40000'), 'Local proxy reports endpoint and type');
 $('warp-port').value = '40001'; $('warp-port-form').requestSubmit(); await wait(200);
 check(port === 40001 && $('warp-proxy-endpoint').textContent.includes('40001'), 'Proxy port changes and refreshes');
@@ -236,7 +236,7 @@ check(before === JSON.stringify(rects()), 'Uninstall restores original element b
 check(maximum === 1, 'Polling and operations never overlap');
 installed = true; connected = true; mode='proxy'; await manualCheck('warp-settings-refresh');
 setLanguage('en');
-check($('warp-state').textContent === 'Connected' && $('warp-mode').selectedOptions[0].textContent === 'Local proxy', 'Dynamic labels change language');
+check($('warp-state').textContent === 'Connected' && $('warp-mode').selectedOptions[0].textContent === 'Split tunneling', 'Dynamic labels change language');
 setLanguage('ru'); mode='warp'; await manualCheck('warp-settings-refresh');
 // Switch from a full tunnel through a single routing action and confirm the consequence.
 connected = false; protocol = 'WireGuard'; mode = 'warp'; await manualCheck('warp-settings-refresh');

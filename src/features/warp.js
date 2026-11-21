@@ -270,7 +270,7 @@ function renderReport() {
     rows.push({ icon: 'power_settings_new', labelKey: 'status_label', value: error ? 'unknown' : snapshot.connected ? 'running' : 'stopped', detail: t(`warp_state_${error ? 'error' : snapshot.state}`) },
       { icon: 'route', labelKey: 'warp_mode', value: snapshot.mode ? 'selected' : 'unknown', detail: t(WARP_MODE_KEYS[snapshot.mode] || 'warp_unknown') },
       { icon: 'tune', labelKey: 'warp_protocol', value: snapshot.protocol ? 'selected' : 'unknown', detail: snapshot.protocol || t('warp_not_checked') });
-    if (snapshot.proxy) rows.push({ icon: 'settings_ethernet', labelKey: 'warp_mode_proxy',
+    if (snapshot.proxy) rows.push({ icon: 'settings_ethernet', labelKey: 'warp_proxy_address',
       value: healthReport?.proxy_available === true ? 'running' : healthReport?.proxy_available === false ? 'stopped' : 'unknown',
       valueLabel: t(healthReport?.proxy_available === true ? 'warp_probe_available' : healthReport?.proxy_available === false ? 'warp_probe_unavailable' : 'warp_not_checked'),
       detail: `${snapshot.proxy.kind || t('warp_unknown')} · ${snapshot.proxy.address}:${snapshot.proxy.port ?? t('warp_unknown')}` });

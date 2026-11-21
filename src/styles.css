@@ -182,7 +182,8 @@ button:disabled { cursor: not-allowed; }
 .warp-home-rule-copy strong { overflow: hidden; font-size: 11px; font-weight: 700; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .warp-secondary-actions:has(#warp-open-settings[hidden]) { grid-template-columns: 1fr; }
 .warp-secondary-actions .ui-button-status { width: 100%; margin-top: 0; }
-.wiresock-split-controls .ui-button-status { margin-top: 0; }
+.wiresock-profile-controls { grid-template-columns: minmax(0, 1fr) auto; }
+.wiresock-profile-controls .ui-button-status { margin-top: 0; }
 .has-warp .connection-actions { display: grid; gap: 8px; margin-top: auto; padding-top: 12px; }
 .connection-actions > :is(.ui-button, .warp-secondary-actions) { margin-top: 0; }
 @media (min-width: 741px) {
