@@ -1,5 +1,5 @@
 import { $, invoke } from '../lib/core.js';
-import { t, onLangChange } from '../lib/i18n.js';
+import { t, onLangChange, translateDOM } from '../lib/i18n.js';
 import markup from '../components/warp.html?raw';
 import { initWarpModes, renderWarpModes, closeWarpModes, initWarpProtocols, renderWarpProtocols, closeWarpProtocols } from './warp-mode.js';
 import { setWarpSummary } from './connection-summary.js';
@@ -9,6 +9,9 @@ import { showConfirm } from '../lib/dom.js';
 import { openWarpTraffic } from './traffic.js';
 import { routingState, needsProxyConfirmation, orderedWarpModes } from './warp-state.js';
 import { adminReason } from '../lib/privilege-errors.js';
+import { initWarpProfile } from './warp-profile.js';
+import { initWireSock } from './wiresock.js';
+import { initSiteEntryDialog, renderRuleList } from './warp-rule-list.js';
 
 export const WARP_MODE_KEYS = {
   doh: 'warp_mode_doh', dot: 'warp_mode_dot', warp: 'warp_mode_warp',
@@ -35,7 +38,7 @@ let activeInfo = null;
 let diagArchive = '';
 let automationNotice = '';
 let auxiliaryCommand = '';
-let hero, zapret, heading, zapretHeader, statusHeading;
+let hero, zapret, heading, zapretHeader, statusHeading, wireSock;
 
 function errorText(error) {
   if (adminReason(error)) return t('elevation_reason_warp_apps');
@@ -46,23 +49,6 @@ function errorText(error) {
 
 function siteDomains() {
   return $('warp-sites-domains').value.split(/\r?\n/).map(domain => domain.trim()).filter(Boolean);
-}
-
-function normalizeSiteDomain(value) {
-  const candidate = value.trim();
-  if (!candidate) return '';
-  try {
-    const source = /^[a-z][a-z\d+.-]*:\/\//i.test(candidate)
-      ? candidate
-      : `https://${candidate.replace(/^\/+/, '')}`;
-    return new URL(source).hostname.replace(/\.$/, '').toLowerCase();
-  } catch {
-    return candidate;
-  }
-}
-
-function normalizeSiteDomains(value) {
-  return [...new Set(value.split(/\r?\n/).map(normalizeSiteDomain).filter(Boolean))];
 }
 
 function renderRuleToggle(id, enabled, disabled) {
@@ -129,7 +115,7 @@ function render() {
     lastInstalled = s.installed;
     try { localStorage.setItem(INSTALLED_KEY, String(lastInstalled)); } catch { /* Storage is optional. */ }
   }
-  layout(lastInstalled);
+  layout(lastInstalled || wireSock?.installed() === true);
   const status = operation || (requestError || operationError ? 'error' : s?.state) || 'detecting';
   const statusLabel = t(status === 'detecting' ? 'warp_detecting' : `warp_state_${status}`);
   const locked = !s || busy || checking || status === 'connecting' || status === 'disconnecting';
@@ -186,21 +172,10 @@ function render() {
   renderRuleToggle('warp-home-sites-toggle', sitesEnabled, $('warp-sites-toggle').disabled);
   const domains = siteDomains();
   $('warp-sites-empty').hidden = domains.length > 0;
-  const siteList = $('warp-sites-list');
-  const siteSignature = JSON.stringify([domains, locked, t('warp_sites_remove')]);
-  if (siteList.dataset.signature !== siteSignature) {
-    siteList.dataset.signature = siteSignature;
-    siteList.replaceChildren(...domains.map(domain => {
-      const row = document.createElement('li'); row.className = 'warp-rule-card';
-      const icon = document.createElement('span'); icon.className = 'material-symbols-outlined'; icon.setAttribute('aria-hidden', 'true'); icon.textContent = 'language';
-      const name = document.createElement('span'); name.className = 'warp-rule-name'; name.textContent = domain;
-      const actions = document.createElement('div'); actions.className = 'warp-card-actions';
-      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'ui-icon-button'; remove.title = t('warp_sites_remove'); remove.setAttribute('aria-label', `${t('warp_sites_remove')}: ${domain}`);
-      remove.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">close</span>'; remove.disabled = locked;
-      remove.addEventListener('click', () => act('save_warp_sites', { domains: siteDomains().filter(item => item !== domain) }));
-      actions.append(remove); row.append(icon, name, actions); return row;
-    }));
-  }
+  renderRuleList($('warp-sites-list'), domains, {
+    kind: 'sites', disabled: locked,
+    remove: domain => act('save_warp_sites', { domains: siteDomains().filter(item => item !== domain) }),
+  });
   $('warp-page-status').textContent = statusLabel;
   $('warp-page-status').dataset.state = status;
   $('warp-apps-empty').hidden = apps.paths.length > 0;
@@ -210,23 +185,10 @@ function render() {
   $('warp-apps-toggle').dataset.enabled = String(appsEnabled);
   $('warp-apps-toggle').setAttribute('aria-pressed', String(appsEnabled));
   renderRuleToggle('warp-home-apps-toggle', appsEnabled, $('warp-apps-toggle').disabled);
-  const list = $('warp-apps-list');
-  const listSignature = JSON.stringify([apps.paths, locked, apps.enabled, t('warp_apps_remove'), t('warp_apps_path')]);
-  if (list.dataset.signature !== listSignature) {
-    list.dataset.signature = listSignature;
-    list.replaceChildren(...apps.paths.map(path => {
-      const row = document.createElement('li'); row.className = 'warp-rule-card';
-      const icon = document.createElement('span'); icon.className = 'material-symbols-outlined'; icon.setAttribute('aria-hidden', 'true'); icon.textContent = 'description';
-      const name = document.createElement('span'); name.className = 'warp-rule-name'; name.textContent = path.split(/[\\/]/).pop();
-      const actions = document.createElement('div'); actions.className = 'warp-card-actions';
-      const details = document.createElement('button'); details.type = 'button'; details.className = 'ui-icon-button'; details.title = t('warp_apps_path'); details.setAttribute('aria-label', `${t('warp_apps_path')}: ${name.textContent}`);
-      details.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">info</span>'; details.addEventListener('click', () => openWarpInfo('path', path));
-      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'ui-icon-button'; remove.title = t('warp_apps_remove'); remove.setAttribute('aria-label', `${t('warp_apps_remove')}: ${name.textContent}`);
-      remove.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">close</span>'; remove.disabled = locked;
-      remove.addEventListener('click', () => act('save_warp_applications', { paths: apps.paths.filter(item => item !== path) }));
-      actions.append(details, remove); row.append(icon, name, actions); return row;
-    }));
-  }
+  renderRuleList($('warp-apps-list'), apps.paths, {
+    kind: 'apps', disabled: locked, details: path => openWarpInfo('path', path),
+    remove: path => act('save_warp_applications', { paths: apps.paths.filter(item => item !== path) }),
+  });
   for (const [kind, rule, ruleError, count] of [
     ['sites', sites, s?.sites_error, domains.length], ['apps', apps, s?.applications_error, apps.paths.length],
   ]) {
@@ -278,6 +240,7 @@ function render() {
   if ($('warp-install-details')) $('warp-install-details').hidden = true;
   renderWarpInfo();
   renderReport();
+  wireSock?.render(lastInstalled, busy || checking);
 }
 
 function renderReport() {
@@ -307,7 +270,7 @@ function renderReport() {
     rows.push({ icon: 'power_settings_new', labelKey: 'status_label', value: error ? 'unknown' : snapshot.connected ? 'running' : 'stopped', detail: t(`warp_state_${error ? 'error' : snapshot.state}`) },
       { icon: 'route', labelKey: 'warp_mode', value: snapshot.mode ? 'selected' : 'unknown', detail: t(WARP_MODE_KEYS[snapshot.mode] || 'warp_unknown') },
       { icon: 'tune', labelKey: 'warp_protocol', value: snapshot.protocol ? 'selected' : 'unknown', detail: snapshot.protocol || t('warp_not_checked') });
-    if (snapshot.proxy) rows.push({ icon: 'settings_ethernet', labelKey: 'warp_mode_proxy',
+    if (snapshot.proxy) rows.push({ icon: 'settings_ethernet', labelKey: 'warp_proxy_address',
       value: healthReport?.proxy_available === true ? 'running' : healthReport?.proxy_available === false ? 'stopped' : 'unknown',
       valueLabel: t(healthReport?.proxy_available === true ? 'warp_probe_available' : healthReport?.proxy_available === false ? 'warp_probe_unavailable' : 'warp_not_checked'),
       detail: `${snapshot.proxy.kind || t('warp_unknown')} · ${snapshot.proxy.address}:${snapshot.proxy.port ?? t('warp_unknown')}` });
@@ -428,7 +391,18 @@ async function toggleRule(kind) {
   });
 }
 
+export function resumeWireSockSetup(request) {
+  wireSock?.resumeSetup(request);
+}
+
 export function initWarp() {
+  const openSites = initSiteEntryDialog();
+  const ruleOptions = {
+    openSites,
+    openPath: path => openWarpInfo('path', path),
+    warpRules: () => ({ sites: snapshot?.sites?.domains || [], allowed: snapshot?.applications?.paths || [] }),
+  };
+  const openProfile = initWarpProfile(ruleOptions);
   try { lastInstalled = localStorage.getItem(INSTALLED_KEY) === 'true'; } catch { /* Storage is optional. */ }
   hero = document.querySelector('#section-home > section');
   zapret = hero.querySelector(':scope > .relative');
@@ -442,28 +416,21 @@ export function initWarp() {
   const fragment = document.createElement('template');
   fragment.innerHTML = markup;
   hero.append(fragment.content);
-  document.body.append($('warp-status-dialog'));
+  const dialogs = ['warp-status-dialog', 'wiresock-setup-dialog', 'wiresock-status-dialog', 'wiresock-split-dialog', 'wiresock-add-profile-dialog'].map($);
+  document.body.append(...dialogs);
   heading = hero.querySelector('.connection-heading');
   hero.prepend(heading);
   // Translate only the inserted content: translating the whole page here would
   // reset Zapret's live status/button labels to their initial HTML values.
-  for (const root of [heading, zapretHeader, $('warp-card'), $('warp-status-dialog')]) {
-    root.querySelectorAll('[data-i18n]').forEach(el => {
-      if (el.dataset.i18nAttr) el.setAttribute(el.dataset.i18nAttr, t(el.dataset.i18n));
-      else el.textContent = t(el.dataset.i18n);
-    });
-  }
+  for (const root of [heading, zapretHeader, $('warp-card'), ...dialogs]) translateDOM(root);
   initWarpModes(); initWarpProtocols();
+  wireSock = initWireSock(render, openProfile, ruleOptions);
   const warpInfoDialog = $('warp-settings-info-dialog');
   document.body.append(warpInfoDialog);
   $('warp-settings-info-close').addEventListener('click', () => warpInfoDialog.close());
   warpInfoDialog.addEventListener('click', event => { if (event.target === warpInfoDialog) warpInfoDialog.close(); });
   document.querySelectorAll('[data-warp-info]').forEach(button => button.addEventListener('click', () => openWarpInfo(button.dataset.warpInfo)));
   $('warp-open-settings').addEventListener('click', () => showSection('warp-settings'));
-  const sitesDialog = $('warp-sites-dialog');
-  document.body.append(sitesDialog);
-  $('warp-sites-dialog-close').addEventListener('click', () => sitesDialog.close());
-  sitesDialog.addEventListener('click', event => { if (event.target === sitesDialog) sitesDialog.close(); });
   $('warp-copy-proxy').addEventListener('click', async () => {
     const proxy = snapshot?.proxy;
     const address = proxy?.address && proxy?.port ? `${proxy.address}:${proxy.port}` : proxy?.address;
@@ -484,20 +451,11 @@ export function initWarp() {
     } catch (error) { operationError = error; }
     finally { busy = false; render(); }
   });
-  const saveSiteDomains = domains => act('save_warp_sites', { domains });
-  $('warp-sites-add').addEventListener('click', () => {
-    $('warp-sites-input').value = '';
-    sitesDialog.showModal();
-    $('warp-sites-input').focus();
-  });
-  const addSites = () => {
-    const added = normalizeSiteDomains($('warp-sites-input').value);
+  $('warp-sites-add').addEventListener('click', () => openSites(added => {
     const existing = siteDomains();
     const domains = [...new Set([...existing, ...added])];
-    if (domains.length !== existing.length) saveSiteDomains(domains);
-    sitesDialog.close();
-  };
-  $('warp-sites-dialog-add').addEventListener('click', addSites);
+    if (domains.length !== existing.length) act('save_warp_sites', { domains });
+  }));
   $('warp-sites-domains').addEventListener('input', () => { sitesDirty = true; });
   const toggleSites = () => toggleRule('sites');
   $('warp-sites-toggle').addEventListener('click', toggleSites);
@@ -568,4 +526,11 @@ export function initWarp() {
     window.setTimeout(poll, snapshot || requestError ? 3000 : 200);
   }
   void poll();
+  return invoke('get_tunnel_installations').then(detected => {
+    if (typeof snapshot?.installed !== 'boolean' && typeof detected?.warp === 'boolean') {
+      lastInstalled = detected.warp;
+    }
+    wireSock.seedInstallation(detected?.wiresock);
+    render();
+  }).catch(error => console.warn('Could not detect tunnel installations:', error));
 }

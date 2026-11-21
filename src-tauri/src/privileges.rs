@@ -1,5 +1,9 @@
 //! Optional elevation and an explicit handoff before the single-instance lock.
-use std::sync::OnceLock;
+use crate::providers::wiresock::setup::SetupRequest;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    OnceLock,
+};
 
 pub(crate) const ADMIN_REQUIRED: &str = "admin_required:";
 
@@ -24,10 +28,22 @@ pub(crate) struct RestartContext {
     resume_telegram: bool,
     automation: crate::automations::HandoffState,
     routing: crate::providers::warp::RoutingHandoff,
+    wiresock_setup: Option<SetupRequest>,
+    wiresock_temporary_strategy: Option<String>,
 }
 
 impl RestartContext {
     fn validate(&self) -> Result<(), String> {
+        if let Some(request) = &self.wiresock_setup {
+            request.validate()?;
+        }
+        if self
+            .wiresock_temporary_strategy
+            .as_deref()
+            .is_some_and(|name| !crate::is_safe_strategy_name(name))
+        {
+            return Err("wiresock_zapret_strategy_required".into());
+        }
         if [
             "home",
             "automations",
@@ -51,6 +67,7 @@ impl RestartContext {
 }
 
 static CONTEXT: OnceLock<RestartContext> = OnceLock::new();
+static WIRESOCK_SETUP_TAKEN: AtomicBool = AtomicBool::new(false);
 
 /// Test write access without truncating existing data. Protected installs can
 /// request elevation, while portable/user-owned installs remain usable normally.
@@ -132,7 +149,20 @@ pub(crate) fn request_admin_from_tray(app: tauri::AppHandle, reason: String) -> 
 
 #[tauri::command]
 pub(crate) fn elevation_context() -> Option<RestartContext> {
-    CONTEXT.get().cloned()
+    let mut context = CONTEXT.get()?.clone();
+    if WIRESOCK_SETUP_TAKEN.load(Ordering::Acquire) {
+        context.wiresock_setup = None;
+    }
+    Some(context)
+}
+
+pub(crate) fn take_wiresock_setup() -> Option<(SetupRequest, Option<String>)> {
+    let context = CONTEXT.get()?;
+    let request = context.wiresock_setup.clone()?;
+    if WIRESOCK_SETUP_TAKEN.swap(true, Ordering::AcqRel) {
+        return None;
+    }
+    Some((request, context.wiresock_temporary_strategy.clone()))
 }
 
 pub(crate) fn resume_telegram() -> bool {
@@ -366,6 +396,14 @@ pub(crate) async fn restart_as_admin(
     context.automation = crate::automations::capture_handoff(app.state());
     context.routing = crate::providers::warp::capture_handoff()
         .map_err(|e| format!("{}: {}", e.code, e.detail))?;
+    context.wiresock_temporary_strategy = None;
+    if context.wiresock_setup.is_some() {
+        let status = crate::read_zapret_status(app.state::<crate::AppState>().inner());
+        if status.mode.as_deref() == Some("temporary") {
+            context.wiresock_temporary_strategy =
+                Some(status.strategy.ok_or("wiresock_zapret_strategy_required")?);
+        }
+    }
     #[cfg(windows)]
     tauri::async_runtime::spawn_blocking(move || handoff::launch(&context))
         .await

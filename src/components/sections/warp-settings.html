@@ -3,6 +3,13 @@
     <div><div class="warp-page-title-row"><h2 id="warp-page-title" class="font-headline text-2xl font-bold text-primary" data-i18n="warp_page_title"></h2></div><p class="warp-page-description" data-i18n="warp_page_description"></p></div>
     <span id="warp-page-status" class="provider-badge warp-page-status" role="status"></span>
   </header>
+  <section class="ui-panel p-6 flex flex-wrap items-center justify-between gap-4" aria-labelledby="warp-profile-title">
+    <div>
+      <h3 id="warp-profile-title" class="font-headline text-base font-bold" data-i18n="warp_profile_title"></h3>
+      <p class="mt-1 text-sm text-on-surface-variant" data-i18n="warp_profile_description"></p>
+    </div>
+    <button id="warp-profile-open" type="button" class="ui-button" aria-haspopup="dialog" data-i18n="warp_profile_open"></button>
+  </section>
   <section id="warp-sites" class="ui-panel p-6 warp-rules-panel" aria-labelledby="warp-sites-title">
     <header class="warp-section-heading"><div class="warp-section-title"><span class="warp-section-icon"><span class="material-symbols-outlined" aria-hidden="true">language</span></span><h3 id="warp-sites-title" class="font-headline text-base font-bold" data-i18n="warp_sites_title"></h3><button id="warp-sites-info" data-warp-info="sites" aria-haspopup="dialog" type="button" class="ui-icon-button warp-title-info" data-i18n="warp_info" data-i18n-attr="aria-label"><span class="material-symbols-outlined" aria-hidden="true">info</span></button></div><div class="warp-section-actions"><button id="warp-sites-add" type="button" class="ui-button"><span class="material-symbols-outlined" aria-hidden="true">add</span><span data-i18n="warp_sites_add"></span></button><button id="warp-sites-toggle" type="button" class="ui-switch"></button></div></header>
     <p id="warp-sites-state" class="warp-rule-status" role="status"></p>
@@ -11,7 +18,7 @@
   <section id="warp-apps" class="ui-panel p-6 warp-rules-panel" aria-labelledby="warp-apps-title">
     <header class="warp-section-heading"><div class="warp-section-title"><span class="warp-section-icon"><span class="material-symbols-outlined" aria-hidden="true">apps</span></span><h3 id="warp-apps-title" class="font-headline text-base font-bold" data-i18n="warp_apps_title"></h3><button id="warp-apps-info" data-warp-info="apps" aria-haspopup="dialog" type="button" class="ui-icon-button warp-title-info" data-i18n="warp_info" data-i18n-attr="aria-label"><span class="material-symbols-outlined" aria-hidden="true">info</span></button></div><div class="warp-section-actions"><button id="warp-apps-add" type="button" class="ui-button"><span class="material-symbols-outlined" aria-hidden="true">add</span><span data-i18n="warp_apps_add"></span></button><button id="warp-apps-toggle" type="button" class="ui-switch"></button></div></header>
     <p id="warp-apps-state" class="warp-rule-status" role="status"></p>
-    <p id="warp-apps-empty" class="warp-list-empty" data-i18n="warp_apps_empty"></p><ul id="warp-apps-list" class="warp-rule-grid" aria-labelledby="warp-apps-title"></ul>
+    <p id="warp-apps-empty" class="warp-list-empty" data-i18n="warp_apps_empty"></p><ul id="warp-apps-list" class="warp-rule-grid warp-rule-grid-apps" aria-labelledby="warp-apps-title"></ul>
   </section>
   <details id="warp-advanced" class="ui-disclosure glass-panel">
     <summary class="ui-disclosure-summary"><span class="ui-disclosure-heading"><span class="material-symbols-outlined" aria-hidden="true">tune</span><span class="ui-disclosure-title" data-i18n="advanced_settings"></span></span><span class="material-symbols-outlined ui-disclosure-chevron" aria-hidden="true">expand_more</span></summary>

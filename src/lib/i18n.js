@@ -32,8 +32,8 @@ export function t(key, params = {}) {
   return translation;
 }
 
-export function updatePageTranslations() {
-  document.querySelectorAll('[data-i18n]').forEach((el) => {
+export function translateDOM(root) {
+  root.querySelectorAll('[data-i18n]').forEach((el) => {
     const key = el.dataset.i18n;
     const attr = el.dataset.i18nAttr;
     const translation = t(key);
@@ -45,6 +45,10 @@ export function updatePageTranslations() {
       el.textContent = translation;
     }
   });
+}
+
+export function updatePageTranslations() {
+  translateDOM(document);
   const langBtn = $('lang-text');
   if (langBtn) langBtn.textContent = currentLang.toUpperCase();
   const langRadios = document.querySelectorAll('input[name="lang-pref"]');

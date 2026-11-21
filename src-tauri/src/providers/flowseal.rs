@@ -154,6 +154,29 @@ impl FlowsealProvider {
         let bin = self.paths.bin_dir().to_string_lossy().to_string() + &suffix;
         let lists = self.paths.lists_dir().to_string_lossy().to_string() + &suffix;
         let root = self.paths.root().to_string_lossy().to_string() + &suffix;
+        let lists_path = self.paths.lists_dir();
+        let user_list = crate::ipset::USER_INCLUDE_FILE;
+        let arguments = if lists_path.join(user_list).is_file()
+            && fs::read_to_string(lists_path.join("ipset-all.txt")).is_ok_and(|text| {
+                crate::ipset_mode(text.trim_start_matches('\u{feff}')) == "loaded"
+            }) {
+            arguments
+                .split_whitespace()
+                .map(|argument| {
+                    if matches!(
+                        argument,
+                        "--ipset=\"%LISTS%ipset-all.txt\"" | "--ipset=%LISTS%ipset-all.txt"
+                    ) {
+                        format!("{argument} --ipset=\"%LISTS%{user_list}\"")
+                    } else {
+                        argument.to_owned()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        } else {
+            arguments.to_owned()
+        };
         let args = arguments
             .replace("%GameFilter%", gf)
             .replace("%GameFilterTCP%", gftcp)
@@ -854,5 +877,35 @@ mod tests {
             catalog.strategies[0].arguments,
             "--fake=! --literal-caret=^ --quoted=\"^!\""
         );
+    }
+
+    #[test]
+    fn attaches_the_user_ipset_to_each_upstream_ipset_only_in_list_mode() {
+        let root = tempfile::tempdir().unwrap();
+        let provider = FlowsealProvider::new(root.path());
+        let lists = provider.paths.lists_dir();
+        fs::create_dir_all(&lists).unwrap();
+        fs::write(
+            lists.join(crate::ipset::USER_INCLUDE_FILE),
+            "192.0.2.1/32\n",
+        )
+        .unwrap();
+        let upstream = lists.join("ipset-all.txt");
+        let args = "--ipset=\"%LISTS%ipset-all.txt\" --new --ipset=%LISTS%ipset-all.txt --new --ipset-exclude=\"%LISTS%ipset-all.txt\"";
+        for (list, expected) in [("198.51.100.0/24\n", 2), ("203.0.113.113/32\n", 0), ("", 0)] {
+            fs::write(&upstream, list).unwrap();
+            let resolved = provider.resolve_strategy_arguments(
+                args,
+                &GameFilterSettings {
+                    mode: "disabled".into(),
+                    tcp_range: "12".into(),
+                    udp_range: "12".into(),
+                },
+            );
+            assert_eq!(
+                resolved.matches(crate::ipset::USER_INCLUDE_FILE).count(),
+                expected
+            );
+        }
     }
 }

@@ -29,6 +29,7 @@ This is an operating desktop application. Keep controls consistent across sectio
 | Switch | `ui-switch` | Native checkbox track uses `is-on`/`is-off`; button uses `data-enabled`; optional `ui-switch-sm` |
 | Select | `ui-select-trigger`, `ui-select-popup`, `ui-select-option` | Shared skin; keep feature selection/search behavior; selected option uses `dropdown-option-selected` |
 | Tab/filter | `ui-tab` | Active state via `aria-selected` or `aria-pressed` |
+| Segmented choice | `ui-tab-group` containing `ui-tab` buttons | Equal-width options on one surface. Use `role="group"` with an accessible name and `aria-pressed` on each option. Reference: tunnel client switch on Home. |
 | Page title | `ui-page-title` | Use on the localized `<h2>`. Reference: `src/components/sections/zapret-settings.html` |
 | Tab content transition | `transitionTabContent` from `src/lib/tab-transition.js` | Fade out for 100ms, switch panels, fade in for 180ms; latest selection wins; instant with reduced motion |
 | Panel | `ui-panel` | Add layout/padding utilities, e.g. `p-6`; shared frame and theme surface |
@@ -82,6 +83,8 @@ Reference: `src/features/automations.js` and `src/features/automations-interacti
 
 Rule action menus reuse `ui-select-popup` and `ui-select-option` surfaces with menu/menuitem roles. An `ui-icon-button` trigger has `aria-haspopup="menu"`, `aria-expanded` and `aria-controls`. Support arrow keys, Home/End, Escape, outside clicks and dismissal on scrolling. Keep popup placement in behavior code.
 
+The WireSock profile menu uses `ui-select-option-group` for a selectable row and its adjacent icon action. The selected background covers the whole row. Give the selection `role="menuitemradio"` and the delete action `role="menuitem"` with the profile name in its accessible label. Cap the scroll area to the space available above or below the trigger.
+
 Reordering uses an `ui-icon-button` handle with pointer capture and Up/Down/Home/End keyboard alternatives. Persist only on drop, announce the new position in a live region, and restore the original order on Escape, pointer cancellation or save failure.
 
 ## Application identity
@@ -94,7 +97,17 @@ Reference: `#app-header` and `#app-sidebar` in `src/index.html`; shell layout is
 
 The soft background accents live in a single fixed `.app-backdrop` under the isolated body. Keep the main scroll container and page roots transparent so the backdrop continues from the header into every page without an opaque seam. Individual cards retain their own surfaces. Text-only dialog dismissal uses `ui-button` in a right-aligned footer; `ui-icon-button` is reserved for an actual icon, never a translated Close label. References: `info-help.html`, `status.html`, and the WARP information dialog footer.
 
-At startup, center the main window within the work area of the monitor under the pointer. Fit its height to the initial home layout within that work area, using the monitor's DPI and the configured minimum size where it fits. Keep the same size as the user navigates. Overflow stays in the central scroll area.
+Zapret and WireSock status dialogs use the same report elements from `src/features/status-check.js`. Use a summary panel for the overall state, icon rows for individual fields, and a message panel while the status is loading.
+
+The WARP settings and WireSock profile editor share `renderRuleList` in `src/features/warp-rule-list.js`. Use a `warp-rule-grid` list, `warp-rule-card` rows, and `ui-icon-button` details and removal actions. Both site lists open the same site entry dialog. The WireSock editor and profile generator mount `src/components/wiresock-rules.html` for their draft lists.
+
+The plus icon beside the WireSock profile selector opens a `ui-dialog` with creation and import actions. The split-tunneling dialog uses a `ui-switch` to edit the global rules for connections started from ZAPRET UI. Saving the switch applies to the next connection.
+
+The WireSock split-tunneling switch on Home controls whether connections started from ZAPRET UI use split rules. Changing the switch or selecting another profile reconnects an active WireSock tunnel. If disconnected, the app applies the choice at the next connection. Keep the rule editor accessible while the switch is off so saved rules can be reviewed and edited.
+
+At startup, center the main window within the work area of the monitor under the pointer. Measure Home after detecting the installed tunnel clients and loading local fonts. Fit the measured height with 24px of extra space, applying the monitor's DPI and the configured minimum size where it fits. Keep the same size as the user navigates. Overflow stays in the central scroll area.
+
+The first-run setup opens at 880 × 740 logical pixels when the monitor has room. Keep the step indicator and footer in view while the current step scrolls independently. The indicator is an ordered list with `aria-current="step"` on the current item and a screen-reader status for each completed item. `src/features/setup-step-progress.js` reproduces [DesignBookmark Step Progress](https://designbookmark.com/motion#db-step-progress) with a spring-driven rail and markers. The wizard controls advancement. The indicator settles immediately with reduced motion.
 
 The home page restores the WARP card from the last confirmed installation state. While the first status check is pending, its overlay shows the localized initialization message and its controls are inert. A successful check refreshes the saved installation state.
 
@@ -107,6 +120,8 @@ Automation creation/editing uses the native `#auto-editor` dialog, with `ui-dial
 
 Reference: `src/components/modals/elevation.html` and `src/features/admin-check.js`.
 Use a native `ui-dialog` with a reason, a cancel action and an explicit restart action. Focus starts on Cancel; Escape cancels unless a restart is in progress. Permission errors from user actions open the dialog; background rules use the non-modal `ui-panel` notice and never open UAC themselves. Restart returns to the current section; the user repeats the action after elevation.
+
+For confirmed WireSock setup, the elevation handoff carries the selected profile. After approval, the app resumes the operation once and connects WireSock after Zapret starts successfully.
 
 The background notice has an accessible `ui-icon-button ui-icon-button-sm` close action. Dismissing it suppresses the notice until the next application launch, including repeated background polls and events. Explicit user actions still show their permission dialog.
 

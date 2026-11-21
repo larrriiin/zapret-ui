@@ -1,6 +1,8 @@
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::windows::ffi::OsStrExt;
+use std::os::windows::io::{FromRawHandle, OwnedHandle};
+use std::path::Path;
 use windows_sys::Win32::{
     Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS},
     System::Registry::{
@@ -86,23 +88,34 @@ fn elevate_once(
 }
 
 fn elevation_parameters(args: &[OsString]) -> io::Result<Vec<u16>> {
+    quote_parameters(
+        std::iter::once(OsStr::new(ELEVATION_ATTEMPTED_ARG))
+            .chain(args.iter().map(OsString::as_os_str)),
+    )
+}
+
+fn quote_parameters<'a>(args: impl IntoIterator<Item = &'a OsStr>) -> io::Result<Vec<u16>> {
     let mut parameters = Vec::new();
-    for arg in std::iter::once(OsStr::new(ELEVATION_ATTEMPTED_ARG))
-        .chain(args.iter().map(OsString::as_os_str))
-    {
+    for arg in args {
         if !parameters.is_empty() {
             parameters.push(b' ' as u16);
+        }
+        let units = arg.encode_wide();
+        if units.clone().any(|unit| unit == 0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "NUL in argument",
+            ));
+        }
+        // msiexec parses its switches directly and rejects quoted switches.
+        if !arg.is_empty() && !units.clone().any(|unit| matches!(unit, 9..=13 | 32 | 34)) {
+            parameters.extend(units);
+            continue;
         }
         // Quote for the Windows argv parser, not for cmd.exe or PowerShell.
         parameters.push(b'"' as u16);
         let mut backslashes = 0;
-        for unit in arg.encode_wide() {
-            if unit == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "NUL in argument",
-                ));
-            }
+        for unit in units {
             if unit == b'\\' as u16 {
                 backslashes += 1;
                 continue;
@@ -124,8 +137,30 @@ fn elevation_parameters(args: &[OsString]) -> io::Result<Vec<u16>> {
 }
 
 fn relaunch_elevated(parameters: &[u16]) -> io::Result<()> {
+    drop(shell_execute_elevated(
+        &std::env::current_exe()?,
+        &std::env::current_dir()?,
+        parameters,
+    )?);
+    Ok(())
+}
+
+pub(crate) fn spawn_elevated(
+    executable: &Path,
+    directory: &Path,
+    args: &[OsString],
+) -> io::Result<OwnedHandle> {
+    let parameters = quote_parameters(args.iter().map(OsString::as_os_str))?;
+    shell_execute_elevated(executable, directory, &parameters)
+}
+
+fn shell_execute_elevated(
+    executable: &Path,
+    directory: &Path,
+    parameters: &[u16],
+) -> io::Result<OwnedHandle> {
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, RPC_E_CHANGED_MODE},
+        Foundation::RPC_E_CHANGED_MODE,
         System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED},
         UI::{
             Shell::{
@@ -146,16 +181,12 @@ fn relaunch_elevated(parameters: &[u16]) -> io::Result<()> {
         }
     }
 
-    let executable: Vec<u16> = std::env::current_exe()?
+    let executable: Vec<u16> = executable
         .as_os_str()
         .encode_wide()
         .chain(Some(0))
         .collect();
-    let directory: Vec<u16> = std::env::current_dir()?
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect();
+    let directory: Vec<u16> = directory.as_os_str().encode_wide().chain(Some(0)).collect();
     let verb: Vec<u16> = "runas".encode_utf16().chain(Some(0)).collect();
 
     // SAFETY: All strings remain alive and NUL-terminated throughout the call.
@@ -186,9 +217,8 @@ fn relaunch_elevated(parameters: &[u16]) -> io::Result<()> {
                 "Windows did not return the new process handle",
             ));
         }
-        CloseHandle(request.hProcess);
+        Ok(OwnedHandle::from_raw_handle(request.hProcess))
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -267,5 +297,23 @@ mod tests {
         let args = [OsString::from_wide(&[b'a' as u16, 0, b'b' as u16])];
         let error = elevate_once(false, &args, |_| panic!("must not launch")).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn msi_switches_stay_bare_and_paths_with_spaces_round_trip() {
+        let args = [
+            "/i",
+            r"C:\Installer Cache\WireSock.msi",
+            "/norestart",
+            "/L*V",
+            r"C:\App Logs\WireSock.log",
+        ];
+        let parameters = quote_parameters(args.iter().map(OsStr::new)).unwrap();
+        let command = String::from_utf16(&parameters[..parameters.len() - 1]).unwrap();
+        assert_eq!(
+            command,
+            r#"/i "C:\Installer Cache\WireSock.msi" /norestart /L*V "C:\App Logs\WireSock.log""#
+        );
+        assert_eq!(parse_parameters(&parameters), args.map(OsString::from));
     }
 }

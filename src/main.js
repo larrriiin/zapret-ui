@@ -37,7 +37,7 @@ import { initFirstRun, maybeShowFirstRun, openSetup } from './features/firstrun.
 import { initStatusCheck } from './features/status-check.js';
 import { initTrafficMonitor, refreshTrafficTranslations } from './features/traffic.js';
 import { initTelegram } from './features/telegram.js';
-import { initWarp } from './features/warp.js';
+import { initWarp, resumeWireSockSetup } from './features/warp.js';
 
 // Mount HTML fragments before initializing translations and controls.
 mountComponents();
@@ -60,7 +60,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.addEventListener('contextmenu', (e) => e.preventDefault());
 
   initTitlebar();
-  initWarp();
+  const tunnelLayoutReady = initWarp();
 
   initFirstRun();
   const resumeSetup = elevationContext?.section === 'setup';
@@ -155,14 +155,15 @@ window.addEventListener('DOMContentLoaded', async () => {
     refreshTrafficTranslations();
   });
 
-  await document.fonts.ready;
+  await Promise.all([document.fonts.ready, tunnelLayoutReady]);
   const home = $('section-home').getBoundingClientRect();
   const content = $('sections-host').getBoundingClientRect();
-  await invoke('fit_initial_window_height', { height: Math.ceil(content.top + home.height) })
+  await invoke('fit_initial_window_height', { height: Math.ceil(content.top + home.height + 24) })
     .catch(error => console.warn('Could not fit the initial window height:', error));
   if (elevationContext && elevationContext.section !== 'setup') showSection(elevationContext.section);
   document.documentElement.classList.remove('app-loading');
   await invoke('show_app_window', { force: forceShow });
+  if (elevationContext?.wiresock_setup) resumeWireSockSetup(elevationContext.wiresock_setup);
   } catch (error) {
     console.error('Startup failed:', error);
     document.getElementById('startup-spinner').hidden = true;

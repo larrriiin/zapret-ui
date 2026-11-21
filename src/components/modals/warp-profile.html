@@ -1,0 +1,101 @@
+<dialog id="warp-profile-dialog" class="ui-dialog" aria-labelledby="warp-profile-dialog-title">
+  <h2 id="warp-profile-dialog-title" class="font-headline text-lg font-bold" data-i18n="warp_profile_title"></h2>
+  <p id="warp-profile-hint" class="mt-2 text-sm text-on-surface-variant" data-i18n="warp_profile_hint"></p>
+  <form id="warp-profile-form" class="mt-5">
+    <fieldset id="warp-profile-options" class="space-y-4">
+      <div>
+        <label for="warp-profile-terms" class="flex items-center gap-2 text-sm">
+          <input id="warp-profile-terms" class="ui-check" type="checkbox" required autofocus>
+          <span data-i18n="warp_profile_terms_accept"></span>
+        </label>
+        <a class="inline-block mt-1 text-xs text-secondary underline" href="https://www.cloudflare.com/application/terms/"
+          target="_blank" rel="noopener noreferrer" data-i18n="warp_profile_terms_link"></a>
+      </div>
+      <details id="warp-profile-advanced" class="ui-disclosure glass-panel">
+        <summary class="ui-disclosure-summary">
+          <span class="ui-disclosure-heading">
+            <span class="material-symbols-outlined" aria-hidden="true">tune</span>
+            <span class="ui-disclosure-title" data-i18n="advanced_settings"></span>
+          </span>
+          <span class="material-symbols-outlined ui-disclosure-chevron" aria-hidden="true">expand_more</span>
+        </summary>
+        <div class="px-4 pb-4 space-y-4">
+          <div>
+            <label for="warp-profile-endpoint" class="block mb-1 text-sm" data-i18n="warp_profile_endpoint"></label>
+            <input id="warp-profile-endpoint" class="ui-field w-full font-mono" type="text" maxlength="260"
+              spellcheck="false" autocomplete="off" aria-describedby="warp-profile-endpoint-hint"
+              placeholder="8.6.112.9:928">
+            <p id="warp-profile-endpoint-hint" class="mt-1 text-xs text-on-surface-variant" data-i18n="warp_profile_endpoint_hint"></p>
+            <label class="mt-2 flex items-center gap-2 text-sm">
+              <input id="warp-profile-random-endpoint" class="ui-check" type="checkbox" checked>
+              <span data-i18n="warp_profile_random_endpoint"></span>
+            </label>
+          </div>
+          <div>
+            <label class="flex items-center gap-2 text-sm">
+              <input id="warp-profile-masking" class="ui-check" type="checkbox" aria-controls="warp-profile-masking-options" checked>
+              <span data-i18n="warp_profile_masking"></span>
+            </label>
+            <div id="warp-profile-masking-options" class="mt-2" hidden>
+              <label for="warp-profile-masking-domain" class="block mb-1 text-sm" data-i18n="warp_profile_masking_domain"></label>
+              <input id="warp-profile-masking-domain" class="ui-field w-full font-mono" type="text" maxlength="253"
+                spellcheck="false" autocomplete="off" aria-describedby="warp-profile-masking-hint">
+              <p id="warp-profile-masking-hint" class="mt-1 text-xs text-on-surface-variant" data-i18n="warp_profile_masking_hint"></p>
+            </div>
+          </div>
+          <div>
+            <label class="flex items-center gap-2 text-sm">
+              <input id="warp-profile-split" class="ui-check" type="checkbox" aria-controls="warp-profile-services">
+              <span data-i18n="warp_profile_split"></span>
+            </label>
+            <fieldset id="warp-profile-services" class="mt-2" aria-describedby="warp-profile-split-hint" hidden>
+              <legend class="sr-only" data-i18n="warp_profile_split"></legend>
+              <div class="flex flex-wrap gap-x-4 gap-y-2">
+                <label class="flex items-center gap-2 text-sm"><input class="ui-check" type="checkbox" value="youtube">YouTube</label>
+                <label class="flex items-center gap-2 text-sm"><input class="ui-check" type="checkbox" value="discord">Discord</label>
+                <label class="flex items-center gap-2 text-sm"><input class="ui-check" type="checkbox" value="telegram">Telegram</label>
+              </div>
+              <p id="warp-profile-split-hint" class="mt-1 text-xs text-on-surface-variant" data-i18n="warp_profile_split_hint"></p>
+            </fieldset>
+          </div>
+          <div id="warp-profile-rules" class="space-y-4"></div>
+          <p id="warp-profile-apps-ip-hint" class="text-xs text-on-surface-variant" data-i18n="wiresock_split_intersection" hidden></p>
+          <fieldset id="warp-profile-dns" aria-describedby="warp-profile-system-dns">
+            <legend class="mb-1 text-sm">DNS</legend>
+            <div class="flex flex-wrap gap-x-4 gap-y-2">
+              <label class="flex items-center gap-2 text-sm"><input name="warp-profile-dns" class="ui-check" type="radio" value="cloudflare" checked>Cloudflare (1.1.1.1)</label>
+              <label class="flex items-center gap-2 text-sm"><input name="warp-profile-dns" class="ui-check" type="radio" value="google">Google (8.8.8.8)</label>
+              <label class="flex items-center gap-2 text-sm"><input name="warp-profile-dns" class="ui-check" type="radio" value="system"><span data-i18n="warp_profile_dns_system"></span></label>
+            </div>
+            <p id="warp-profile-system-dns" class="mt-1 text-xs text-on-surface-variant" data-i18n="warp_profile_dns_split_hint" hidden></p>
+          </fieldset>
+          <div class="flex flex-wrap gap-x-4 gap-y-2">
+            <label class="flex items-center gap-2 text-sm">
+              <input id="warp-profile-exclude-lan" class="ui-check" type="checkbox">
+              <span data-i18n="warp_profile_exclude_lan"></span>
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <input id="warp-profile-ipv6" class="ui-check" type="checkbox" checked>IPv6
+            </label>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <label class="grid gap-1 text-sm">MTU
+              <input id="warp-profile-mtu" class="ui-field w-full" type="number" value="1280" min="1280" max="65535" step="1" required>
+            </label>
+            <label class="grid gap-1 text-sm">
+              <span data-i18n="warp_profile_keepalive"></span>
+              <input id="warp-profile-keepalive" class="ui-field w-full" type="number" value="0" min="0" max="65535" step="1" required>
+            </label>
+          </div>
+        </div>
+      </details>
+    </fieldset>
+    <p id="warp-profile-status" class="mt-3 text-sm text-on-surface-variant" role="status" hidden></p>
+    <p id="warp-profile-error" class="warp-error mt-3" role="alert" hidden></p>
+    <div class="mt-5 flex flex-wrap justify-end gap-2">
+      <button id="warp-profile-save" type="submit" class="ui-button ui-button-primary" data-i18n="warp_profile_save"></button>
+      <button id="warp-profile-reveal" type="button" class="ui-button" data-i18n="warp_profile_reveal" hidden></button>
+      <button id="warp-profile-close" type="button" class="ui-button" data-i18n="close"></button>
+    </div>
+  </form>
+</dialog>

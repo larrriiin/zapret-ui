@@ -293,6 +293,10 @@ fn is_safe_list_entry(entry: &str) -> bool {
 /// otherwise allow the filename allowlist to be sidestepped at runtime.
 fn resolve_list_path(filename: &str) -> Result<PathBuf, String> {
     ensure_safe_list_filename(filename)?;
+    resolve_core_list_path(filename)
+}
+
+fn resolve_core_list_path(filename: &str) -> Result<PathBuf, String> {
     let lists_dir = find_binaries_dir().join("lists");
     let file_path = lists_dir.join(filename);
 
@@ -2246,6 +2250,7 @@ mod backup_tests {
 /// Updates the IPSet list from the provider's upstream source.
 #[tauri::command]
 async fn update_ipset_list() -> Result<ipset::UpdateResult, String> {
+    let _operation = CoreOperationGuard::acquire()?;
     privileges::writable(&find_binaries_dir().join("lists"))?;
     update_ipset_list_inner().await
 }
@@ -2313,7 +2318,9 @@ async fn update_ipset_list_inner() -> Result<ipset::UpdateResult, String> {
                 let _ = std::fs::remove_file(&download_file);
                 return Err("Downloaded ipset list is empty".to_string());
             }
-            let result = ipset::install_if_changed(&list_file, &content);
+            let lists = provider.paths().lists_dir();
+            let result = providers::wiresock::setup::preserve_legacy_ipset(&lists, &lists)
+                .and_then(|()| ipset::install_if_changed(&list_file, &content));
             if result.as_ref().is_ok_and(|result| result.changed) {
                 *IPSET_STATUS.lock_unpoisoned() = None;
             }
@@ -4180,9 +4187,10 @@ async fn open_setup_window(
         return Ok(());
     }
     let url = format!("index.html?setup=1&repeat={repeat}&clearLists={clear_lists}");
-    tauri::WebviewWindowBuilder::new(&app, "setup", tauri::WebviewUrl::App(url.into()))
+    let (width, height) = (880.0, 740.0);
+    let setup = tauri::WebviewWindowBuilder::new(&app, "setup", tauri::WebviewUrl::App(url.into()))
         .title("Zapret — Setup")
-        .inner_size(660.0, 660.0)
+        .inner_size(width, height)
         .decorations(false)
         .resizable(false)
         .maximizable(false)
@@ -4190,6 +4198,18 @@ async fn open_setup_window(
         .visible(false)
         .build()
         .map_err(|e| e.to_string())?;
+    let monitor = app
+        .get_webview_window("main")
+        .and_then(|main| main.current_monitor().ok().flatten())
+        .or_else(|| setup.current_monitor().ok().flatten());
+    if let Some(monitor) = monitor {
+        let placement = setup.set_position(monitor.work_area().position).and_then(|()| {
+            place_window_in_work_area(&setup, &monitor, (width * monitor.scale_factor()).round() as u32, height)
+        });
+        if let Err(error) = placement {
+            eprintln!("Could not fit setup window to the monitor: {error}");
+        }
+    }
     Ok(())
 }
 
@@ -4216,6 +4236,14 @@ fn finish_setup_window(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_tunnel_installations() -> serde_json::Value {
+    serde_json::json!({
+        "warp": providers::warp::discover().is_some(),
+        "wiresock": providers::wiresock::is_installed(),
+    })
+}
+
+#[tauri::command]
 fn fit_initial_window_height(window: tauri::WebviewWindow, height: u32) -> tauri::Result<()> {
     if window.label() != "main" || window.is_visible()? || window.is_maximized()? {
         return Ok(());
@@ -4224,7 +4252,7 @@ fn fit_initial_window_height(window: tauri::WebviewWindow, height: u32) -> tauri
         let width = window.inner_size()?.width;
         let minimum = window_config(window.app_handle()).min_height.unwrap_or(1.0);
         let height = f64::from(height).max(minimum);
-        place_main_window(&window, &monitor, width, height)?;
+        place_window_in_work_area(&window, &monitor, width, height)?;
     }
     Ok(())
 }
@@ -4233,7 +4261,7 @@ fn window_config(app: &tauri::AppHandle) -> &tauri::utils::config::WindowConfig 
     &app.config().app.windows[0]
 }
 
-fn place_main_window(
+fn place_window_in_work_area(
     window: &tauri::WebviewWindow,
     monitor: &tauri::Monitor,
     width: u32,
@@ -4281,7 +4309,7 @@ fn prepare_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
         .unwrap_or(1.0)
         .min(f64::from(area.size.height) / scale);
     window.set_min_size(Some(tauri::LogicalSize::new(min_width, min_height)))?;
-    place_main_window(
+    place_window_in_work_area(
         &window,
         &monitor,
         (config.width * scale).round() as u32,
@@ -4708,6 +4736,25 @@ pub fn run() {
             providers::warp::diagnostics::check_warp_connection,
             providers::warp::diagnostics::create_warp_diagnostics,
             providers::warp::diagnostics::reveal_warp_diagnostics,
+            providers::warp::profile::save_warp_profile,
+            providers::warp::profile::reveal_warp_profile,
+            providers::wiresock::get_wiresock_status,
+            providers::wiresock::get_wiresock_installation,
+            providers::wiresock::installer::install_wiresock,
+            providers::wiresock::list_wiresock_profiles,
+            providers::wiresock::split::get_wiresock_split_rules,
+            providers::wiresock::split::global::get_wiresock_global_rules,
+            providers::wiresock::split::global::save_wiresock_global_rules,
+            providers::wiresock::split::global::set_wiresock_split_tunneling,
+            providers::wiresock::split::save_wiresock_split_profile,
+            providers::wiresock::import_wiresock_profile,
+            providers::wiresock::delete_wiresock_profile,
+            providers::wiresock::connect_wiresock,
+            providers::wiresock::reconnect_wiresock,
+            providers::wiresock::disconnect_wiresock,
+            providers::wiresock::setup::get_wiresock_setup,
+            providers::wiresock::setup::apply_wiresock_setup,
+            providers::wiresock::setup::resume_wiresock_setup,
             providers::warp::set_warp_sites,
             providers::warp::set_warp_applications,
             providers::warp::applications::choose_warp_applications,
@@ -4721,6 +4768,7 @@ pub fn run() {
             setup_window_ready,
             finish_setup_window,
             show_app_window,
+            get_tunnel_installations,
             fit_initial_window_height,
             get_strategies,
             remember_strategy_selection,

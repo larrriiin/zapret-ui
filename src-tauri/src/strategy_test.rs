@@ -439,6 +439,8 @@ pub async fn run(
         let mut arguments = provider.parse_strategy(name, game_filter)?;
         if let Some(ipset) = ipset_override.as_ref() {
             arguments = arguments.replace(&ipset.original, &ipset.temporary);
+            let user_ipset = root.join("lists").join(crate::ipset::USER_INCLUDE_FILE);
+            arguments = arguments.replace(&format!(" --ipset=\"{}\"", user_ipset.display()), "");
         }
         let mut process = match start_strategy(app, &provider.winws_executable(), &arguments) {
             Ok(process) => process,

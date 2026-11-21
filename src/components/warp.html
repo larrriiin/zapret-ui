@@ -5,10 +5,23 @@
 <article id="warp-card" class="connection-card" hidden aria-labelledby="warp-title">
   <div id="warp-card-controls" class="contents">
     <header class="provider-heading">
-      <span class="material-symbols-outlined warp-cloud" aria-hidden="true">cloud</span>
-      <div><h3 id="warp-title" class="provider-title-row"><span>CLOUDFLARE WARP</span><button id="warp-info-btn" type="button" class="ui-icon-button" aria-label="Cloudflare WARP: info"><span class="material-symbols-outlined" aria-hidden="true">info</span></button></h3><p data-i18n="warp_subtitle"></p></div>
+      <span id="warp-provider-cloud" class="material-symbols-outlined warp-cloud" aria-hidden="true">cloud</span>
+      <span id="wiresock-logo" class="material-symbols-outlined text-secondary" aria-hidden="true" hidden>shield</span>
+      <div>
+        <h3 id="warp-title" class="provider-title-row">
+          <span id="warp-provider-name">Cloudflare</span>
+          <button id="warp-info-btn" type="button" class="ui-icon-button" data-i18n="warp_info" data-i18n-attr="aria-label"><span class="material-symbols-outlined" aria-hidden="true">info</span></button>
+          <button id="wiresock-info-btn" type="button" class="ui-icon-button" data-i18n="warp_info" data-i18n-attr="aria-label" hidden><span class="material-symbols-outlined" aria-hidden="true">info</span></button>
+        </h3>
+        <p id="warp-provider-subtitle" data-i18n="warp_subtitle"></p>
+      </div>
       <span id="warp-state" class="provider-badge" role="status" aria-live="polite"></span>
     </header>
+    <div id="aux-provider-switch" class="ui-tab-group mb-5" role="group" data-i18n="wiresock_provider" data-i18n-attr="aria-label" hidden>
+      <button id="aux-provider-warp" type="button" class="ui-tab" aria-pressed="true">Cloudflare</button>
+      <button id="aux-provider-wiresock" type="button" class="ui-tab" aria-pressed="false">WireSock</button>
+    </div>
+    <div id="warp-native-panel" class="contents">
     <label id="warp-mode-title" class="provider-label" for="warp-mode-trigger" data-i18n="warp_mode"></label>
     <div id="warp-mode-dropdown" class="relative">
       <button id="warp-mode-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="warp-mode-options" aria-labelledby="warp-mode-title warp-mode-label" class="ui-select-trigger"><span id="warp-mode-label" class="truncate text-on-surface"></span><span id="warp-mode-chevron" class="material-symbols-outlined text-primary/60 text-base ml-2 transition-transform" aria-hidden="true">expand_more</span></button>
@@ -27,17 +40,101 @@
         <button id="warp-home-apps-toggle" type="button" class="ui-switch ui-switch-sm" aria-pressed="false" data-i18n="warp_home_apps" data-i18n-attr="aria-label"></button>
       </div>
     </div>
-    <button id="warp-connect" type="button" class="ui-button ui-button-connect connect-glow">
-      <span id="warp-connect-label"></span><span class="material-symbols-outlined" aria-hidden="true">power_settings_new</span>
-    </button>
-    <div class="warp-secondary-actions">
-      <button id="warp-refresh" type="button" class="ui-button ui-button-status"><span data-i18n="check_status"></span><span class="material-symbols-outlined" aria-hidden="true">query_stats</span></button>
-      <button id="warp-open-settings" type="button" class="ui-button ui-button-status"><span data-i18n="warp_tunnel_settings"></span><span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>
-    </div>
     <p id="warp-error" class="warp-error" role="status" hidden></p>
+    <div class="connection-actions">
+      <button id="warp-connect" type="button" class="ui-button ui-button-connect connect-glow">
+        <span id="warp-connect-label"></span><span class="material-symbols-outlined" aria-hidden="true">power_settings_new</span>
+      </button>
+      <div class="warp-secondary-actions">
+        <button id="warp-refresh" type="button" class="ui-button ui-button-status"><span data-i18n="check_status"></span><span class="material-symbols-outlined" aria-hidden="true">query_stats</span></button>
+        <button id="warp-open-settings" type="button" class="ui-button ui-button-status"><span data-i18n="warp_tunnel_settings"></span><span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>
+      </div>
+    </div>
+    </div>
+    <div id="wiresock-panel" class="contents" hidden>
+      <label id="wiresock-profile-title" class="provider-label" for="wiresock-profile-trigger" data-i18n="wiresock_profile_title"></label>
+      <div class="wiresock-profile-controls grid items-center gap-2">
+        <div id="wiresock-profile-dropdown" class="relative min-w-0">
+          <button id="wiresock-profile-trigger" type="button" class="ui-select-trigger" aria-haspopup="menu" aria-expanded="false" aria-controls="wiresock-profile-options-list" aria-labelledby="wiresock-profile-title wiresock-profile-label">
+            <span id="wiresock-profile-label" class="truncate text-on-surface"></span>
+            <span id="wiresock-profile-chevron" class="material-symbols-outlined text-primary/60 text-base ml-2" aria-hidden="true">expand_more</span>
+          </button>
+          <select hidden id="wiresock-profile" tabindex="-1" aria-hidden="true"></select>
+          <div id="wiresock-profile-options" class="ui-select-popup" hidden>
+            <div id="wiresock-profile-options-list" class="max-h-64 overflow-y-auto overscroll-contain py-1" role="menu" aria-labelledby="wiresock-profile-title"></div>
+          </div>
+        </div>
+        <button id="wiresock-add-profile" type="button" class="ui-icon-button justify-self-center" aria-haspopup="dialog" aria-controls="wiresock-add-profile-dialog" data-i18n="wiresock_add_profile" data-i18n-attr="aria-label"><span class="material-symbols-outlined" aria-hidden="true">add</span></button>
+        <button id="wiresock-split-open" type="button" class="ui-button ui-button-status min-w-0" data-i18n="wiresock_split_title"></button>
+        <button id="wiresock-split-toggle" type="button" role="switch" class="ui-switch" aria-labelledby="wiresock-split-open" aria-checked="false" disabled></button>
+      </div>
+      <p id="wiresock-error" class="warp-error" role="alert" hidden></p>
+      <div class="connection-actions">
+        <button id="wiresock-connect" type="button" class="ui-button ui-button-connect connect-glow">
+          <span id="wiresock-connect-label"></span><span class="material-symbols-outlined" aria-hidden="true">power_settings_new</span>
+        </button>
+        <button id="wiresock-refresh" type="button" class="ui-button ui-button-status"><span data-i18n="check_status"></span><span class="material-symbols-outlined" aria-hidden="true">query_stats</span></button>
+      </div>
+    </div>
   </div>
   <div id="warp-card-initializing" class="warp-card-initializing" role="status" hidden data-i18n="warp_initializing"></div>
 </article>
+<dialog id="wiresock-add-profile-dialog" class="ui-dialog" aria-labelledby="wiresock-add-profile-title">
+  <h2 id="wiresock-add-profile-title" class="font-headline text-lg font-bold" data-i18n="wiresock_add_profile"></h2>
+  <div class="mt-5 flex flex-wrap gap-2">
+    <button id="wiresock-create" type="button" class="ui-button ui-button-primary" data-i18n="warp_profile_open"></button>
+    <button id="wiresock-import" type="button" class="ui-button" data-i18n="wiresock_import"></button>
+  </div>
+  <form method="dialog" class="mt-5 flex justify-end"><button class="ui-button" data-i18n="close"></button></form>
+</dialog>
+<dialog id="wiresock-split-dialog" class="ui-dialog" aria-labelledby="wiresock-split-title">
+  <h2 id="wiresock-split-title" class="font-headline text-lg font-bold" data-i18n="wiresock_split_title"></h2>
+  <p id="wiresock-split-profile" class="mt-1 break-all text-sm text-on-surface-variant"></p>
+  <div class="mt-4 flex items-center justify-between gap-3">
+    <span id="wiresock-global-label" class="text-sm" data-i18n="wiresock_global_override"></span>
+    <button id="wiresock-global-toggle" type="button" class="ui-switch" aria-labelledby="wiresock-global-label" aria-pressed="false"></button>
+  </div>
+  <p id="wiresock-global-hint" class="mt-2 text-xs text-on-surface-variant" data-i18n="wiresock_global_hint" hidden></p>
+  <form id="wiresock-split-form" class="mt-5">
+    <fieldset id="wiresock-split-fields" class="space-y-4"></fieldset>
+    <p id="wiresock-split-error" class="warp-error mt-3" role="alert" hidden></p>
+    <p id="wiresock-split-progress" class="mt-3 text-sm text-on-surface-variant" role="status" hidden></p>
+    <p id="wiresock-split-copy-hint" class="mt-3 text-xs text-on-surface-variant" data-i18n="wiresock_split_copy_hint"></p>
+    <div class="mt-5 flex flex-wrap justify-end gap-2">
+      <button id="wiresock-split-close" type="button" class="ui-button" data-i18n="close" autofocus></button>
+      <button id="wiresock-split-save" type="submit" class="ui-button ui-button-primary" data-i18n="wiresock_split_save_copy"></button>
+    </div>
+  </form>
+</dialog>
+<dialog id="wiresock-setup-dialog" class="ui-dialog" aria-labelledby="wiresock-setup-title">
+  <header class="flex items-center justify-between gap-4 mb-4">
+    <h2 id="wiresock-setup-title" class="font-headline text-lg font-bold" data-i18n="wiresock_setup_title"></h2>
+    <form method="dialog"><button id="wiresock-setup-close" class="ui-icon-button" value="cancel" data-i18n="warp_close" data-i18n-attr="aria-label"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></form>
+  </header>
+  <p id="wiresock-setup-status" class="whitespace-pre-line text-sm text-tertiary"></p>
+  <p id="wiresock-setup-details" class="mt-3 text-sm text-on-surface-variant" data-i18n="wiresock_setup_confirm"></p>
+  <p id="wiresock-setup-progress" class="mt-3 text-sm text-on-surface-variant" role="status" hidden></p>
+  <p id="wiresock-setup-error" class="warp-error mt-3" role="alert" hidden></p>
+  <form method="dialog" class="mt-6 flex flex-wrap justify-end gap-2">
+    <button id="wiresock-setup-skip" class="ui-button" value="connect" autofocus data-i18n="wiresock_setup_skip"></button>
+    <button id="wiresock-setup" type="button" class="ui-button ui-button-primary" data-i18n="wiresock_setup_button"></button>
+  </form>
+</dialog>
+<dialog id="wiresock-status-dialog" class="ui-dialog" aria-labelledby="wiresock-status-title">
+  <header class="flex items-center justify-between gap-4 mb-5">
+    <div class="flex items-center gap-3 min-w-0">
+      <span class="material-symbols-outlined text-secondary text-2xl" aria-hidden="true">query_stats</span>
+      <h2 id="wiresock-status-title" class="font-headline text-lg font-bold text-on-surface" data-i18n="wiresock_status_title"></h2>
+    </div>
+    <form method="dialog">
+      <button id="wiresock-status-dismiss" class="ui-icon-button" data-i18n="close" data-i18n-attr="aria-label">
+        <span class="material-symbols-outlined text-xl" aria-hidden="true">close</span>
+      </button>
+    </form>
+  </header>
+  <div id="wiresock-status-report" class="space-y-3" aria-live="polite" aria-busy="false"></div>
+  <form method="dialog" class="mt-6 flex justify-end"><button id="wiresock-status-close" class="ui-button" data-i18n="close"></button></form>
+</dialog>
 <dialog id="warp-status-dialog" class="ui-dialog" aria-labelledby="warp-status-title">
   <header class="flex items-center justify-between gap-4 mb-5">
     <div class="flex items-center gap-3 min-w-0"><span class="material-symbols-outlined text-secondary text-2xl" aria-hidden="true">query_stats</span><h2 id="warp-status-title" class="font-headline text-lg font-bold" data-i18n="warp_status_title"></h2></div>

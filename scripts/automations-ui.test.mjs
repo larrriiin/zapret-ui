@@ -19,7 +19,7 @@ test('application rules: CRUD, failure rollback, priority, keyboard dropdowns, t
   } }] });
   let browser;
   try {
-    await server.listen(); browser = await chromium.launch({ channel: 'msedge', headless: true });
+    await server.listen(); browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge', headless: true });
     await mkdir('artifacts/automations-qa', { recursive: true });
     for (const [theme, lang, width, height] of [['zapret','ru',1100,900], ['light','en',900,750], ['graphite','ru',900,750]]) {
       const page = await browser.newPage({ viewport: { width, height }, reducedMotion: 'reduce' }); const errors = [];
@@ -122,7 +122,7 @@ test('application rules: CRUD, failure rollback, priority, keyboard dropdowns, t
       assert.equal(await page.locator('#auto-list [data-provider="warp"]').count(), 1);
       assert.equal(await page.locator('#auto-list [data-provider="zapret"]').count(), 0);
       assert.equal(await page.locator('#auto-list .warp-cloud').textContent(), 'cloud');
-      assert.ok((await page.locator('#auto-list .auto-rule-provider-value').textContent()).includes(lang === 'ru' ? 'Локальный прокси' : 'Local proxy'));
+      assert.ok((await page.locator('#auto-list .auto-rule-provider-value').textContent()).includes(lang === 'ru' ? 'Раздельное туннелирование' : 'Split tunneling'));
       assert.equal(await page.locator('#auto-list [data-rule-state]').isVisible(), false);
       const normalBorder = await page.locator('#auto-list article').first().evaluate(e => getComputedStyle(e).borderColor);
       await page.evaluate(() => { window.testActive = [window.testConfig.rules[0].id]; });
