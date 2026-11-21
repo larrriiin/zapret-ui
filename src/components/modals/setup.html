@@ -10,19 +10,40 @@
                 <button id="setup-close" class="setup-window-button setup-window-close" type="button" data-i18n="close" data-i18n-attr="aria-label" title="Close"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
             </div>
         </header>
-        <ol class="setup-steps" aria-label="Setup" data-i18n="setup_steps" data-i18n-attr="aria-label">
-            <li data-setup-step="0" data-i18n="theme_title">Appearance</li>
-            <li data-setup-step="1" data-i18n="setup_prepare">Preparation</li>
-            <li data-setup-step="2" data-i18n="setup_test">Testing</li>
-            <li data-setup-step="3" data-i18n="setup_finish">Done</li>
-        </ol>
+        <div id="setup-step-progress" class="setup-step-progress">
+            <div class="setup-step-track" aria-hidden="true"><span class="setup-step-fill"></span></div>
+            <ol class="setup-steps" aria-label="Setup" data-i18n="setup_steps" data-i18n-attr="aria-label">
+                <li data-setup-step="0">
+                    <span class="setup-step-marker" aria-hidden="true"><span class="setup-step-number">1</span><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
+                    <span class="setup-step-label" data-i18n="theme_title">Appearance</span>
+                    <span class="sr-only" data-setup-complete data-i18n="setup_step_complete" hidden></span>
+                </li>
+                <li data-setup-step="1">
+                    <span class="setup-step-marker" aria-hidden="true"><span class="setup-step-number">2</span><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
+                    <span class="setup-step-label" data-i18n="setup_prepare">Preparation</span>
+                    <span class="sr-only" data-setup-complete data-i18n="setup_step_complete" hidden></span>
+                </li>
+                <li data-setup-step="2">
+                    <span class="setup-step-marker" aria-hidden="true"><span class="setup-step-number">3</span><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
+                    <span class="setup-step-label" data-i18n="setup_test">Testing</span>
+                    <span class="sr-only" data-setup-complete data-i18n="setup_step_complete" hidden></span>
+                </li>
+                <li data-setup-step="3">
+                    <span class="setup-step-marker" aria-hidden="true"><span class="setup-step-number">4</span><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
+                    <span class="setup-step-label" data-i18n="setup_finish">Done</span>
+                    <span class="sr-only" data-setup-complete data-i18n="setup_step_complete" hidden></span>
+                </li>
+            </ol>
+        </div>
         <div id="setup-body" class="setup-body">
             <h2 id="setup-title" tabindex="-1"></h2>
             <p id="setup-description" class="setup-description"></p>
             <section data-setup-panel="0" aria-labelledby="setup-title"><div id="setup-appearance"></div></section>
             <section data-setup-panel="1" hidden aria-labelledby="setup-title">
-                <div class="setup-illustration" aria-hidden="true"><span class="material-symbols-outlined">download</span></div>
-                <p class="setup-note" data-i18n="setup_prepare_note">The app checks the core and downloads missing components</p>
+                <div class="setup-step-note ui-panel">
+                    <span class="ui-icon-tile" aria-hidden="true"><span class="material-symbols-outlined">download</span></span>
+                    <p class="setup-note" data-i18n="setup_prepare_note">The app checks the core and downloads missing components</p>
+                </div>
                 <fieldset id="setup-modules" class="setup-modules"><legend data-i18n="tg_optional_title"></legend>
                     <p class="theme-description" data-i18n="tg_optional_hint"></p>
                     <label class="module-choice"><input id="setup-telegram" type="checkbox" disabled class="ui-check"><span id="setup-telegram-installed" class="material-symbols-outlined module-installed-mark" hidden aria-hidden="true">check_circle</span><span><strong>Telegram · TG WS Proxy</strong><span id="setup-telegram-detail" class="theme-description" data-i18n="tg_checking"></span></span></label>
@@ -33,8 +54,8 @@
                 </fieldset>
             </section>
             <section data-setup-panel="2" hidden aria-labelledby="setup-title">
-                <div id="setup-test-intro">
-                    <div class="setup-illustration" aria-hidden="true"><span class="material-symbols-outlined">network_check</span></div>
+                <div id="setup-test-intro" class="setup-step-note ui-panel">
+                    <span class="ui-icon-tile" aria-hidden="true"><span class="material-symbols-outlined">network_check</span></span>
                     <p class="setup-note" data-i18n="setup_test_note">Tests may take several minutes. Zapret will stop during testing; your connection may be interrupted</p>
                 </div>
                 <div id="setup-result" class="setup-result" hidden>
@@ -51,8 +72,10 @@
                 </div>
             </section>
             <section data-setup-panel="3" hidden aria-labelledby="setup-title">
-                <div class="setup-illustration setup-success" aria-hidden="true"><span class="material-symbols-outlined">check_circle</span></div>
-                <p id="setup-summary" class="setup-note"></p>
+                <div class="setup-step-note ui-panel">
+                    <span class="ui-icon-tile setup-success" aria-hidden="true"><span class="material-symbols-outlined">check_circle</span></span>
+                    <p id="setup-summary" class="setup-note"></p>
+                </div>
             </section>
             <div id="setup-progress" class="setup-progress" hidden>
                 <p id="setup-progress-label" role="status" aria-live="polite"></p>

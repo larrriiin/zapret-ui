@@ -11,6 +11,7 @@ use tauri::Manager;
 
 pub mod installer;
 pub mod setup;
+pub(crate) mod split;
 
 pub(super) static SWITCH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 const CLI: &str = "wiresock-connect-cli.exe";
@@ -166,6 +167,7 @@ pub struct WireSockStatus {
     profile: Option<String>,
     version: Option<String>,
     error: Option<&'static str>,
+    split_tunneling: Option<bool>,
 }
 
 fn parse_status(output: &str) -> Option<WireSockStatus> {
@@ -210,8 +212,7 @@ fn parse_status(output: &str) -> Option<WireSockStatus> {
         state: Some(state),
         address: address.filter(|_| state == State::Connected),
         profile: profile.filter(|_| state != State::Disconnected),
-        error: None,
-        version: None,
+        ..Default::default()
     })
 }
 
@@ -263,7 +264,7 @@ async fn wait_for_state(path: &Path, target: State) -> Option<WireSockStatus> {
 }
 
 #[tauri::command]
-pub async fn get_wiresock_status() -> WireSockStatus {
+pub async fn get_wiresock_status(app: tauri::AppHandle) -> WireSockStatus {
     let installation = get_wiresock_installation();
     let result = match locate() {
         Some(path) => status(&path).await,
@@ -276,6 +277,8 @@ pub async fn get_wiresock_status() -> WireSockStatus {
         ..Default::default()
     });
     report.version = installation.version;
+    report.split_tunneling = split::global::split_tunneling_enabled(&app).ok();
+    split::global::describe(&app, &mut report);
     report
 }
 
@@ -350,9 +353,15 @@ async fn imported(path: &Path) -> Result<Vec<String>, &'static str> {
 
 fn is_generated(name: &str) -> bool {
     name == "WARP-WireSock"
-        || name.strip_prefix("WARP-WireSock-").is_some_and(|suffix| {
-            suffix.len() == 16 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
-        })
+        || ["WARP-WireSock-", "WireSock-Split-"]
+            .into_iter()
+            .filter_map(|prefix| name.strip_prefix(prefix))
+            .any(|suffix| suffix.len() == 16 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
+fn profile_in_source(name: &str, source: ProfileFileSource) -> bool {
+    is_generated(name)
+        && (source == ProfileFileSource::AppData || !name.starts_with("WireSock-Split-"))
 }
 
 fn created_at(path: &Path) -> Option<u64> {
@@ -421,17 +430,16 @@ fn generated_path(
     directories: impl IntoIterator<Item = (ProfileFileSource, PathBuf)>,
     profile: &str,
 ) -> Option<(ProfileFileSource, PathBuf)> {
-    if !is_generated(profile) {
-        return None;
-    }
-    let name = format!("{profile}.conf");
-    directories.into_iter().find_map(|(source, dir)| {
-        let path = dir.join(&name);
-        std::fs::symlink_metadata(&path)
-            .ok()?
-            .is_file()
-            .then_some((source, path))
-    })
+    directories
+        .into_iter()
+        .filter(|(source, _)| profile_in_source(profile, *source))
+        .find_map(|(source, dir)| {
+            let path = dir.join(format!("{profile}.conf"));
+            std::fs::symlink_metadata(&path)
+                .ok()?
+                .is_file()
+                .then_some((source, path))
+        })
 }
 
 #[derive(Serialize)]
@@ -448,6 +456,7 @@ pub async fn list_wiresock_profiles(app: tauri::AppHandle) -> Result<Vec<Profile
     let mut profiles: Vec<_> = imported(&path)
         .await?
         .into_iter()
+        .filter(|name| !split::global::is_runtime_profile(name))
         .map(|name| Profile {
             created_at: imported_date(&name),
             name,
@@ -483,7 +492,7 @@ fn merge_generated_profiles(
             let Some(name) = path
                 .file_stem()
                 .and_then(OsStr::to_str)
-                .filter(|name| is_generated(name))
+                .filter(|name| profile_in_source(name, source))
             else {
                 continue;
             };
@@ -553,6 +562,14 @@ pub async fn import_wiresock_profile(
     let Some(file) = dialog.pick_file().await else {
         return Ok(None);
     };
+    if file
+        .path()
+        .file_stem()
+        .and_then(OsStr::to_str)
+        .is_some_and(split::global::is_runtime_profile)
+    {
+        return Err("wiresock_import_failed");
+    }
     let _switch = SWITCH.lock().await;
     import_file(&path, file.path()).await.map(Some)
 }
@@ -605,22 +622,51 @@ pub async fn connect_wiresock(
     profile: String,
     generated: bool,
 ) -> Result<WireSockStatus, &'static str> {
-    if !valid_profile_name(&profile) || (generated && !is_generated(&profile)) {
+    if !valid_profile_name(&profile)
+        || split::global::is_runtime_profile(&profile)
+        || (generated && !is_generated(&profile))
+    {
         return Err("wiresock_profile_missing");
     }
     let path = locate().ok_or("wiresock_not_installed")?;
     let _switch = SWITCH.lock().await;
+    let before = status(&path).await?;
+    let split_enabled = split::global::split_tunneling_enabled(&app)?;
+    let global_rules = if split_enabled {
+        let rules = split::global::get_wiresock_global_rules(app.clone())?;
+        rules.enabled.then_some(rules)
+    } else {
+        None
+    };
+    let use_temporary_profile = !split_enabled || global_rules.is_some();
+    if before.state == Some(State::Disconnected) {
+        if use_temporary_profile {
+            split::global::cleanup(&app, &path).await?;
+        } else {
+            let _ = split::global::cleanup(&app, &path).await;
+        }
+    }
     let mut names = imported(&path).await?;
-    if generated && !names.iter().any(|name| name.eq_ignore_ascii_case(&profile)) {
+    let mut selected = names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(&profile))
+        .map(|index| names.swap_remove(index));
+    if generated && selected.is_none() {
         let (_, file) = generated_path(generated_directories(&app), &profile)
             .ok_or("wiresock_profile_missing")?;
-        names.push(import_file(&path, &file).await?);
+        selected = Some(if use_temporary_profile {
+            profile.clone()
+        } else {
+            import_file(&path, &file).await?
+        });
     }
-    let profile = names
-        .into_iter()
-        .find(|name| name.eq_ignore_ascii_case(&profile))
-        .ok_or("wiresock_profile_missing")?;
-    status(&path).await?;
+    let mut profile = selected.ok_or("wiresock_profile_missing")?;
+    if use_temporary_profile {
+        if before.state != Some(State::Disconnected) {
+            return Err("wiresock_global_error");
+        }
+        profile = split::global::profile_for_connection(&app, &path, &profile, global_rules).await?;
+    }
     warp::stop_for_wiresock().await?;
     cli(
         &path,
@@ -628,9 +674,11 @@ pub async fn connect_wiresock(
         30,
     )
     .await?;
-    wait_for_state(&path, State::Connected)
+    let mut report = wait_for_state(&path, State::Connected)
         .await
-        .ok_or("wiresock_connect_failed")
+        .ok_or("wiresock_connect_failed")?;
+    split::global::describe(&app, &mut report);
+    Ok(report)
 }
 
 async fn disconnect(path: &Path) -> Result<WireSockStatus, &'static str> {
@@ -668,10 +716,12 @@ fn reports_disconnected(output: &str) -> bool {
 }
 
 #[tauri::command]
-pub async fn disconnect_wiresock() -> Result<WireSockStatus, &'static str> {
+pub async fn disconnect_wiresock(app: tauri::AppHandle) -> Result<WireSockStatus, &'static str> {
     let path = locate().ok_or("wiresock_not_installed")?;
     let _switch = SWITCH.lock().await;
-    disconnect(&path).await
+    let report = disconnect(&path).await?;
+    let _ = split::global::cleanup(&app, &path).await;
+    Ok(report)
 }
 
 #[cfg(test)]
@@ -746,10 +796,14 @@ mod tests {
         let downloads = tempfile::tempdir().unwrap();
         let shared = "WARP-WireSock-0123456789ABCDEF";
         let old = "WARP-WireSock";
+        let split = "WireSock-Split-0123456789ABCDEF";
+        let external_split = "WireSock-Split-ABCDEF0123456789";
         for file in [
             managed.path().join(format!("{shared}.conf")),
+            managed.path().join(format!("{split}.conf")),
             downloads.path().join(format!("{shared}.conf")),
             downloads.path().join(format!("{old}.conf")),
+            downloads.path().join(format!("{external_split}.conf")),
             downloads.path().join("user.conf"),
         ] {
             std::fs::write(file, []).unwrap();
@@ -765,9 +819,10 @@ mod tests {
         };
         let mut profiles = Vec::new();
         merge_generated_profiles(&mut profiles, directories());
-        assert_eq!(profiles.len(), 2);
+        assert_eq!(profiles.len(), 3);
         for (name, source) in [
             (shared, ProfileFileSource::AppData),
+            (split, ProfileFileSource::AppData),
             (old, ProfileFileSource::LegacyDownloads),
         ] {
             let listed = profiles
@@ -777,6 +832,7 @@ mod tests {
             assert_eq!(listed.file_source, Some(source));
             assert_eq!(generated_path(directories(), name).unwrap().0, source);
         }
+        assert!(generated_path(directories(), external_split).is_none());
         assert!(generated_path(directories(), "user").is_none());
     }
 }

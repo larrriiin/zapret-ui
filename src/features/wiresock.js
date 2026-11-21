@@ -7,6 +7,7 @@ import { getStrategyValue } from './strategies.js';
 import { createWarpDropdown } from './warp-mode.js';
 import { makeStatusMessage, makeStatusRow, makeStatusSummary } from './status-check.js';
 import { setWireSockSummary } from './connection-summary.js';
+import { initWireSockRules } from './wiresock-rules.js';
 
 const PROVIDER_KEY = 'zapret.tunnelProvider';
 const LAST_PROFILE_KEY = 'zapret.wiresock.lastConnected';
@@ -38,7 +39,125 @@ function renderMessage(id, key, params) {
   element.textContent = key ? t(key, params ?? {}) : '';
 }
 
-export function initWireSock(renderHome, openProfile) {
+function initSplitEditor(trigger, onSaved, ruleOptions) {
+  const dialog = $('wiresock-split-dialog');
+  const form = $('wiresock-split-form');
+  const fields = $('wiresock-split-fields');
+  const save = $('wiresock-split-save');
+  const close = $('wiresock-split-close');
+  const toggle = $('wiresock-global-toggle');
+  let profile = '';
+  let global = null;
+  let enabled = false;
+  let globalDraft;
+  let profileDraft;
+  let profileError;
+  let profileInitial;
+  let saving = false;
+  const rules = initWireSockRules(fields, ruleOptions, updateControls);
+
+  function updateControls() {
+    const globalChange = global && enabled !== global.enabled;
+    const globalSave = enabled || globalChange;
+    const current = rules.value();
+    fields.hidden = !global || (!enabled && (!profileDraft || globalChange));
+    fields.disabled = fields.hidden || saving;
+    rules.setDisabled(fields.disabled);
+    close.disabled = saving;
+    toggle.disabled = !global || saving;
+    toggle.dataset.enabled = String(enabled);
+    toggle.setAttribute('aria-pressed', String(enabled));
+    $('wiresock-global-hint').hidden = !globalSave;
+    $('wiresock-split-copy-hint').hidden = Boolean(globalSave) || !profileDraft;
+    $('wiresock-split-profile').hidden = enabled || !profile;
+    const label = globalSave ? 'wiresock_global_save' : 'wiresock_split_save_copy';
+    save.dataset.i18n = label;
+    save.textContent = t(label);
+    save.disabled = saving || !global || (globalSave
+      ? !globalChange && JSON.stringify(current) === JSON.stringify({ applications: global.applications, sites: global.sites })
+      : !profileDraft || (!current.sites.length && JSON.stringify(current) === profileInitial));
+  }
+
+  toggle.addEventListener('click', () => {
+    const draft = rules.value();
+    if (enabled) globalDraft = draft;
+    else if (profileDraft) profileDraft = { ...draft, sites: profileDraft.sites === null ? null : draft.sites };
+    enabled = !enabled;
+    rules.reset(enabled ? globalDraft : profileDraft || {});
+    renderMessage('wiresock-split-error', !enabled && !global.enabled ? profileError : '');
+    updateControls();
+  });
+  close.addEventListener('click', () => dialog.close());
+  dialog.addEventListener('cancel', event => { if (saving) event.preventDefault(); });
+  dialog.addEventListener('close', () => trigger.focus());
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (save.disabled) return;
+    const override = enabled || enabled !== global.enabled;
+    const draft = enabled || !override ? rules.value() : globalDraft;
+    saving = true;
+    updateControls();
+    renderMessage('wiresock-split-error', '');
+    renderMessage('wiresock-split-progress', 'wiresock_split_saving');
+    try {
+      if (override) {
+        await invoke('save_wiresock_global_rules', { rules: { ...draft, enabled } });
+      } else {
+        const name = await invoke('save_wiresock_split_profile', { profile, ...draft });
+        await onSaved(name);
+      }
+      dialog.close();
+    } catch (reason) {
+      renderMessage('wiresock-split-error', errorKey(reason, override ? 'wiresock_global_error' : 'wiresock_split_write_error'));
+    } finally {
+      saving = false;
+      renderMessage('wiresock-split-progress', '');
+      updateControls();
+    }
+  });
+
+  let requestId = 0;
+  return async name => {
+    profile = name;
+    const request = ++requestId;
+    global = null;
+    enabled = false;
+    profileDraft = null;
+    profileError = '';
+    rules.reset();
+    $('wiresock-split-profile').textContent = name;
+    renderMessage('wiresock-split-error', '');
+    renderMessage('wiresock-split-progress', 'wiresock_split_loading');
+    updateControls();
+    dialog.showModal();
+    try {
+      const [preferences, result] = await Promise.allSettled([
+        invoke('get_wiresock_global_rules'),
+        name ? invoke('get_wiresock_split_rules', { profile: name }) : Promise.resolve(null),
+      ]);
+      if (!dialog.open || request !== requestId) return;
+      if (preferences.status === 'rejected') throw preferences.reason;
+      global = preferences.value;
+      enabled = global.enabled;
+      globalDraft = { applications: global.applications, sites: global.sites };
+      if (result.status === 'fulfilled') profileDraft = result.value;
+      else profileError = errorKey(result.reason, 'wiresock_split_read_error');
+      rules.reset(profileDraft || {});
+      profileInitial = JSON.stringify(rules.value());
+      if (enabled) rules.reset(globalDraft);
+      else renderMessage('wiresock-split-error', profileError);
+    } catch (reason) {
+      if (dialog.open && request === requestId) renderMessage('wiresock-split-error', errorKey(reason, 'wiresock_split_read_error'));
+    } finally {
+      if (dialog.open && request === requestId) {
+        renderMessage('wiresock-split-progress', '');
+        updateControls();
+      }
+    }
+  };
+}
+
+export function initWireSock(renderHome, openProfile, ruleOptions) {
   const dropdown = createWarpDropdown('wiresock-profile', {
     placeholder: 'wiresock_profile_empty',
     itemAction: { icon: 'delete', label: name => t('wiresock_delete_named', { name }), run: deleteProfile },
@@ -49,6 +168,11 @@ export function initWireSock(renderHome, openProfile) {
   const removeDialog = $('wiresock-remove-dialog');
   document.body.append(removeDialog);
   const profileSelect = $('wiresock-profile');
+  const addProfile = $('wiresock-add-profile');
+  const addDialog = $('wiresock-add-profile-dialog');
+  const splitButton = $('wiresock-split-open');
+  const splitToggle = $('wiresock-split-toggle');
+  const openSplitEditor = initSplitEditor(splitButton, selectSavedProfile, ruleOptions);
   let preferred = stored(PROVIDER_KEY);
   let lastConnected = stored(LAST_PROFILE_KEY);
   let current = 'warp';
@@ -66,6 +190,8 @@ export function initWireSock(renderHome, openProfile) {
   let loadingProfiles = null;
   let setupSaving = false;
   let setupRequest;
+  let splitTunneling = null;
+  let splitBeforeChange = null;
 
   const selectedProfile = () => profiles.find(profile => profile.name === selected);
   const tunnelActive = () => status?.state === 'connected' || status?.state === 'connecting';
@@ -157,8 +283,13 @@ export function initWireSock(renderHome, openProfile) {
       profileSelect.replaceChildren(...names.map(name => new Option(name, name)));
     }
     profileSelect.value = selected;
-    $('wiresock-create').disabled = locked;
-    $('wiresock-import').disabled = locked;
+    addProfile.disabled = locked;
+    splitButton.disabled = locked;
+    splitToggle.disabled = locked || splitTunneling === null;
+    splitToggle.dataset.enabled = String(splitTunneling === true);
+    splitToggle.setAttribute('aria-checked', String(splitTunneling === true));
+    renderMessage('wiresock-split-toggle-hint', canStop && splitBeforeChange !== null && splitBeforeChange !== splitTunneling
+      ? 'wiresock_split_reconnect_hint' : splitTunneling === false ? 'wiresock_split_off_hint' : '');
     $('wiresock-refresh').disabled = locked;
     renderMessage('wiresock-error', error || status.error || profileError);
   }
@@ -169,6 +300,8 @@ export function initWireSock(renderHome, openProfile) {
       try {
         status = await invoke('get_wiresock_status') || null;
         version = status?.version ?? null;
+        splitTunneling = status?.split_tunneling ?? null;
+        if (status?.state === 'disconnected' || !status?.installed) splitBeforeChange = null;
       }
       catch (reason) { if (status?.installed) status = { installed: true, error: errorKey(reason) }; }
       if (!status?.installed) {
@@ -217,7 +350,7 @@ export function initWireSock(renderHome, openProfile) {
     let settings;
     try {
       settings = await invoke('get_wiresock_setup');
-      if (settings && !(settings.domains || settings.ipset || settings.hosts || settings.ipset_mode === 'none' || settings.restart_pending)) return 'connect';
+      if (settings && !(settings.domains || settings.ipset || settings.hosts || settings.ipset_mode !== 'loaded' || settings.restart_pending)) return 'connect';
     } catch { /* The user can continue after a failed preflight. */ }
     setupRequest = request;
     renderSetup(settings);
@@ -231,6 +364,7 @@ export function initWireSock(renderHome, openProfile) {
 
   async function acceptConnection(report, request) {
     status = report;
+    splitBeforeChange = null;
     selected = request.profile;
     lastConnected = request.profile;
     store(LAST_PROFILE_KEY, lastConnected);
@@ -277,14 +411,36 @@ export function initWireSock(renderHome, openProfile) {
     });
   }
   profileSelect.addEventListener('change', () => { selected = profileSelect.value; renderHome(); });
-  $('wiresock-create').addEventListener('click', () => openProfile($('wiresock-create'), file => {
-    selected = file.replace(/\.conf$/i, '');
-    void loadProfiles();
-  }));
-  $('wiresock-import').addEventListener('click', () => action('import', async () => {
-    const name = await invoke('import_wiresock_profile');
-    if (name) { selected = name; await loadProfiles(); }
-  }, 'wiresock_import_failed'));
+  async function selectSavedProfile(name) {
+    await loadingProfiles;
+    selected = name;
+    await loadProfiles();
+  }
+  addProfile.addEventListener('click', () => { dropdown.close(); addDialog.showModal(); });
+  addDialog.addEventListener('close', () => { if (!$('warp-profile-dialog').open) addProfile.focus(); });
+  $('wiresock-create').addEventListener('click', () => {
+    addDialog.close();
+    openProfile(addProfile, file => { void selectSavedProfile(file.replace(/\.conf$/i, '')); });
+  });
+  splitButton.addEventListener('click', () => {
+    void openSplitEditor(selectedProfile()?.name || '');
+  });
+  splitToggle.addEventListener('click', () => action('split-toggle', async () => {
+    await loadingStatus;
+    if (splitTunneling === null) return;
+    const enabled = !splitTunneling;
+    await invoke('set_wiresock_split_tunneling', { enabled });
+    if (tunnelActive()) splitBeforeChange ??= splitTunneling;
+    splitTunneling = enabled;
+  }, 'wiresock_split_preference_error'));
+  $('wiresock-import').addEventListener('click', async () => {
+    addDialog.close();
+    await action('import', async () => {
+      const name = await invoke('import_wiresock_profile');
+      if (name) await selectSavedProfile(name);
+    }, 'wiresock_import_failed');
+    addProfile.focus();
+  });
   function deleteProfile(name) {
     void action('delete', async () => {
       const profile = profiles.find(item => item.name === name);
@@ -303,7 +459,10 @@ export function initWireSock(renderHome, openProfile) {
   }
   $('wiresock-connect').addEventListener('click', () => {
     if (tunnelActive()) {
-      void action('disconnecting', async () => { status = await invoke('disconnect_wiresock'); }, 'wiresock_disconnect_failed');
+      void action('disconnecting', async () => {
+        status = await invoke('disconnect_wiresock');
+        splitBeforeChange = null;
+      }, 'wiresock_disconnect_failed');
       return;
     }
     const profile = selectedProfile();

@@ -12,7 +12,6 @@ use tauri::Manager;
 const DOMAINS: &str = "wiresock.net\ncdn.paddle.com\ncdn.jsdelivr.net\ncdn.skypack.dev\ngenerator-config-warp.vercel.app\nwarp5.llimonix.pw\nmtrcs.llimonix.dev\nupload.wikimedia.org\nllimonix.pw\nworkers.dev\nvercel.app";
 const ADDRESSES: &str = "95.179.146.125/32\n15.197.167.90/32\n3.33.186.135/32\n104.16.179.112/32\n104.16.180.112/32\n8.6.112.5/32\n8.47.69.5/32\n216.198.79.131/32\n64.29.17.131/32\n187.52.45.33/32\n188.114.96.1/32\n188.114.97.1/32\n185.15.59.240/32\n185.199.111.153/32\n185.199.108.153/32\n185.199.109.153/32\n185.199.110.153/32";
 const HOSTS: &str = "95.179.146.125 wiresock.net\n187.52.45.33 warp6.llimonix.pw\n64.29.17.3 generator-config-warp.vercel.app\n216.198.79.131 generator-config-warp.vercel.app";
-const IPSET_DISABLED: &str = "203.0.113.113/32";
 const READ_ERROR: &str = "wiresock_setup_read";
 const WRITE_ERROR: &str = "wiresock_setup_write";
 const RESTART_ERROR: &str = "wiresock_zapret_restart_failed";
@@ -44,6 +43,7 @@ impl SetupRequest {
 struct Files {
     domains: PathBuf,
     ipset: PathBuf,
+    upstream_ipset: PathBuf,
     hosts: PathBuf,
 }
 
@@ -52,7 +52,10 @@ impl Files {
         let system = std::env::var_os("SystemRoot").ok_or(READ_ERROR)?;
         Ok(Self {
             domains: crate::resolve_list_path("list-general-user.txt").map_err(|_| READ_ERROR)?,
-            ipset: crate::resolve_core_list_path("ipset-all.txt").map_err(|_| READ_ERROR)?,
+            ipset: crate::resolve_core_list_path(crate::ipset::USER_INCLUDE_FILE)
+                .map_err(|_| READ_ERROR)?,
+            upstream_ipset: crate::resolve_core_list_path("ipset-all.txt")
+                .map_err(|_| READ_ERROR)?,
             hosts: PathBuf::from(system).join("System32/drivers/etc/hosts"),
         })
     }
@@ -110,13 +113,14 @@ fn missing(text: &str, expected: &str, addresses: bool) -> Vec<String> {
 fn inspect(files: &Files) -> Result<(String, String, Setup), String> {
     let domains = read_list(&files.domains)?;
     let ipset = read_list(&files.ipset)?;
+    let upstream_ipset = read_list(&files.upstream_ipset)?;
     let hosts = std::fs::read(&files.hosts).map_err(|_| READ_ERROR)?;
     let (_, hosts) = crate::hosts::additions(&hosts, HOSTS).map_err(|_| READ_ERROR)?;
     let setup = Setup {
         domains: missing(&domains, DOMAINS, false).len(),
         ipset: missing(&ipset, ADDRESSES, true).len(),
         hosts,
-        ipset_mode: crate::ipset_mode(ipset.trim_start_matches('\u{feff}')),
+        ipset_mode: crate::ipset_mode(upstream_ipset.trim_start_matches('\u{feff}')),
         restart_pending: PENDING_RESTART
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -152,6 +156,21 @@ fn stage(path: &Path, text: &str) -> Result<tempfile::NamedTempFile, String> {
         .and_then(|_| temp.as_file().sync_all())
         .map_err(|_| WRITE_ERROR)?;
     Ok(temp)
+}
+
+pub(crate) fn preserve_legacy_ipset(source: &Path, destination: &Path) -> Result<(), String> {
+    let previous = read_list(&source.join("ipset-all.txt"))?;
+    if missing(&previous, ADDRESSES, true).is_empty() {
+        let path = destination.join(crate::ipset::USER_INCLUDE_FILE);
+        let current = read_list(&path)?;
+        let entries = missing(&current, ADDRESSES, true);
+        if !entries.is_empty() {
+            stage(&path, &with_additions(current, entries))?
+                .persist(&path)
+                .map_err(|_| WRITE_ERROR)?;
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -216,18 +235,8 @@ async fn apply_restart_connect(
         } else {
             None
         };
-        let ipset = if setup.ipset != 0 || setup.ipset_mode == "none" {
+        let ipset = if setup.ipset != 0 {
             let added = missing(&ipset, ADDRESSES, true);
-            let ipset = if setup.ipset_mode == "none" {
-                ipset
-                    .trim_start_matches('\u{feff}')
-                    .lines()
-                    .filter(|line| line.trim() != IPSET_DISABLED)
-                    .map(|line| format!("{line}\r\n"))
-                    .collect()
-            } else {
-                ipset
-            };
             Some(stage(&files.ipset, &with_additions(ipset, added))?)
         } else {
             None
@@ -245,15 +254,15 @@ async fn apply_restart_connect(
         }
         if let Some(ipset) = ipset {
             ipset.persist(&files.ipset).map_err(|_| WRITE_ERROR)?;
-            *crate::IPSET_STATUS
-                .lock()
-                .unwrap_or_else(|error| error.into_inner()) = None;
+        }
+        if setup.ipset_mode != "loaded" {
+            crate::set_ipset_filter("loaded".into()).map_err(|_| WRITE_ERROR)?;
         }
         let (_, _, applied) = inspect(&files)?;
         if applied.domains != 0
             || applied.ipset != 0
             || applied.hosts != 0
-            || applied.ipset_mode == "none"
+            || applied.ipset_mode != "loaded"
         {
             return Err(WRITE_ERROR.into());
         }
@@ -338,5 +347,23 @@ mod tests {
             with_additions("# keep".into(), vec!["example.com".into()]),
             "# keep\r\nexample.com\r\n"
         );
+    }
+
+    #[test]
+    fn copies_the_legacy_wiresock_entries_before_an_upstream_refresh() {
+        let lists = tempfile::tempdir().unwrap();
+        let upstream = lists.path().join("ipset-all.txt");
+        let user = lists.path().join(crate::ipset::USER_INCLUDE_FILE);
+        let content = format!("198.51.100.0/24\n{ADDRESSES}\n");
+        std::fs::write(&upstream, &content).unwrap();
+        std::fs::write(&user, "192.0.2.0/24\n95.179.146.125\n").unwrap();
+        preserve_legacy_ipset(lists.path(), lists.path()).unwrap();
+        assert_eq!(std::fs::read_to_string(&upstream).unwrap(), content);
+        crate::ipset::install_if_changed(&upstream, "198.51.100.0/24\n").unwrap();
+        let saved = std::fs::read_to_string(&user).unwrap();
+        assert!(missing(&saved, ADDRESSES, true).is_empty());
+        assert!(saved.contains("192.0.2.0/24"));
+        assert!(!saved.contains("198.51.100.0/24"));
+        assert_eq!(saved.matches("95.179.146.125").count(), 1);
     }
 }

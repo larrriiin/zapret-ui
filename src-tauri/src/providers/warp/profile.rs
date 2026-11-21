@@ -1,3 +1,4 @@
+use super::super::wiresock::split::{sites::SiteRules, SplitApplications};
 use aws_lc_rs::{
     agreement::{PrivateKey, X25519},
     encoding::{AsBigEndian, Curve25519SeedBin},
@@ -9,7 +10,7 @@ use serde_json::json;
 use std::{
     io::Write,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::Duration,
 };
 use tauri::Manager;
@@ -25,6 +26,26 @@ pub(crate) fn profile_directory(app: &tauri::AppHandle) -> tauri::Result<PathBuf
     app.path()
         .app_local_data_dir()
         .map(|dir| dir.join("profiles").join("wiresock"))
+}
+
+pub(in crate::providers) fn prepare_profile_file(
+    directory: &Path,
+) -> std::io::Result<tempfile::NamedTempFile> {
+    std::fs::create_dir_all(directory)?;
+    tempfile::Builder::new()
+        .prefix(".profile-")
+        .tempfile_in(directory)
+}
+
+pub(in crate::providers) fn write_profile(
+    mut output: tempfile::NamedTempFile,
+    path: &Path,
+    profile: &str,
+) -> std::io::Result<()> {
+    output.write_all(profile.as_bytes())?;
+    output.as_file().sync_all()?;
+    output.persist_noclobber(path)?;
+    Ok(())
 }
 
 // Consumer WARP device registration is separate from the official desktop client.
@@ -89,6 +110,10 @@ pub struct ProfileOptions {
     masking_domain: Option<String>,
     #[serde(default)]
     services: Option<Vec<Service>>,
+    #[serde(default)]
+    applications: SplitApplications,
+    #[serde(default)]
+    sites: Vec<String>,
     dns: DnsPreset,
     exclude_lan: bool,
     ipv6: bool,
@@ -123,7 +148,7 @@ impl DnsPreset {
 #[tauri::command]
 pub async fn save_warp_profile(
     app: tauri::AppHandle,
-    options: ProfileOptions,
+    mut options: ProfileOptions,
     accepted_terms: bool,
 ) -> Result<String, &'static str> {
     if !accepted_terms {
@@ -146,17 +171,14 @@ pub async fn save_warp_profile(
     if options.services.as_ref().is_some_and(Vec::is_empty) {
         return Err("warp_profile_services_required");
     }
+    options.applications.normalize()?;
     if options.mtu < if options.ipv6 { 1280 } else { 576 } {
         return Err("warp_profile_invalid_mtu");
     }
     let directory = profile_directory(&app).map_err(|_| "warp_profile_write_error")?;
-    std::fs::create_dir_all(&directory).map_err(|_| "warp_profile_write_error")?;
+    let output = prepare_profile_file(&directory).map_err(|_| "warp_profile_write_error")?;
     let file_name = format!("WARP-WireSock-{:016X}.conf", rand::random::<u64>());
     let path = directory.join(&file_name);
-    let mut output = tempfile::Builder::new()
-        .prefix(".warp-")
-        .tempfile_in(&directory)
-        .map_err(|_| "warp_profile_write_error")?;
 
     let client = reqwest::Client::builder()
         .https_only(true)
@@ -168,6 +190,10 @@ pub async fn save_warp_profile(
         Some(services) => Some(routes::fetch(&client, services.clone()).await?),
         None => None,
     };
+    let sites = SiteRules::resolve(&options.sites).await?;
+    if sites.is_empty() {
+        options.sites.clear();
+    }
 
     // Rotating the connection address does not require a new device registration.
     if state.tunnel.is_none() {
@@ -182,7 +208,7 @@ pub async fn save_warp_profile(
         .tunnel
         .as_ref()
         .ok_or("warp_profile_registration_error")?;
-    let profile = build_profile(
+    let mut profile = build_profile(
         key,
         config,
         &options,
@@ -190,13 +216,8 @@ pub async fn save_warp_profile(
         masking_domain,
         service_routes.as_deref(),
     )?;
-    output
-        .write_all(profile.as_bytes())
-        .and_then(|()| output.as_file().sync_all())
-        .map_err(|_| "warp_profile_write_error")?;
-    output
-        .persist_noclobber(&path)
-        .map_err(|_| "warp_profile_write_error")?;
+    sites.apply(&mut profile)?;
+    write_profile(output, &path, &profile).map_err(|_| "warp_profile_write_error")?;
     if random.is_some() {
         state.last_endpoint = random;
     }
@@ -366,7 +387,7 @@ fn build_profile(
         address.push_str(&format!(", {ipv6}/128"));
     }
     let allowed_ips = routes::format_allowed_ips(service_routes, has_ipv6)?;
-    let dns = if service_routes.is_none() {
+    let dns = if service_routes.is_none() && options.sites.is_empty() {
         options
             .dns
             .servers(has_ipv6)
@@ -393,9 +414,10 @@ fn build_profile(
     let private_key: Curve25519SeedBin<'static> =
         key.as_be_bytes().map_err(|_| "warp_profile_key_error")?;
     let private_key = Zeroizing::new(STANDARD.encode(private_key.as_ref()));
+    let applications = options.applications.directives("\n");
     Ok(Zeroizing::new(format!(
         "[Interface]\nPrivateKey = {}\nAddress = {address}\n{dns}MTU = {}\n{masking}\n\
-         [Peer]\nPublicKey = {public_key}\nAllowedIPs = {allowed_ips}\nEndpoint = {endpoint}\n{lan_exclusions}{keepalive}",
+         [Peer]\nPublicKey = {public_key}\nAllowedIPs = {allowed_ips}\nEndpoint = {endpoint}\n{applications}{lan_exclusions}{keepalive}",
         private_key.as_str(), options.mtu,
     )))
 }
@@ -504,6 +526,11 @@ mod tests {
         assert!(!profile.contains("PersistentKeepalive = "));
         assert!(!profile.contains("test-token"));
 
+        options.applications = serde_json::from_value(json!({
+            "allowed": ["Discord.exe", "firefox.exe"], "disallowed": ["steam.exe"]
+        }))
+        .unwrap();
+        options.applications.normalize().unwrap();
         let routes = [
             "91.108.56.0/22".parse().unwrap(),
             "2a0a:f280::/32".parse().unwrap(),
@@ -519,6 +546,8 @@ mod tests {
         .unwrap();
         assert!(profile.contains("Jc = 0\nId = www.example.com\nIp = QUIC\nIb = cURL\n"));
         assert!(profile.contains("AllowedIPs = 91.108.56.0/22, 2a0a:f280::/32\n"));
+        assert!(profile.contains("#@ws:AllowedApps = Discord.exe, firefox.exe\n"));
+        assert!(profile.contains("#@ws:DisallowedApps = steam.exe\n"));
         assert!(!profile.contains("DNS = "));
 
         options.ipv6 = false;

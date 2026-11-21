@@ -117,7 +117,7 @@
     <!-- 3. МОДУЛИ -->
     <section class="space-y-4" aria-labelledby="settings-modules-title">
         <h3 id="settings-modules-title" class="font-headline text-[11px] font-bold uppercase tracking-[0.2em] text-primary/70" data-i18n="settings_modules">Modules</h3>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 md:auto-rows-fr gap-4">
             <!-- Cloudflare WARP -->
             <section id="warp-settings-panel" class="ui-panel p-6 flex flex-col justify-between min-h-[180px]" aria-labelledby="warp-settings-title">
                 <div>
@@ -138,6 +138,25 @@
                         <button id="warp-settings-remove" type="button" class="ui-button" data-i18n="warp_remove_module" hidden>Remove module</button>
                     </div>
                     <p id="warp-install-result" class="module-message" role="status"></p>
+                </div>
+            </section>
+
+            <section class="ui-panel p-6 flex flex-col justify-between min-h-[180px]" aria-labelledby="wiresock-settings-title">
+                <div class="flex items-start gap-4">
+                    <span class="material-symbols-outlined text-secondary text-3xl shrink-0" aria-hidden="true">shield</span>
+                    <div class="min-w-0 flex-1">
+                        <h4 id="wiresock-settings-title" class="text-sm font-headline font-bold text-on-surface">WireSock</h4>
+                        <p class="text-xs text-on-surface-variant mt-0.5" data-i18n="wiresock_subtitle"></p>
+                        <p id="wiresock-settings-status" class="mt-2 text-xs text-on-surface-variant" role="status" data-i18n="warp_detecting"></p>
+                    </div>
+                </div>
+                <div class="mt-auto pt-6">
+                    <div class="module-actions flex flex-wrap items-center gap-2">
+                        <button id="wiresock-install" type="button" class="ui-button" data-i18n="wiresock_install" disabled></button>
+                        <button id="wiresock-settings-refresh" type="button" class="ui-button" data-i18n="check_status" hidden></button>
+                        <button id="wiresock-settings-remove" type="button" class="ui-button" data-i18n="warp_remove_module" hidden></button>
+                    </div>
+                    <p id="wiresock-install-result" class="module-message whitespace-pre-line break-words" role="status"></p>
                 </div>
             </section>
 
@@ -164,24 +183,7 @@
                 </div>
             </section>
 
-            <section class="ui-panel p-6 flex flex-col justify-between min-h-[180px] md:col-span-2" aria-labelledby="wiresock-settings-title">
-                <div class="flex items-start gap-4">
-                    <span class="material-symbols-outlined text-secondary text-3xl shrink-0" aria-hidden="true">shield</span>
-                    <div class="min-w-0 flex-1">
-                        <h4 id="wiresock-settings-title" class="text-sm font-headline font-bold text-on-surface">WireSock</h4>
-                        <p class="text-xs text-on-surface-variant mt-0.5" data-i18n="wiresock_subtitle"></p>
-                        <p id="wiresock-settings-status" class="mt-2 text-xs text-on-surface-variant" role="status" data-i18n="warp_detecting"></p>
-                    </div>
-                </div>
-                <div class="mt-auto pt-6">
-                    <div class="module-actions flex flex-wrap items-center gap-2">
-                        <button id="wiresock-install" type="button" class="ui-button" data-i18n="wiresock_install" disabled></button>
-                        <button id="wiresock-settings-refresh" type="button" class="ui-button" data-i18n="check_status" hidden></button>
-                        <button id="wiresock-settings-remove" type="button" class="ui-button" data-i18n="warp_remove_module" hidden></button>
-                    </div>
-                    <p id="wiresock-install-result" class="module-message whitespace-pre-line break-words" role="status"></p>
-                </div>
-            </section>
+            <p class="ui-panel min-h-24 grid place-items-center border-dashed bg-transparent backdrop-blur-none p-6 text-center text-sm text-on-surface-variant" data-i18n="settings_modules_placeholder"></p>
         </div>
     </section>
 

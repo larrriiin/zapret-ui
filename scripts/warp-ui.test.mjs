@@ -53,12 +53,15 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
             window.profileRevealed = true;
             return;
           }
+          if (command === 'choose_warp_applications') return ['C:\\Games\\Steam\\steam.exe'];
           if (command !== 'save_warp_profile') return original(command, args);
           const defaults = { endpoint: '', randomEndpoint: true, maskingDomain: '',
             services: null, dns: 'cloudflare', excludeLan: false, ipv6: true, mtu: 1280, keepalive: 0 };
           const expected = profiles === 0 ? defaults : {
             ...defaults, endpoint: 'vpn.example:2408', randomEndpoint: false, maskingDomain: 'example.com',
             services: ['youtube', 'telegram'], excludeLan: true, ipv6: false, mtu: 1200, keepalive: 25,
+            applications: { allowed: ['C:\\Games\\League of Legends\\LeagueClientUx.exe'], disallowed: ['C:\\Games\\Steam\\steam.exe'] },
+            sites: ['telegram.org'],
           };
           if (!args.acceptedTerms || JSON.stringify(args.options) !== JSON.stringify(expected) || 'saveTitle' in args) {
             throw 'warp_profile_routes_error';
@@ -91,6 +94,16 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
       assert.equal(await page.locator('#warp-profile-dns input[value="google"]').isDisabled(), true);
       await page.locator('#warp-profile-services input[value="youtube"]').check();
       await page.locator('#warp-profile-services input[value="telegram"]').check();
+      const group = (dialog, id) => dialog.locator(`[data-rules-group="${id}"]`);
+      await group(profileDialog, 'allowed').locator('[data-rules-copy]').click();
+      await group(profileDialog, 'allowed').locator('.warp-rule-name').filter({ hasText: 'LeagueClientUx.exe' }).waitFor();
+      await group(profileDialog, 'disallowed').locator('[data-rules-add]').click();
+      await group(profileDialog, 'disallowed').locator('.warp-rule-name').filter({ hasText: 'steam.exe' }).waitFor();
+      await group(profileDialog, 'sites').locator('[data-rules-add]').click();
+      await page.locator('#warp-sites-input').fill('https://telegram.org/path');
+      await page.locator('#warp-sites-dialog-add').click();
+      await group(profileDialog, 'sites').locator('.warp-rule-name').filter({ hasText: 'telegram.org' }).waitFor();
+      assert.equal(await page.locator('#warp-profile-apps-ip-hint').isVisible(), true);
       await page.locator('#warp-profile-exclude-lan').check();
       await page.locator('#warp-profile-ipv6').uncheck();
       await page.locator('#warp-profile-mtu').fill('1200');
@@ -199,18 +212,21 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
       assert.equal(await page.locator('#aux-provider-switch').isVisible(), false);
       await page.evaluate(() => {
         const original = window.__TAURI__.core.invoke;
-        window.wire = { installed: false, state: 'disconnected', active: null, applied: 0, checks: 0, restarts: 0, restartPending: false, connections: 0, profiles: [
+        window.wire = { installed: false, state: 'disconnected', active: null, applied: 0, checks: 0, restarts: 0, restartPending: false, connections: 0,
+          global: { enabled: false, applications: { allowed: [], disallowed: [] }, sites: [] }, splitTunneling: true, profiles: [
           { name: 'WARP-WireSock-1234567890ABCDEF', file_source: 'legacy_downloads', imported: false, created_at: 1784563200 },
           { name: 'Home VPN', file_source: null, imported: true, created_at: 1784563200 },
           ...Array.from({ length: 24 }, (_, index) => ({ name: `Saved VPN ${index + 1}`, file_source: null, imported: true, created_at: 1784563200 })),
         ] };
         const installation = () => ({ installed: window.wire.installed, version: window.wire.installed ? '3.8.2.1' : null });
-        const status = () => ({ ...installation(), state: window.wire.state, profile: window.wire.active, address: window.wire.active ? '203.0.113.8' : null });
+        const status = () => ({ ...installation(), state: window.wire.state, profile: window.wire.active,
+          address: window.wire.active ? '203.0.113.8' : null, split_tunneling: window.wire.splitTunneling });
         const connect = ({ profile: name, generated }) => {
           const profile = window.wire.profiles.find(item => item.name === name);
           if (!profile || generated !== (Boolean(profile.file_source) && !profile.imported)) throw 'wiresock_profile_missing';
           profile.imported = true;
           window.wire.state = 'connected'; window.wire.active = name;
+          window.wire.connectedWithSplit = window.wire.splitTunneling;
           return status();
         };
         window.__TAURI__.core.invoke = async (command, args) => {
@@ -228,6 +244,24 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
           if (command === 'list_wiresock_profiles') {
             if (wire.failList) throw 'wiresock_cli_failed';
             return wire.profiles;
+          }
+          if (command === 'get_wiresock_global_rules') return structuredClone(wire.global);
+          if (command === 'set_wiresock_split_tunneling') { wire.splitTunneling = args.enabled; return; }
+          if (command === 'save_wiresock_global_rules') {
+            wire.global = structuredClone(args.rules);
+            return;
+          }
+          if (command === 'get_wiresock_split_rules') {
+            if (args.profile !== 'Home VPN') throw 'wiresock_profile_missing';
+            return { applications: { allowed: ['chrome.exe'], disallowed: [] }, sites: [] };
+          }
+          if (command === 'save_wiresock_split_profile') {
+            if (args.profile !== 'Home VPN' || args.applications.allowed.length || args.applications.disallowed.join() !== 'C:\\Games\\Steam\\steam.exe' || args.sites.join() !== 'example.org') {
+              throw 'wiresock_split_write_error';
+            }
+            const name = 'WireSock-Split-5555555555555555';
+            wire.profiles.push({ name, file_source: 'app_data', imported: false, created_at: 1784563200 });
+            return name;
           }
           if (command === 'get_wiresock_setup') {
             wire.checks++;
@@ -300,6 +334,53 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
         }
       }
       await alignedActions('#wiresock-connect', '#wiresock-refresh');
+      const addProfile = page.locator('#wiresock-add-profile');
+      assert.equal(await page.locator('#wiresock-create').isVisible(), false);
+      assert.equal(await page.locator('#wiresock-import').isVisible(), false);
+      assert.ok((await addProfile.boundingBox()).x > (await page.locator('#wiresock-profile-trigger').boundingBox()).x);
+      await addProfile.click();
+      assert.equal(await page.locator('#wiresock-create').isVisible(), true);
+      assert.equal(await page.locator('#wiresock-import').isVisible(), true);
+      await page.keyboard.press('Escape');
+      await page.locator('#wiresock-split-open').click();
+      const splitDialog = page.locator('#wiresock-split-dialog');
+      const allowed = group(splitDialog, 'allowed');
+      await allowed.locator('.warp-rule-name').filter({ hasText: 'chrome.exe' }).waitFor();
+      assert.equal(await splitDialog.evaluate(el => el.scrollWidth > el.clientWidth), false);
+      const splitSave = page.locator('#wiresock-split-save');
+      assert.equal(await splitSave.isDisabled(), true);
+      await allowed.locator('.warp-rule-card button').last().click();
+      await group(splitDialog, 'disallowed').locator('[data-rules-add]').click();
+      await group(splitDialog, 'disallowed').locator('.warp-rule-name').filter({ hasText: 'steam.exe' }).waitFor();
+      const splitSites = group(splitDialog, 'sites');
+      await splitSites.locator('[data-rules-copy]').click();
+      await splitSites.locator('[data-rules-copy]').click();
+      await splitSites.locator('.warp-rule-card').filter({ hasText: 'example.com' }).locator('button').click();
+      assert.deepEqual(await splitSites.locator('.warp-rule-name').allTextContents(), ['example.org']);
+      assert.deepEqual(await page.locator('#warp-sites-list .warp-rule-name').allTextContents(), ['example.com', 'example.org']);
+      await splitSave.click();
+      await splitDialog.waitFor({ state: 'hidden' });
+      await page.locator('#wiresock-profile-label').filter({ hasText: 'WireSock-Split-5555555555555555' }).waitFor();
+      assert.equal(await page.evaluate(() => window.wire.profiles.some(profile => profile.name === 'Home VPN')), true);
+      assert.equal(await page.evaluate(() => window.wire.connections), 0);
+      await page.locator('#wiresock-split-open').click();
+      const override = page.locator('#wiresock-global-toggle');
+      await override.click();
+      await group(splitDialog, 'disallowed').locator('[data-rules-add]').click();
+      await group(splitDialog, 'disallowed').locator('.warp-rule-name').filter({ hasText: 'steam.exe' }).waitFor();
+      await splitSave.click();
+      await splitDialog.waitFor({ state: 'hidden' });
+      assert.equal(await page.evaluate(() => window.wire.global.enabled), true);
+      await page.locator('#wiresock-split-open').click();
+      await group(splitDialog, 'disallowed').locator('.warp-rule-name').filter({ hasText: 'steam.exe' }).waitFor();
+      assert.equal(await override.getAttribute('aria-pressed'), 'true');
+      assert.equal(await page.locator('#wiresock-split-profile').isVisible(), false);
+      await override.click();
+      await splitSave.click();
+      await splitDialog.waitFor({ state: 'hidden' });
+      assert.deepEqual(await page.evaluate(() => window.wire.global), {
+        enabled: false, applications: { allowed: [], disallowed: ['C:\\Games\\Steam\\steam.exe'] }, sites: [],
+      });
       await page.locator('#wiresock-profile-trigger').click();
       const menu = page.locator('#wiresock-profile-options-list');
       assert.equal(await menu.evaluate(el => el.scrollHeight > el.clientHeight), true);
@@ -351,6 +432,7 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
       await page.waitForFunction(() => document.getElementById('wiresock-connect').dataset.action === 'start');
       assert.equal(await page.locator('#wiresock-error').isVisible(), false);
       await page.evaluate(() => { window.wire.failList = false; });
+      await addProfile.click();
       await page.locator('#wiresock-import').click();
       await page.locator('#wiresock-profile-label').filter({ hasText: 'Imported profile' }).waitFor();
       const deleteImported = page.locator('#wiresock-profile-options button[role="menuitem"][aria-label*="Imported profile"]');
@@ -362,6 +444,7 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
       await deleteImported.click();
       await page.locator('#confirm-modal-ok').click();
       await page.locator('#wiresock-profile-label').filter({ hasText: 'WARP-WireSock-1234567890ABCDEF' }).waitFor();
+      await addProfile.click();
       await page.locator('#wiresock-create').click();
       await page.locator('#warp-profile-terms').check();
       await page.locator('#warp-profile-save').click();
@@ -379,12 +462,25 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
       assert.equal(await page.evaluate(() => window.wire.applied), 1);
       assert.equal(await page.evaluate(() => window.wire.restarts), 2);
       assert.equal(await page.evaluate(() => window.wire.connections), 1);
+      const splitToggle = page.locator('#wiresock-split-toggle');
+      const splitHint = page.locator('#wiresock-split-toggle-hint');
+      assert.equal(await splitToggle.getAttribute('aria-checked'), 'true');
+      await splitToggle.click();
+      await splitToggle.and(page.locator('[aria-checked="false"]')).waitFor();
+      assert.match(await splitHint.textContent(), /переподключи|reconnect/i);
+      assert.deepEqual(await page.evaluate(() => [window.wire.state, window.wire.connectedWithSplit]), ['connected', true]);
       await page.locator('#wiresock-connect').click();
       await page.waitForFunction(() => document.getElementById('wiresock-connect').dataset.action === 'start');
       await page.locator('#wiresock-connect').click();
       await page.waitForFunction(() => document.getElementById('wiresock-connect').dataset.action === 'stop');
       assert.equal(await page.locator('#wiresock-setup-dialog').isVisible(), false);
       assert.equal(await page.evaluate(() => window.wire.checks), 5);
+      assert.equal(await page.evaluate(() => window.wire.connectedWithSplit), false);
+      assert.equal(await splitToggle.getAttribute('aria-checked'), 'false');
+      await splitToggle.click();
+      await splitToggle.and(page.locator('[aria-checked="true"]')).waitFor();
+      assert.match(await splitHint.textContent(), /переподключи|reconnect/i);
+      assert.deepEqual(await page.evaluate(() => window.wire.global.applications.disallowed), ['C:\\Games\\Steam\\steam.exe']);
       await page.locator('#aux-provider-warp').click();
       assert.equal(await page.locator('#warp-connect').isVisible(), true);
       assert.equal(await page.locator('#wiresock-panel').isVisible(), false);

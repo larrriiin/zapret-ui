@@ -14,10 +14,11 @@ const STAGING_PREFIX: &str = ".binaries-staging-";
 const SWAP_NAME: &str = ".binaries-rollback-swap";
 const RESTORE_SWAP_NAME: &str = ".binaries-rollback-restore-swap";
 const PREVIOUS_BACKUP_NAME: &str = ".binaries-previous-backup";
-const USER_FILES: [&str; 3] = [
+const USER_FILES: [&str; 4] = [
     "list-general-user.txt",
     "list-exclude-user.txt",
     "ipset-exclude-user.txt",
+    crate::ipset::USER_INCLUDE_FILE,
 ];
 const ACTIVE_FAKE_FILES: [&str; 2] = ["ACTIVE_DISCORD_UDP.bin", "ACTIVE_GAME_UDP.bin"];
 const CUSTOM_STRATEGIES_DIR: &str = "custom-strategies";
@@ -281,6 +282,10 @@ impl CoreInstallation {
                     .map_err(|e| format!("Cannot preserve {name}: {e}"))?;
             }
         }
+        crate::providers::wiresock::setup::preserve_legacy_ipset(
+            &from.join("lists"),
+            &destination,
+        )?;
         let destination_bin = to.join("bin");
         for name in ACTIVE_FAKE_FILES {
             let source = from.join("bin").join(name);

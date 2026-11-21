@@ -1,7 +1,8 @@
 import { $, invoke } from '../lib/core.js';
 import { t } from '../lib/i18n.js';
+import { initWireSockRules } from './wiresock-rules.js';
 
-export function initWarpProfile() {
+export function initWarpProfile(ruleOptions) {
   const open = $('warp-profile-open');
   const dialog = $('warp-profile-dialog');
   const form = $('warp-profile-form');
@@ -29,13 +30,16 @@ export function initWarpProfile() {
   let fileName = '';
   let opener = open;
   let onSaved = null;
+  const rules = initWireSockRules($('warp-profile-rules'), ruleOptions, updateControls);
 
   function selectedServices() {
     return Array.from(serviceGroup.querySelectorAll('input:checked'), input => input.value);
   }
 
   function updateControls() {
+    const hasSiteFilter = split.checked || rules.hasSites();
     fields.disabled = busy;
+    rules.setDisabled(busy);
     save.disabled = busy || !terms.checked || (split.checked && selectedServices().length === 0);
     close.disabled = busy;
     reveal.hidden = !fileName;
@@ -45,8 +49,9 @@ export function initWarpProfile() {
     maskingDomain.disabled = !masking.checked;
     serviceGroup.hidden = !split.checked;
     serviceGroup.disabled = !split.checked;
-    dns.disabled = split.checked;
-    $('warp-profile-system-dns').hidden = !split.checked;
+    dns.disabled = hasSiteFilter;
+    $('warp-profile-system-dns').hidden = !hasSiteFilter;
+    $('warp-profile-apps-ip-hint').hidden = !split.checked;
     mtu.min = ipv6.checked ? '1280' : '576';
   }
 
@@ -59,6 +64,7 @@ export function initWarpProfile() {
     opener = trigger;
     onSaved = saved;
     form.reset();
+    rules.reset();
     advanced.open = false;
     fileName = '';
     setMessage(status);
@@ -91,6 +97,7 @@ export function initWarpProfile() {
     updateControls();
     setMessage(error);
     setMessage(status, 'warp_profile_generating');
+    const { applications, sites } = rules.value();
     try {
       fileName = await invoke('save_warp_profile', {
         options: {
@@ -103,6 +110,8 @@ export function initWarpProfile() {
           ipv6: ipv6.checked,
           mtu: mtu.valueAsNumber,
           keepalive: keepalive.valueAsNumber,
+          ...(applications.allowed.length || applications.disallowed.length ? { applications } : {}),
+          ...(sites.length ? { sites } : {}),
         },
         acceptedTerms: terms.checked,
       });
@@ -111,7 +120,9 @@ export function initWarpProfile() {
     } catch (reason) {
       setMessage(status);
       const key = typeof reason === 'string' ? reason : '';
-      setMessage(error, key.startsWith('warp_profile_') && t(key) !== key ? key : 'warp_profile_registration_error');
+      const ruleError = key === 'warp_profile_invalid_applications' || key === 'warp_sites_invalid' || key.startsWith('wiresock_split_sites_');
+      if (ruleError) advanced.open = true;
+      setMessage(error, (ruleError || key.startsWith('warp_profile_')) && t(key) !== key ? key : 'warp_profile_registration_error');
     } finally {
       busy = false;
       updateControls();

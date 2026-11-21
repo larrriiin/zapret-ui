@@ -99,7 +99,15 @@ The soft background accents live in a single fixed `.app-backdrop` under the iso
 
 Zapret and WireSock status dialogs use the same report elements from `src/features/status-check.js`. Use a summary panel for the overall state, icon rows for individual fields, and a message panel while the status is loading.
 
+The WARP settings and WireSock profile editor share `renderRuleList` in `src/features/warp-rule-list.js`. Use a `warp-rule-grid` list, `warp-rule-card` rows, and `ui-icon-button` details and removal actions. Both site lists open the same site entry dialog. The WireSock editor and profile generator mount `src/components/wiresock-rules.html` for their draft lists.
+
+The plus icon beside the WireSock profile selector opens a `ui-dialog` with creation and import actions. The split-tunneling dialog uses a `ui-switch` to edit the global rules for connections started from ZAPRET UI. Saving the switch applies to the next connection.
+
+The WireSock split-tunneling switch on Home controls whether connections started from ZAPRET UI use split rules. It applies at the next connection. Keep the rule editor accessible while the switch is off so saved rules can be reviewed and edited.
+
 At startup, center the main window within the work area of the monitor under the pointer. Measure Home after detecting the installed tunnel clients and loading local fonts. Fit the measured height with 24px of extra space, applying the monitor's DPI and the configured minimum size where it fits. Keep the same size as the user navigates. Overflow stays in the central scroll area.
+
+The first-run setup opens at 880 × 740 logical pixels when the monitor has room. Keep the step indicator and footer in view while the current step scrolls independently. The indicator is an ordered list with `aria-current="step"` on the current item and a screen-reader status for each completed item. `src/features/setup-step-progress.js` reproduces [DesignBookmark Step Progress](https://designbookmark.com/motion#db-step-progress) with a spring-driven rail and markers. The wizard controls advancement. The indicator settles immediately with reduced motion.
 
 The home page restores the WARP card from the last confirmed installation state. While the first status check is pending, its overlay shows the localized initialization message and its controls are inert. A successful check refreshes the saved installation state.
 

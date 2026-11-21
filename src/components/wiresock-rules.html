@@ -1,0 +1,34 @@
+<section class="ui-panel p-4" data-rules-group="sites">
+  <header class="warp-section-heading">
+    <div class="warp-section-title"><span class="warp-section-icon"><span class="material-symbols-outlined" aria-hidden="true">language</span></span><h3 class="font-headline text-base font-bold" data-i18n="warp_home_sites"></h3></div>
+    <div class="flex flex-wrap gap-2">
+      <button type="button" class="ui-button" data-rules-add><span class="material-symbols-outlined" aria-hidden="true">add</span><span data-i18n="warp_sites_add"></span></button>
+      <button type="button" class="ui-button" data-rules-copy data-i18n="wiresock_split_from_warp"></button>
+    </div>
+  </header>
+  <p class="warp-list-empty" data-rules-empty data-i18n="warp_sites_empty"></p>
+  <ul class="warp-rule-grid" data-rules-list data-i18n="warp_home_sites" data-i18n-attr="aria-label"></ul>
+  <p class="text-xs text-on-surface-variant" data-rules-sites-help data-i18n="wiresock_split_sites_help"></p>
+  <p class="text-xs text-on-surface-variant" data-rules-sites-unavailable data-i18n="wiresock_split_sites_routes" hidden></p>
+</section>
+<section class="ui-panel p-4">
+  <header class="warp-section-heading"><div class="warp-section-title"><span class="warp-section-icon"><span class="material-symbols-outlined" aria-hidden="true">apps</span></span><h3 class="font-headline text-base font-bold" data-i18n="warp_home_apps"></h3></div></header>
+  <div data-rules-group="allowed">
+    <h4 class="mb-2 text-sm font-semibold" data-i18n="wiresock_split_allowed"></h4>
+    <div class="flex flex-wrap gap-2">
+      <button type="button" class="ui-button" data-rules-add><span class="material-symbols-outlined" aria-hidden="true">add</span><span data-i18n="warp_apps_add"></span></button>
+      <button type="button" class="ui-button" data-rules-copy data-i18n="wiresock_split_from_warp"></button>
+    </div>
+    <p class="warp-list-empty mt-2" data-rules-empty data-i18n="warp_apps_empty"></p>
+    <ul class="warp-rule-grid warp-rule-grid-apps" data-rules-list data-i18n="wiresock_split_allowed" data-i18n-attr="aria-label"></ul>
+  </div>
+  <div class="mt-4" data-rules-group="disallowed">
+    <h4 class="mb-2 text-sm font-semibold" data-i18n="wiresock_split_disallowed"></h4>
+    <button type="button" class="ui-button" data-rules-add><span class="material-symbols-outlined" aria-hidden="true">add</span><span data-i18n="warp_apps_add"></span></button>
+    <p class="warp-list-empty mt-2" data-rules-empty data-i18n="warp_apps_empty"></p>
+    <ul class="warp-rule-grid warp-rule-grid-apps" data-rules-list data-i18n="wiresock_split_disallowed" data-i18n-attr="aria-label"></ul>
+  </div>
+  <p class="text-xs text-on-surface-variant" data-rules-priority data-i18n="wiresock_split_priority" hidden></p>
+  <p class="text-xs text-on-surface-variant" data-rules-combined data-i18n="wiresock_split_combined" hidden></p>
+</section>
+<p class="text-xs text-on-surface-variant" data-rules-error role="status" hidden></p>

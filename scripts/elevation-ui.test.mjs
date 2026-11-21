@@ -166,12 +166,55 @@ test('ordinary startup, explicit elevation, cancellation, background rules and s
         assert.equal(await page.evaluate(() => window.elevationCalls.filter(c => c.command === 'resume_wiresock_setup').length), 1);
 
         await page.goto(`http://127.0.0.1:${server.config.server.port}/elevation-test.html?setup=1&wiresock-onboarding=1`);
+        const currentStep = page.locator('.setup-steps [aria-current="step"]');
+        assert.equal(await currentStep.getAttribute('data-setup-step'), '0');
+        await page.emulateMedia({ reducedMotion: 'no-preference' });
+        const animation = await page.evaluate(async () => {
+          const rail = document.querySelector('.setup-step-fill');
+          const marker = document.querySelector('[data-setup-step="1"] .setup-step-marker');
+          const check = document.querySelector('[data-setup-step="0"] path');
+          const samples = [];
+          const sample = () => ({
+            rail: Number(rail.style.getPropertyValue('--step-progress')),
+            marker: Number(marker.style.transform.match(/[\d.]+/)[0]),
+            check: Number(check.style.strokeDashoffset),
+          });
+          document.getElementById('setup-next').click();
+          samples.push(sample());
+          const start = performance.now();
+          while (performance.now() - start < 550) {
+            await new Promise(requestAnimationFrame);
+            samples.push(sample());
+          }
+          return samples;
+        });
+        assert.deepEqual(animation[0], { rail: 0, marker: 0.7, check: 22 });
+        assert.ok(animation.some(sample => sample.rail > 0 && sample.rail < 0.3 && sample.check === 22));
+        assert.ok(animation.some(sample => sample.marker > 1.1));
+        assert.ok(animation.at(-1).rail > 0.32 && animation.at(-1).check < 7);
+        assert.equal(await currentStep.getAttribute('data-setup-step'), '1');
+        assert.equal(await page.locator('.setup-steps [data-setup-step="0"] [data-setup-complete]').getAttribute('hidden'), null);
+        await page.locator('#setup-back').click();
+        await page.waitForFunction(() => Number(document.querySelector('.setup-step-fill').style.getPropertyValue('--step-progress')) < 0.02);
+        assert.equal(await currentStep.getAttribute('data-setup-step'), '0');
+        await page.emulateMedia({ reducedMotion: 'reduce' });
         await page.locator('#setup-next').click();
+        await page.setViewportSize({ width: 480, height: 460 });
+        assert.equal(await page.locator('#setup-dialog').evaluate(dialog => dialog.scrollWidth > innerWidth), false);
+        assert.equal(await page.locator('#setup-body').evaluate(body => body.scrollHeight > body.clientHeight), true);
+        const footer = await page.locator('.setup-footer').first().boundingBox();
+        assert.ok(footer.y + footer.height <= 460);
         await page.locator('#setup-wiresock').check();
         await page.locator('#setup-next').click();
         await page.locator('[data-setup-panel="2"]').waitFor();
+        assert.equal(await currentStep.getAttribute('data-setup-step'), '2');
         assert.equal(await page.evaluate(() => window.elevationCalls.filter(c => c.command === 'install_wiresock').length), 1);
         assert.match(await page.locator('#setup-wiresock-detail').textContent(), /3\.8\.2\.1/);
+        await page.locator('#setup-skip').click();
+        assert.equal(await currentStep.getAttribute('data-setup-step'), '3');
+        assert.equal(await page.locator('.setup-steps [data-complete]').count(), 4);
+        assert.equal(await page.locator('.setup-step-fill').evaluate(bar => Number(bar.style.getPropertyValue('--step-progress'))), 1);
+        await page.setViewportSize({ width, height });
 
         await page.goto(`http://127.0.0.1:${server.config.server.port}/elevation-test.html?setup=1&repeat=true&clearLists=true`);
         await page.locator('#setup-dialog').waitFor({ state: 'visible' });

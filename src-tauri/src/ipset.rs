@@ -1,6 +1,8 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
+pub(crate) const USER_INCLUDE_FILE: &str = "ipset-all-user.txt";
+
 #[derive(serde::Serialize)]
 pub struct UpdateResult {
     pub changed: bool,

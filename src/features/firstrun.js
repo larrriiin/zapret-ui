@@ -8,6 +8,7 @@ import { pollFakes } from './fakes.js';
 import { updateRestartBanner } from '../lib/restart.js';
 import { syncThemeFromStorage } from './theme.js';
 import { markSetupCompleted, shouldShowFirstRun } from './setup-state.js';
+import { initSetupStepProgress } from './setup-step-progress.js';
 import { installTelegram, moduleError } from './telegram.js';
 import { requestAdmin } from './admin-check.js';
 
@@ -16,7 +17,7 @@ const isSetupWindow = new URLSearchParams(location.search).get('setup') === '1';
 const USER_LISTS = ['list-general-user.txt', 'list-exclude-user.txt', 'ipset-exclude-user.txt'];
 let step = 0, busy = false, testStarted = false, cancelled = false;
 let prepared = false, best = null, connected = false, rerun = false, deleteLists = false;
-let appearanceHome, appearance, resolveSetup, previousFocus, transition;
+let appearanceHome, appearance, resolveSetup, previousFocus, transition, setStepProgress;
 
 function errorMessage(error) {
   $('setup-error').textContent = moduleError(error);
@@ -42,11 +43,7 @@ function goTo(next, animate = true) {
   $('setup-error').hidden = true;
   $('setup-progress').hidden = true;
   document.querySelectorAll('[data-setup-panel]').forEach(panel => { panel.hidden = Number(panel.dataset.setupPanel) !== step; });
-  document.querySelectorAll('[data-setup-step]').forEach(item => {
-    const index = Number(item.dataset.setupStep);
-    item.toggleAttribute('data-complete', index < step);
-    if (index === step) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current');
-  });
+  setStepProgress(step, animate);
   const title = $('setup-title');
   const titleText = t(['setup_welcome', 'setup_prepare_title', 'setup_test_title', 'setup_complete_title'][step]);
   title.textContent = titleText;
@@ -302,6 +299,7 @@ export async function openSetup({ repeat = false, clearLists = false, restoreMai
   return new Promise(resolve => { resolveSetup = resolve; });
 }
 export function initFirstRun() {
+  setStepProgress = initSetupStepProgress($('setup-step-progress'));
   $('setup-modules-retry').addEventListener('click', detectModules);
   $('setup-next').addEventListener('click', () => {
     if (busy) return;
