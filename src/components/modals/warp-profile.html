@@ -1,6 +1,6 @@
 <dialog id="warp-profile-dialog" class="ui-dialog" aria-labelledby="warp-profile-dialog-title">
   <h2 id="warp-profile-dialog-title" class="font-headline text-lg font-bold" data-i18n="warp_profile_title"></h2>
-  <p class="mt-2 text-sm text-on-surface-variant" data-i18n="warp_profile_hint"></p>
+  <p id="warp-profile-hint" class="mt-2 text-sm text-on-surface-variant" data-i18n="warp_profile_hint"></p>
   <form id="warp-profile-form" class="mt-5">
     <fieldset id="warp-profile-options" class="space-y-4">
       <div>
@@ -24,7 +24,7 @@
             <label for="warp-profile-endpoint" class="block mb-1 text-sm" data-i18n="warp_profile_endpoint"></label>
             <input id="warp-profile-endpoint" class="ui-field w-full font-mono" type="text" maxlength="260"
               spellcheck="false" autocomplete="off" aria-describedby="warp-profile-endpoint-hint"
-              placeholder="engage.cloudflareclient.com:2408">
+              placeholder="8.6.112.9:928">
             <p id="warp-profile-endpoint-hint" class="mt-1 text-xs text-on-surface-variant" data-i18n="warp_profile_endpoint_hint"></p>
             <label class="mt-2 flex items-center gap-2 text-sm">
               <input id="warp-profile-random-endpoint" class="ui-check" type="checkbox" checked>
@@ -93,9 +93,9 @@
     <p id="warp-profile-status" class="mt-3 text-sm text-on-surface-variant" role="status" hidden></p>
     <p id="warp-profile-error" class="warp-error mt-3" role="alert" hidden></p>
     <div class="mt-5 flex flex-wrap justify-end gap-2">
-      <button id="warp-profile-close" type="button" class="ui-button" data-i18n="close"></button>
-      <button id="warp-profile-reveal" type="button" class="ui-button" data-i18n="warp_profile_reveal" hidden></button>
       <button id="warp-profile-save" type="submit" class="ui-button ui-button-primary" data-i18n="warp_profile_save"></button>
+      <button id="warp-profile-reveal" type="button" class="ui-button" data-i18n="warp_profile_reveal" hidden></button>
+      <button id="warp-profile-close" type="button" class="ui-button" data-i18n="close"></button>
     </div>
   </form>
 </dialog>

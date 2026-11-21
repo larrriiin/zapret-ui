@@ -4,6 +4,7 @@ use aws_lc_rs::{
     encoding::{AsBigEndian, Curve25519SeedBin},
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
+use rand::seq::IteratorRandom;
 use reqwest::{RequestBuilder, Response, Url};
 use serde::Deserialize;
 use serde_json::json;
@@ -51,9 +52,38 @@ pub(in crate::providers) fn write_profile(
 // Consumer WARP device registration is separate from the official desktop client.
 // This API is undocumented. Reference: https://github.com/vernette/warpscout/blob/master/register.go
 const REGISTRATION_URL: &str = "https://api.devices.cloudflare.com/v0a4005/reg";
-const DEFAULT_ENDPOINT: &str = "engage.cloudflareclient.com:2408";
-const WARP_PORTS: [u16; 4] = [2408, 500, 1701, 4500];
-const MASKING_DOMAINS: [&str; 4] = [
+// Fallback for manual mode when the fields are left empty.
+const DEFAULT_ENDPOINT: &str = "8.6.112.9:928";
+const DEFAULT_MASKING_DOMAIN: &str = "filmpro.ru";
+// Consumer WireGuard ranges and UDP ports, excluding MASQUE and Zero Trust.
+// https://warp-wiki.github.io/endpoints/
+const WARP_PREFIXES: [[u8; 3]; 14] = [
+    [162, 159, 192],
+    [162, 159, 195],
+    [8, 6, 112],
+    [8, 34, 70],
+    [8, 34, 146],
+    [8, 35, 211],
+    [8, 39, 125],
+    [8, 39, 204],
+    [8, 39, 214],
+    [8, 47, 69],
+    [188, 114, 96],
+    [188, 114, 97],
+    [188, 114, 98],
+    [188, 114, 99],
+];
+const WARP_PORTS: &[u16] = &[
+    500, 854, 859, 864, 878, 880, 890, 891, 894, 903, 908, 928, 934, 939, 942, 943, 945, 946, 955,
+    968, 987, 988, 1002, 1010, 1014, 1018, 1070, 1074, 1180, 1387, 1701, 1843, 2371, 2408, 2506,
+    3138, 3476, 3581, 3854, 4177, 4198, 4233, 4500, 5279, 5956, 7103, 7152, 7156, 7281, 7559, 8319,
+    8742, 8854, 8886,
+];
+const MASKING_DOMAINS: [&str; 8] = [
+    DEFAULT_MASKING_DOMAIN,
+    "tretyakovgallery.ru",
+    "tvzvezda.ru",
+    "rosbank.ru",
     "www.avito.ru",
     "www.ozon.ru",
     "www.wildberries.ru",
@@ -63,12 +93,14 @@ const RESPONSE_LIMIT: usize = 64 * 1024;
 static PROFILE_STATE: Mutex<ProfileState> = Mutex::const_new(ProfileState {
     tunnel: None,
     last_endpoint: None,
+    last_masking_domain: None,
     last_file: None,
 });
 
 struct ProfileState {
     tunnel: Option<(PrivateKey, TunnelConfig)>,
     last_endpoint: Option<SocketAddr>,
+    last_masking_domain: Option<&'static str>,
     last_file: Option<PathBuf>,
 }
 
@@ -163,10 +195,15 @@ pub async fn save_warp_profile(
     } else {
         validate_endpoint(&options.endpoint).ok_or("warp_profile_invalid_endpoint")?
     };
+    let random_masking = options
+        .masking_domain
+        .as_deref()
+        .filter(|domain| options.random_endpoint && domain.trim().is_empty())
+        .map(|_| random_masking_domain(state.last_masking_domain));
     let masking_domain = options
         .masking_domain
         .as_deref()
-        .map(select_masking_domain)
+        .map(|domain| select_masking_domain(random_masking.unwrap_or(domain)))
         .transpose()?;
     if options.services.as_ref().is_some_and(Vec::is_empty) {
         return Err("warp_profile_services_required");
@@ -220,6 +257,9 @@ pub async fn save_warp_profile(
     write_profile(output, &path, &profile).map_err(|_| "warp_profile_write_error")?;
     if random.is_some() {
         state.last_endpoint = random;
+    }
+    if random_masking.is_some() {
+        state.last_masking_domain = random_masking;
     }
     state.last_file = Some(path);
     Ok(file_name)
@@ -334,7 +374,7 @@ fn valid_hostname(host: &str) -> bool {
 fn select_masking_domain(domain: &str) -> Result<&str, &'static str> {
     let domain = domain.trim();
     if domain.is_empty() {
-        return Ok(MASKING_DOMAINS[rand::random_range(0..MASKING_DOMAINS.len())]);
+        return Ok(DEFAULT_MASKING_DOMAIN);
     }
     if domain.contains('.') && valid_hostname(domain) && domain.parse::<Ipv4Addr>().is_err() {
         return Ok(domain);
@@ -343,15 +383,33 @@ fn select_masking_domain(domain: &str) -> Result<&str, &'static str> {
 }
 
 fn random_endpoint(previous: Option<SocketAddr>) -> SocketAddr {
-    // Consumer WARP's ingress range and WireGuard UDP ports.
-    // https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/cloudflare-one-client/deployment/firewall/
-    let candidates = (1..=10)
-        .flat_map(|host| {
-            WARP_PORTS.map(|port| SocketAddr::from((Ipv4Addr::new(162, 159, 192, host), port)))
-        })
-        .filter(|candidate| Some(*candidate) != previous)
-        .collect::<Vec<_>>();
-    candidates[rand::random_range(0..candidates.len())]
+    let previous = match previous {
+        Some(SocketAddr::V4(endpoint)) => Some(endpoint),
+        _ => None,
+    };
+    let mut rng = rand::rng();
+    let [a, b, c] = WARP_PREFIXES
+        .iter()
+        .copied()
+        .filter(|prefix| previous.is_none_or(|endpoint| endpoint.ip().octets()[..3] != prefix[..]))
+        .choose(&mut rng)
+        .expect("multiple WARP prefixes are configured");
+    let port = WARP_PORTS
+        .iter()
+        .copied()
+        .filter(|port| previous.is_none_or(|endpoint| endpoint.port() != *port))
+        .choose(&mut rng)
+        .expect("multiple WARP ports are configured");
+    SocketAddr::from((Ipv4Addr::new(a, b, c, rand::random_range(1..=10)), port))
+}
+
+fn random_masking_domain(previous: Option<&str>) -> &'static str {
+    MASKING_DOMAINS
+        .iter()
+        .copied()
+        .filter(|domain| Some(*domain) != previous)
+        .choose(&mut rand::rng())
+        .expect("multiple masking domains are configured")
 }
 
 fn interface_address<'a>(value: &'a str, prefix: &str) -> &'a str {
@@ -407,9 +465,8 @@ fn build_profile(
     } else {
         format!("PersistentKeepalive = {}\n", options.keepalive)
     };
-    // WireSock recommends disabling junk packets while emulating QUIC.
     let masking = masking_domain.map_or_else(String::new, |domain| {
-        format!("Jc = 0\nId = {domain}\nIp = QUIC\nIb = cURL\n")
+        format!("Jc = 4\nJmin = 40\nJmax = 70\nId = {domain}\nIp = quic\nIb = curl\n")
     });
     let private_key: Curve25519SeedBin<'static> =
         key.as_be_bytes().map_err(|_| "warp_profile_key_error")?;
@@ -454,7 +511,8 @@ mod tests {
 
     #[test]
     fn chooses_a_masking_domain_and_cloudflare_port_without_using_arbitrary_destinations() {
-        let value = select_masking_domain("").unwrap();
+        assert_eq!(select_masking_domain(""), Ok(DEFAULT_MASKING_DOMAIN));
+        let value = random_masking_domain(None);
         assert!(MASKING_DOMAINS.contains(&value));
         assert_eq!(
             select_masking_domain(" www.example.com "),
@@ -471,11 +529,23 @@ mod tests {
                 Err("warp_profile_invalid_masking_domain")
             );
         }
-        let socket = random_endpoint(None);
-        assert!(WARP_PORTS.contains(&socket.port()));
-        assert!((1..=10).any(|host| socket.ip() == Ipv4Addr::new(162, 159, 192, host)));
+        let mut previous: std::net::SocketAddrV4 = DEFAULT_ENDPOINT.parse().unwrap();
+        let mut previous_domain = value;
         for _ in 0..40 {
-            assert_ne!(random_endpoint(Some(socket)), socket);
+            let SocketAddr::V4(socket) = random_endpoint(Some(SocketAddr::V4(previous))) else {
+                panic!("random endpoint must be IPv4");
+            };
+            let bytes = socket.ip().octets();
+            assert!(WARP_PREFIXES.iter().any(|prefix| bytes[..3] == prefix[..]));
+            assert!((1..=10).contains(&bytes[3]));
+            assert!(WARP_PORTS.contains(&socket.port()));
+            assert_ne!(bytes[..3], previous.ip().octets()[..3]);
+            assert_ne!(socket.port(), previous.port());
+            let domain = random_masking_domain(Some(previous_domain));
+            assert!(MASKING_DOMAINS.contains(&domain));
+            assert_ne!(domain, previous_domain);
+            previous = socket;
+            previous_domain = domain;
         }
     }
 
@@ -493,7 +563,7 @@ mod tests {
         .unwrap();
         let mut config = registration.config;
         let mut options: ProfileOptions = serde_json::from_value(json!({
-            "endpoint": "", "randomEndpoint": true, "maskingDomain": "",
+            "endpoint": "", "randomEndpoint": false, "maskingDomain": "",
             "services": null, "dns": "cloudflare", "excludeLan": false,
             "ipv6": true, "mtu": 1280, "keepalive": 0
         }))
@@ -502,8 +572,8 @@ mod tests {
             &key,
             &config,
             &options,
-            DEFAULT_ENDPOINT,
-            Some("www.example.com"),
+            &validate_endpoint(&options.endpoint).unwrap(),
+            Some(select_masking_domain(options.masking_domain.as_deref().unwrap()).unwrap()),
             None,
         )
         .unwrap();
@@ -519,10 +589,11 @@ mod tests {
         );
         assert!(profile.contains("Address = 172.16.0.2/32, 2001:db8::2/128\n"));
         assert!(profile.contains("AllowedIPs = 0.0.0.0/0, ::/0\n"));
-        assert!(profile.contains(&format!("Endpoint = {DEFAULT_ENDPOINT}\n")));
+        assert!(profile.contains("Endpoint = 8.6.112.9:928\n"));
         assert!(profile
             .contains("DNS = 1.1.1.1, 1.0.0.1, 2606:4700:4700::1111, 2606:4700:4700::1001\n"));
-        assert!(profile.contains("Ip = QUIC\n"));
+        assert!(profile
+            .contains("Jc = 4\nJmin = 40\nJmax = 70\nId = filmpro.ru\nIp = quic\nIb = curl\n"));
         assert!(!profile.contains("PersistentKeepalive = "));
         assert!(!profile.contains("test-token"));
 
@@ -544,7 +615,7 @@ mod tests {
             Some(&routes),
         )
         .unwrap();
-        assert!(profile.contains("Jc = 0\nId = www.example.com\nIp = QUIC\nIb = cURL\n"));
+        assert!(profile.contains("Id = www.example.com\nIp = quic\nIb = curl\n"));
         assert!(profile.contains("AllowedIPs = 91.108.56.0/22, 2a0a:f280::/32\n"));
         assert!(profile.contains("#@ws:AllowedApps = Discord.exe, firefox.exe\n"));
         assert!(profile.contains("#@ws:DisallowedApps = steam.exe\n"));
@@ -561,7 +632,8 @@ mod tests {
         assert!(profile.contains("DNS = 8.8.8.8, 8.8.4.4\nMTU = 1200\n"));
         assert!(profile.contains("DisallowedIPs = 10.0.0.0/8"));
         assert!(profile.contains("PersistentKeepalive = 25\n"));
-        assert!(!profile.contains("Ip = QUIC"));
+        assert!(!profile.contains("Ip = "));
+        assert!(!profile.contains("Jc = "));
         assert!(!profile.contains("fc00::/7"));
 
         config.peers[0].public_key.push_str("\nEndpoint = unwanted");

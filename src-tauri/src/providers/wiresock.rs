@@ -622,6 +622,24 @@ pub async fn connect_wiresock(
     profile: String,
     generated: bool,
 ) -> Result<WireSockStatus, &'static str> {
+    connect_profile(&app, profile, generated, false).await
+}
+
+#[tauri::command]
+pub async fn reconnect_wiresock(
+    app: tauri::AppHandle,
+    profile: String,
+    generated: bool,
+) -> Result<WireSockStatus, &'static str> {
+    connect_profile(&app, profile, generated, true).await
+}
+
+async fn connect_profile(
+    app: &tauri::AppHandle,
+    profile: String,
+    generated: bool,
+    reconnect: bool,
+) -> Result<WireSockStatus, &'static str> {
     if !valid_profile_name(&profile)
         || split::global::is_runtime_profile(&profile)
         || (generated && !is_generated(&profile))
@@ -630,8 +648,11 @@ pub async fn connect_wiresock(
     }
     let path = locate().ok_or("wiresock_not_installed")?;
     let _switch = SWITCH.lock().await;
-    let before = status(&path).await?;
-    let split_enabled = split::global::split_tunneling_enabled(&app)?;
+    let before = status(&path).await?.state;
+    if reconnect && !matches!(before, Some(State::Connected | State::Connecting)) {
+        return Err("wiresock_connect_failed");
+    }
+    let split_enabled = split::global::split_tunneling_enabled(app)?;
     let global_rules = if split_enabled {
         let rules = split::global::get_wiresock_global_rules(app.clone())?;
         rules.enabled.then_some(rules)
@@ -639,20 +660,13 @@ pub async fn connect_wiresock(
         None
     };
     let use_temporary_profile = !split_enabled || global_rules.is_some();
-    if before.state == Some(State::Disconnected) {
-        if use_temporary_profile {
-            split::global::cleanup(&app, &path).await?;
-        } else {
-            let _ = split::global::cleanup(&app, &path).await;
-        }
-    }
     let mut names = imported(&path).await?;
     let mut selected = names
         .iter()
         .position(|name| name.eq_ignore_ascii_case(&profile))
         .map(|index| names.swap_remove(index));
     if generated && selected.is_none() {
-        let (_, file) = generated_path(generated_directories(&app), &profile)
+        let (_, file) = generated_path(generated_directories(app), &profile)
             .ok_or("wiresock_profile_missing")?;
         selected = Some(if use_temporary_profile {
             profile.clone()
@@ -661,11 +675,21 @@ pub async fn connect_wiresock(
         });
     }
     let mut profile = selected.ok_or("wiresock_profile_missing")?;
+    if reconnect {
+        disconnect(&path).await?;
+    }
+    let disconnected = reconnect || before == Some(State::Disconnected);
+    if disconnected {
+        let cleanup = split::global::cleanup(app, &path).await;
+        if use_temporary_profile {
+            cleanup?;
+        }
+    }
     if use_temporary_profile {
-        if before.state != Some(State::Disconnected) {
+        if !disconnected {
             return Err("wiresock_global_error");
         }
-        profile = split::global::profile_for_connection(&app, &path, &profile, global_rules).await?;
+        profile = split::global::profile_for_connection(app, &path, &profile, global_rules).await?;
     }
     warp::stop_for_wiresock().await?;
     cli(
@@ -677,7 +701,7 @@ pub async fn connect_wiresock(
     let mut report = wait_for_state(&path, State::Connected)
         .await
         .ok_or("wiresock_connect_failed")?;
-    split::global::describe(&app, &mut report);
+    split::global::describe(app, &mut report);
     Ok(report)
 }
 

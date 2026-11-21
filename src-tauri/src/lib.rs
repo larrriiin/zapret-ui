@@ -4750,6 +4750,7 @@ pub fn run() {
             providers::wiresock::import_wiresock_profile,
             providers::wiresock::delete_wiresock_profile,
             providers::wiresock::connect_wiresock,
+            providers::wiresock::reconnect_wiresock,
             providers::wiresock::disconnect_wiresock,
             providers::wiresock::setup::get_wiresock_setup,
             providers::wiresock::setup::apply_wiresock_setup,

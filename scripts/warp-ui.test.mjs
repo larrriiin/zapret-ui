@@ -80,12 +80,23 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
       await page.locator('#warp-profile-terms').check();
       await profileSave.click();
       await page.locator('#warp-profile-status').filter({ hasText: 'WARP-WireSock-1.conf' }).waitFor();
+      assert.equal(await page.locator('#warp-profile-hint').isVisible(), false);
+      assert.equal(await page.locator('#warp-profile-options').isVisible(), false);
+      assert.deepEqual(await profileDialog.locator('button:visible').evaluateAll(buttons => buttons.map(button => button.id)), ['warp-profile-reveal', 'warp-profile-close']);
+      assert.equal(await page.locator('#warp-profile-close').evaluate(button => button === document.activeElement), true);
       await page.locator('#warp-profile-reveal').click();
       assert.equal(await page.evaluate(() => window.profileRevealed), true);
+      await page.locator('#warp-profile-close').click();
+      await profileOpen.click();
+      assert.equal(await page.locator('#warp-profile-status').isVisible(), false);
+      assert.equal(await profileSave.isVisible(), true);
+      assert.equal(await profileSave.isDisabled(), true);
+      await page.locator('#warp-profile-terms').check();
       assert.equal(await profileSave.isDisabled(), false);
       await page.locator('#warp-profile-advanced summary').press('Enter');
       assert.equal(await page.locator('#warp-profile-endpoint').isDisabled(), true);
       await page.locator('#warp-profile-random-endpoint').uncheck();
+      assert.equal(await page.locator('#warp-profile-endpoint').isDisabled(), false);
       await page.locator('#warp-profile-endpoint').fill('vpn.example:2408');
       assert.equal(await page.locator('#warp-profile-masking-domain').isVisible(), true);
       await page.locator('#warp-profile-masking-domain').fill('example.com');
@@ -212,7 +223,7 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
       assert.equal(await page.locator('#aux-provider-switch').isVisible(), false);
       await page.evaluate(() => {
         const original = window.__TAURI__.core.invoke;
-        window.wire = { installed: false, state: 'disconnected', active: null, applied: 0, checks: 0, restarts: 0, restartPending: false, connections: 0,
+        window.wire = { installed: false, state: 'disconnected', active: null, applied: 0, checks: 0, restarts: 0, restartPending: false, connections: 0, reconnections: 0,
           global: { enabled: false, applications: { allowed: [], disallowed: [] }, sites: [] }, splitTunneling: true, profiles: [
           { name: 'WARP-WireSock-1234567890ABCDEF', file_source: 'legacy_downloads', imported: false, created_at: 1784563200 },
           { name: 'Home VPN', file_source: null, imported: true, created_at: 1784563200 },
@@ -280,6 +291,11 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
           }
           if (command === 'connect_wiresock') {
             wire.connections++;
+            return connect(args);
+          }
+          if (command === 'reconnect_wiresock') {
+            if (wire.state !== 'connected') throw 'wiresock_connect_failed';
+            wire.reconnections++;
             return connect(args);
           }
           if (command === 'disconnect_wiresock') { wire.state = 'disconnected'; wire.active = null; return status(); }
@@ -463,23 +479,39 @@ test('WARP settings workflows, traffic navigation, update modal and RU/EN themes
       assert.equal(await page.evaluate(() => window.wire.restarts), 2);
       assert.equal(await page.evaluate(() => window.wire.connections), 1);
       const splitToggle = page.locator('#wiresock-split-toggle');
-      const splitHint = page.locator('#wiresock-split-toggle-hint');
+      const activeProfile = 'WARP-WireSock-5555555555555555';
+      const profileTrigger = page.locator('#wiresock-profile-trigger');
+      const homeProfile = page.getByRole('menuitemradio', { name: /Home VPN/ });
+      const connectWireSock = page.locator('#wiresock-connect');
+      const enabledToggle = splitToggle.and(page.locator(':enabled'));
       assert.equal(await splitToggle.getAttribute('aria-checked'), 'true');
       await splitToggle.click();
-      await splitToggle.and(page.locator('[aria-checked="false"]')).waitFor();
-      assert.match(await splitHint.textContent(), /переподключи|reconnect/i);
-      assert.deepEqual(await page.evaluate(() => [window.wire.state, window.wire.connectedWithSplit]), ['connected', true]);
-      await page.locator('#wiresock-connect').click();
-      await page.waitForFunction(() => document.getElementById('wiresock-connect').dataset.action === 'start');
-      await page.locator('#wiresock-connect').click();
-      await page.waitForFunction(() => document.getElementById('wiresock-connect').dataset.action === 'stop');
+      await enabledToggle.and(page.locator('[aria-checked="false"]')).waitFor();
+      assert.equal(await page.locator('#wiresock-split-toggle-hint').count(), 0);
+      assert.deepEqual(await page.evaluate(() => [window.wire.active, window.wire.connectedWithSplit, window.wire.reconnections]), [activeProfile, false, 1]);
+      await splitToggle.click();
+      await enabledToggle.and(page.locator('[aria-checked="true"]')).waitFor();
+      assert.deepEqual(await page.evaluate(() => [window.wire.active, window.wire.connectedWithSplit, window.wire.reconnections]), [activeProfile, true, 2]);
+      await profileTrigger.click();
+      await homeProfile.click();
+      await page.locator('#wiresock-profile-label').filter({ hasText: 'Home VPN' }).waitFor();
+      await enabledToggle.waitFor();
+      assert.deepEqual(await page.evaluate(() => [window.wire.active, window.wire.reconnections, localStorage.getItem('zapret.wiresock.lastConnected')]), ['Home VPN', 3, 'Home VPN']);
       assert.equal(await page.locator('#wiresock-setup-dialog').isVisible(), false);
+      assert.equal(await page.evaluate(() => window.wire.checks), 4);
+      await connectWireSock.click();
+      await connectWireSock.and(page.locator('[data-action="start"]:enabled')).waitFor();
+      await splitToggle.click();
+      await enabledToggle.and(page.locator('[aria-checked="false"]')).waitFor();
+      await profileTrigger.click();
+      await page.getByRole('menuitemradio', { name: new RegExp(activeProfile) }).click();
+      await page.locator('#wiresock-profile-label').filter({ hasText: activeProfile }).waitFor();
+      await enabledToggle.waitFor();
+      assert.deepEqual(await page.evaluate(() => [window.wire.state, window.wire.reconnections]), ['disconnected', 3]);
+      await connectWireSock.click();
+      await connectWireSock.and(page.locator('[data-action="stop"]:enabled')).waitFor();
       assert.equal(await page.evaluate(() => window.wire.checks), 5);
       assert.equal(await page.evaluate(() => window.wire.connectedWithSplit), false);
-      assert.equal(await splitToggle.getAttribute('aria-checked'), 'false');
-      await splitToggle.click();
-      await splitToggle.and(page.locator('[aria-checked="true"]')).waitFor();
-      assert.match(await splitHint.textContent(), /переподключи|reconnect/i);
       assert.deepEqual(await page.evaluate(() => window.wire.global.applications.disallowed), ['C:\\Games\\Steam\\steam.exe']);
       await page.locator('#aux-provider-warp').click();
       assert.equal(await page.locator('#warp-connect').isVisible(), true);

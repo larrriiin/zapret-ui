@@ -103,7 +103,7 @@ The WARP settings and WireSock profile editor share `renderRuleList` in `src/fea
 
 The plus icon beside the WireSock profile selector opens a `ui-dialog` with creation and import actions. The split-tunneling dialog uses a `ui-switch` to edit the global rules for connections started from ZAPRET UI. Saving the switch applies to the next connection.
 
-The WireSock split-tunneling switch on Home controls whether connections started from ZAPRET UI use split rules. It applies at the next connection. Keep the rule editor accessible while the switch is off so saved rules can be reviewed and edited.
+The WireSock split-tunneling switch on Home controls whether connections started from ZAPRET UI use split rules. Changing the switch or selecting another profile reconnects an active WireSock tunnel. If disconnected, the app applies the choice at the next connection. Keep the rule editor accessible while the switch is off so saved rules can be reviewed and edited.
 
 At startup, center the main window within the work area of the monitor under the pointer. Measure Home after detecting the installed tunnel clients and loading local fonts. Fit the measured height with 24px of extra space, applying the monitor's DPI and the configured minimum size where it fits. Keep the same size as the user navigates. Overflow stays in the central scroll area.
 

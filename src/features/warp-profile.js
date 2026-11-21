@@ -5,6 +5,8 @@ import { initWireSockRules } from './wiresock-rules.js';
 export function initWarpProfile(ruleOptions) {
   const open = $('warp-profile-open');
   const dialog = $('warp-profile-dialog');
+  const title = $('warp-profile-dialog-title');
+  const hint = $('warp-profile-hint');
   const form = $('warp-profile-form');
   const fields = $('warp-profile-options');
   const advanced = $('warp-profile-advanced');
@@ -38,11 +40,18 @@ export function initWarpProfile(ruleOptions) {
 
   function updateControls() {
     const hasSiteFilter = split.checked || rules.hasSites();
-    fields.disabled = busy;
-    rules.setDisabled(busy);
-    save.disabled = busy || !terms.checked || (split.checked && selectedServices().length === 0);
+    const saved = Boolean(fileName);
+    title.classList.toggle('sr-only', saved);
+    form.classList.toggle('mt-5', !saved);
+    status.classList.toggle('mt-3', !saved);
+    hint.hidden = saved;
+    fields.hidden = saved;
+    fields.disabled = busy || saved;
+    rules.setDisabled(fields.disabled);
+    save.hidden = saved;
+    save.disabled = fields.disabled || !terms.checked || (split.checked && selectedServices().length === 0);
     close.disabled = busy;
-    reveal.hidden = !fileName;
+    reveal.hidden = !saved;
     reveal.disabled = busy;
     endpoint.disabled = randomEndpoint.checked;
     maskingOptions.hidden = !masking.checked;
@@ -79,6 +88,7 @@ export function initWarpProfile(ruleOptions) {
   }, true);
   close.addEventListener('click', () => dialog.close());
   reveal.addEventListener('click', async () => {
+    setMessage(error);
     try {
       await invoke('reveal_warp_profile');
     } catch {
@@ -126,7 +136,7 @@ export function initWarpProfile(ruleOptions) {
     } finally {
       busy = false;
       updateControls();
-      (error.hidden ? reveal : save).focus();
+      (fileName ? close : save).focus();
     }
   });
   return show;
